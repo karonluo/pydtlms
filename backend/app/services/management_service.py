@@ -7,6 +7,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from passlib.context import CryptContext
+
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.dashboard import DashboardAlert, DashboardOverview, MetricCard
 from app.schemas.recruitment import (
@@ -33,17 +35,22 @@ from app.schemas.system import (
     AuditPolicyListResponse,
     AuditPolicyRecord,
     AuditPolicyUpsert,
+    BulkActionResponse,
     IntegrationListResponse,
     IntegrationRecord,
     IntegrationUpsert,
     OperationLogListResponse,
     OperationLogRecord,
+    PermissionCatalogResponse,
+    PermissionOption,
     RoleListResponse,
     RoleRecord,
     RoleUpsert,
+    SelectOption,
     SyncLogListResponse,
     SyncLogRecord,
     SystemArchitecture,
+    SystemOptionsResponse,
     SystemStats,
     SystemUserListResponse,
     SystemUserRecord,
@@ -64,6 +71,7 @@ from app.schemas.training import (
     ThesisReviewRecord,
     ThesisReviewUpsert,
     ThesisUpsert,
+    TrainingOptionsResponse,
     TrainingPlanListResponse,
     TrainingPlanRecord,
     TrainingPlanUpsert,
@@ -72,6 +80,52 @@ from app.schemas.training import (
     TrainingWorkbench,
 )
 from app.schemas.workflow import WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
+from app.services.postgres_state_store import PostgresStateStore
+
+
+PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+DEFAULT_USER_PASSWORD = "ChangeMe@123"
+DEFAULT_PASSWORD_BY_USERNAME = {
+    "admin": "Admin@123456",
+    "mentor.demo": "Mentor@123456",
+    "secretary.demo": "Secretary@123456",
+}
+PERMISSION_CATALOG: list[dict[str, str]] = [
+    {"code": "dashboard:read", "name": "查看驾驶舱", "module_name": "驾驶舱", "description": "查看系统总览、预警和统计看板。"},
+    {"code": "recruitment:read", "name": "查看招生业务", "module_name": "招生管理", "description": "查看招生计划、报名申请和过程数据。"},
+    {"code": "recruitment:write", "name": "维护招生业务", "module_name": "招生管理", "description": "新建、编辑和推进招生业务流程。"},
+    {"code": "students:read", "name": "查看学生主档", "module_name": "学生管理", "description": "查看学生档案、状态和导师信息。"},
+    {"code": "students:write", "name": "维护学生主档", "module_name": "学生管理", "description": "维护学生信息、导师和团队关系。"},
+    {"code": "training:read", "name": "查看培养业务", "module_name": "培养管理", "description": "查看培养方案、科研汇报和研修安排。"},
+    {"code": "training:write", "name": "维护培养业务", "module_name": "培养管理", "description": "维护培养方案、汇报审核和研修流程。"},
+    {"code": "degree:read", "name": "查看学位业务", "module_name": "学位管理", "description": "查看论文、盲审和答辩进度。"},
+    {"code": "degree:write", "name": "维护学位业务", "module_name": "学位管理", "description": "维护论文节点、送审和授位流程。"},
+    {"code": "audit:read", "name": "查看审计日志", "module_name": "审计治理", "description": "查看审计策略、操作日志和同步日志。"},
+    {"code": "audit:write", "name": "维护审计治理", "module_name": "审计治理", "description": "维护审计策略和审计治理配置。"},
+    {"code": "system:read", "name": "查看系统治理", "module_name": "系统管理", "description": "查看系统用户、角色、权限和集成信息。"},
+    {"code": "system:write", "name": "维护系统治理", "module_name": "系统管理", "description": "维护系统用户、角色、权限和集成配置。"},
+    {"code": "workflow:read", "name": "查看流程任务", "module_name": "流程中心", "description": "查看审批任务和流程状态。"},
+    {"code": "workflow:write", "name": "处理流程任务", "module_name": "流程中心", "description": "处理审批任务和推进流程节点。"},
+]
+ACCOUNT_STATUS_OPTIONS = ["启用", "停用", "锁定"]
+ROLE_SCOPE_OPTIONS = ["系统治理", "招生管理", "学生管理", "培养与学位", "学位管理", "跨部门协同"]
+INTEGRATION_DIRECTION_OPTIONS = ["主数据导入 / 录取回传", "考勤 / 门禁 / 请假同步", "待办通知 / 审批提醒 / 回执", "双向同步", "主数据下发"]
+INTEGRATION_CADENCE_OPTIONS = ["实时", "实时 + 每日对账", "实时事件 + 定时补偿", "每小时", "每日"]
+INTEGRATION_STATUS_OPTIONS = ["正常", "告警", "停用"]
+AUDIT_STATUS_OPTIONS = ["启用", "停用"]
+OPERATION_RESULT_OPTIONS = [
+    {"label": "成功", "value": "success"},
+    {"label": "失败", "value": "failed"},
+]
+SYNC_STATUS_OPTIONS = [
+    {"label": "成功", "value": "success"},
+    {"label": "失败", "value": "failed"},
+]
+TRAINING_PLAN_STATUS_OPTIONS = ["待学生确认", "执行中", "已归档"]
+TRAINING_REPORT_CYCLE_OPTIONS = ["月度", "双月", "季度", "半年度"]
+TRAINING_REPORT_STATUS_OPTIONS = ["待导师审阅", "已通过", "退回修改"]
+OUTBOUND_STUDY_TYPE_OPTIONS = ["联合培养", "企业研修", "访学交流", "学术会议"]
+OUTBOUND_APPROVAL_STATUS_OPTIONS = ["审批中", "已批准", "研修中", "已结束", "已驳回"]
 
 
 class DemoManagementStore:
@@ -79,7 +133,10 @@ class DemoManagementStore:
         self._lock = Lock()
         self._data_path = Path(__file__).resolve().parents[2] / "data" / "demo_store.json"
         self._data_path.parent.mkdir(parents=True, exist_ok=True)
+        self._postgres_store = PostgresStateStore()
         self.state = self._load_state()
+        if self._migrate_state():
+            self._write_state(self.state)
         self._counters = self.state.setdefault("counters", {})
 
     def _seed_state(self) -> dict[str, Any]:
@@ -120,6 +177,15 @@ class DemoManagementStore:
                     "phone_number": "13800000088",
                     "email": "mentor.demo@dtlms.local",
                     "theme_color": "#13795b",
+                },
+                "secretary.demo": {
+                    "username": "secretary.demo",
+                    "full_name": "学位秘书示例账号",
+                    "role_name": "学位秘书",
+                    "department_name": "学位办公室",
+                    "phone_number": "13800000066",
+                    "email": "secretary.demo@dtlms.local",
+                    "theme_color": "#A66B1F",
                 },
             },
             "students": [
@@ -168,15 +234,15 @@ class DemoManagementStore:
                 {"id": 3, "role_code": "secretary", "role_name": "学位秘书", "scope_name": "学位管理", "permissions": ["degree:read", "degree:write", "workflow:read", "workflow:write"]}
             ],
             "system_users": [
-                {"id": 1, "username": "admin", "full_name": "系统管理员", "role_code": "platform_admin", "department_name": "学科与研究生管理处", "phone_number": "13800000000", "account_status": "启用"},
-                {"id": 2, "username": "mentor.demo", "full_name": "导师示例账号", "role_code": "advisor", "department_name": "智能制造学院", "phone_number": "13800000088", "account_status": "启用"},
-                {"id": 3, "username": "secretary.demo", "full_name": "学位秘书示例账号", "role_code": "secretary", "department_name": "学位办公室", "phone_number": "13800000066", "account_status": "启用"}
+                {"id": 1, "username": "admin", "full_name": "系统管理员", "role_code": "platform_admin", "department_name": "学科与研究生管理处", "phone_number": "13800000000", "account_status": "启用", "password_hash": PASSWORD_CONTEXT.hash("Admin@123456"), "last_login_at": None},
+                {"id": 2, "username": "mentor.demo", "full_name": "导师示例账号", "role_code": "advisor", "department_name": "智能制造学院", "phone_number": "13800000088", "account_status": "启用", "password_hash": PASSWORD_CONTEXT.hash("Mentor@123456"), "last_login_at": None},
+                {"id": 3, "username": "secretary.demo", "full_name": "学位秘书示例账号", "role_code": "secretary", "department_name": "学位办公室", "phone_number": "13800000066", "account_status": "启用", "password_hash": PASSWORD_CONTEXT.hash("Secretary@123456"), "last_login_at": None}
             ],
             "audit_policies": [
-                {"id": 1, "item": "登录日志", "policy": "成功、失败、锁定、异地登录均留痕，保留 5 年。"},
-                {"id": 2, "item": "操作日志", "policy": "关键实体的增删改审必须记录前后值、IP、设备和结果。"},
-                {"id": 3, "item": "同步日志", "policy": "外部系统同步需记录总量、成功量、失败量和失败原因。"},
-                {"id": 4, "item": "权限治理", "policy": "职责分离，禁止录入、评分、审批同人闭环完成。"}
+                {"id": 1, "item": "登录日志", "policy": "成功、失败、锁定、异地登录均留痕，保留 5 年。", "status": "启用"},
+                {"id": 2, "item": "操作日志", "policy": "关键实体的增删改审必须记录前后值、IP、设备和结果。", "status": "启用"},
+                {"id": 3, "item": "同步日志", "policy": "外部系统同步需记录总量、成功量、失败量和失败原因。", "status": "启用"},
+                {"id": 4, "item": "权限治理", "policy": "职责分离，禁止录入、评分、审批同人闭环完成。", "status": "启用"}
             ],
             "integrations": [
                 {"id": 1, "name": "招生系统", "direction": "主数据导入 / 录取回传", "cadence": "实时 + 每日对账", "status": "正常", "owner": "招生办公室"},
@@ -199,6 +265,10 @@ class DemoManagementStore:
         }
 
     def _load_state(self) -> dict[str, Any]:
+        postgres_state = self._postgres_store.load_state()
+        if postgres_state:
+            self._write_json_snapshot(postgres_state)
+            return postgres_state
         if not self._data_path.exists():
             state = self._seed_state()
             self._write_state(state)
@@ -207,7 +277,48 @@ class DemoManagementStore:
 
     def _write_state(self, state: dict[str, Any] | None = None) -> None:
         payload = state or self.state
+        self._write_json_snapshot(payload)
+        self._postgres_store.save_state(payload)
+
+    def _write_json_snapshot(self, payload: dict[str, Any]) -> None:
         self._data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _migrate_state(self) -> bool:
+        changed = False
+        role_lookup = {item["role_code"]: item for item in self.state.setdefault("roles", [])}
+        profiles = self.state.setdefault("profiles", {})
+
+        for user in self.state.setdefault("system_users", []):
+            if not user.get("password_hash"):
+                default_password = DEFAULT_PASSWORD_BY_USERNAME.get(user.get("username"), DEFAULT_USER_PASSWORD)
+                user["password_hash"] = PASSWORD_CONTEXT.hash(default_password)
+                changed = True
+            if "last_login_at" not in user:
+                user["last_login_at"] = None
+                changed = True
+            profile = profiles.get(user["username"])
+            role = role_lookup.get(user.get("role_code"))
+            if not profile:
+                profiles[user["username"]] = {
+                    "username": user["username"],
+                    "full_name": user["full_name"],
+                    "role_name": role["role_name"] if role else user["role_code"],
+                    "department_name": user["department_name"],
+                    "phone_number": user.get("phone_number"),
+                    "email": None,
+                    "theme_color": "#0f4cbd",
+                }
+                changed = True
+            elif role and profile.get("role_name") in {None, user.get("role_code")}:
+                profile["role_name"] = role["role_name"]
+                changed = True
+
+        for policy in self.state.setdefault("audit_policies", []):
+            if not policy.get("status"):
+                policy["status"] = "启用"
+                changed = True
+
+        return changed
 
     def _next_id(self, key: str) -> int:
         self._counters[key] = int(self._counters.get(key, 0)) + 1
@@ -238,6 +349,131 @@ class DemoManagementStore:
 
     def _save(self) -> None:
         self._write_state()
+
+    def _matches_keyword(self, *values: Any, keyword: str | None = None) -> bool:
+        if not keyword:
+            return True
+        needle = str(keyword).strip().lower()
+        haystack = " ".join(str(value or "") for value in values).lower()
+        return needle in haystack
+
+    def _role_lookup(self) -> dict[str, dict[str, Any]]:
+        return {item["role_code"]: item for item in self._list("roles")}
+
+    def _build_role_record(self, item: dict[str, Any]) -> RoleRecord:
+        user_count = len([user for user in self._list("system_users") if user["role_code"] == item["role_code"]])
+        return RoleRecord(**item, user_count=user_count)
+
+    def _build_system_user_record(self, item: dict[str, Any]) -> SystemUserRecord:
+        role = self._role_lookup().get(item["role_code"])
+        return SystemUserRecord(
+            id=item["id"],
+            username=item["username"],
+            full_name=item["full_name"],
+            role_code=item["role_code"],
+            role_name=role["role_name"] if role else item["role_code"],
+            department_name=item["department_name"],
+            phone_number=item.get("phone_number"),
+            account_status=item["account_status"],
+            last_login_at=item.get("last_login_at"),
+        )
+
+    def _ensure_role_exists(self, role_code: str) -> dict[str, Any]:
+        role = self._role_lookup().get(role_code)
+        if not role:
+            raise ValueError("Role not found")
+        return role
+
+    def _validate_permissions(self, permissions: list[str]) -> list[str]:
+        allowed_codes = {item["code"] for item in PERMISSION_CATALOG}
+        invalid = [code for code in permissions if code not in allowed_codes]
+        if invalid:
+            raise ValueError(f"Invalid permissions: {', '.join(invalid)}")
+        return list(dict.fromkeys(permissions))
+
+    def get_permission_catalog(self) -> PermissionCatalogResponse:
+        return PermissionCatalogResponse(items=[PermissionOption(**item) for item in PERMISSION_CATALOG])
+
+    def get_system_options(self) -> SystemOptionsResponse:
+        return SystemOptionsResponse(
+            account_status_options=[SelectOption(label=item, value=item) for item in ACCOUNT_STATUS_OPTIONS],
+            role_scope_options=[SelectOption(label=item, value=item) for item in ROLE_SCOPE_OPTIONS],
+            integration_direction_options=[SelectOption(label=item, value=item) for item in INTEGRATION_DIRECTION_OPTIONS],
+            integration_cadence_options=[SelectOption(label=item, value=item) for item in INTEGRATION_CADENCE_OPTIONS],
+            integration_status_options=[SelectOption(label=item, value=item) for item in INTEGRATION_STATUS_OPTIONS],
+            audit_status_options=[SelectOption(label=item, value=item) for item in AUDIT_STATUS_OPTIONS],
+            operation_result_options=[SelectOption(**item) for item in OPERATION_RESULT_OPTIONS],
+            sync_status_options=[SelectOption(**item) for item in SYNC_STATUS_OPTIONS],
+        )
+
+    def get_training_options(self) -> TrainingOptionsResponse:
+        advisor_values = sorted(
+            {
+                *[item["advisor_name"] for item in self._list("training_plans") if item.get("advisor_name")],
+                *[item["advisor_name"] for item in self._list("outbound_studies") if item.get("advisor_name")],
+                *[item["advisor_name"] for item in self._list("students") if item.get("advisor_name")],
+            }
+        )
+        reviewer_values = sorted(
+            {
+                *[item["reviewer_name"] for item in self._list("scientific_reports") if item.get("reviewer_name")],
+                *advisor_values,
+            }
+        )
+        return TrainingOptionsResponse(
+            plan_status_options=[SelectOption(label=item, value=item) for item in TRAINING_PLAN_STATUS_OPTIONS],
+            report_cycle_options=[SelectOption(label=item, value=item) for item in TRAINING_REPORT_CYCLE_OPTIONS],
+            report_status_options=[SelectOption(label=item, value=item) for item in TRAINING_REPORT_STATUS_OPTIONS],
+            study_type_options=[SelectOption(label=item, value=item) for item in OUTBOUND_STUDY_TYPE_OPTIONS],
+            approval_status_options=[SelectOption(label=item, value=item) for item in OUTBOUND_APPROVAL_STATUS_OPTIONS],
+            advisor_options=[SelectOption(label=item, value=item) for item in advisor_values],
+            reviewer_options=[SelectOption(label=item, value=item) for item in reviewer_values],
+        )
+
+    def authenticate_system_user(self, username: str, password: str) -> dict[str, Any] | None:
+        candidate = next((item for item in self._list("system_users") if item["username"] == username), None)
+        if not candidate:
+            return None
+        if candidate["account_status"] != "启用":
+            return None
+        password_hash = candidate.get("password_hash")
+        if not password_hash or not PASSWORD_CONTEXT.verify(password, password_hash):
+            return None
+        return self.get_principal_context(username)
+
+    def get_principal_context(self, username: str) -> dict[str, Any]:
+        user = next((item for item in self._list("system_users") if item["username"] == username), None)
+        if not user or user["account_status"] != "启用":
+            raise KeyError(username)
+        role = self._ensure_role_exists(user["role_code"])
+        return {
+            "username": user["username"],
+            "full_name": user["full_name"],
+            "roles": [role["role_code"]],
+            "permissions": role.get("permissions", []),
+        }
+
+    def touch_last_login(self, username: str) -> None:
+        with self._lock:
+            for index, item in enumerate(self._list("system_users")):
+                if item["username"] == username:
+                    self._list("system_users")[index] = {**item, "last_login_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                    self._save()
+                    return
+            raise KeyError(username)
+
+    def update_user_password(self, username: str, new_password: str) -> None:
+        with self._lock:
+            for index, item in enumerate(self._list("system_users")):
+                if item["username"] == username:
+                    self._list("system_users")[index] = {**item, "password_hash": PASSWORD_CONTEXT.hash(new_password)}
+                    self._record_operation("系统治理", "系统用户", username, "重置密码", f"更新账号 {username} 的登录密码", operator_username=username)
+                    self._save()
+                    return
+            raise KeyError(username)
+
+    def sync_to_postgres(self) -> None:
+        self._postgres_store.save_state(self.state)
 
     def _build_recruit_plan_record(self, item: dict[str, Any]) -> RecruitPlanRecord:
         application_count = len([application for application in self._list("recruitment_applications") if application["plan_id"] == item["id"]])
@@ -461,8 +697,27 @@ class DemoManagementStore:
             ],
         )
 
-    def get_training_plans(self) -> TrainingPlanListResponse:
-        items = [TrainingPlanRecord(**item) for item in self._list("training_plans")]
+    def get_training_plans(
+        self,
+        keyword: str | None = None,
+        plan_status: str | None = None,
+        advisor_name: str | None = None,
+        report_cycle: str | None = None,
+    ) -> TrainingPlanListResponse:
+        items = list(self._list("training_plans"))
+        if keyword:
+            items = [
+                item
+                for item in items
+                if self._matches_keyword(item["student_no"], item["student_name"], item["scientific_goal"], keyword=keyword)
+            ]
+        if plan_status:
+            items = [item for item in items if item["plan_status"] == plan_status]
+        if advisor_name:
+            items = [item for item in items if item["advisor_name"] == advisor_name]
+        if report_cycle:
+            items = [item for item in items if item["report_cycle"] == report_cycle]
+        items = [TrainingPlanRecord(**item) for item in items]
         return TrainingPlanListResponse(items=items, total=len(items))
 
     def create_training_plan(self, payload: TrainingPlanUpsert) -> TrainingPlanRecord:
@@ -470,7 +725,7 @@ class DemoManagementStore:
             item = payload.model_dump()
             item["id"] = self._next_id("training_plans")
             self._list("training_plans").insert(0, item)
-            self._record_operation("培养管理", "培养方案", str(item["id"]), "新增", f'新增培养方案 {item["student_name"]}')
+            self._record_operation("培养管理", "培养方案", str(item["id"]), "登记方案", f'登记培养方案 {item["student_name"]}')
             self._save()
             return TrainingPlanRecord(**item)
 
@@ -479,17 +734,41 @@ class DemoManagementStore:
             index, item = self._find_required("training_plans", plan_id)
             updated = {**item, **payload.model_dump(), "id": plan_id}
             self._list("training_plans")[index] = updated
-            self._record_operation("培养管理", "培养方案", str(plan_id), "编辑", f'更新培养方案 {updated["student_name"]}')
+            self._record_operation("培养管理", "培养方案", str(plan_id), "维护方案", f'维护培养方案 {updated["student_name"]}')
             self._save()
             return TrainingPlanRecord(**updated)
 
-    def get_scientific_reports(self, keyword: str | None = None, status: str | None = None) -> ScientificReportListResponse:
+    def delete_training_plan(self, plan_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("training_plans", plan_id)
+            self._list("training_plans").pop(index)
+            self._record_operation("培养管理", "培养方案", str(plan_id), "删除方案", f'删除培养方案 {item["student_name"]}')
+            self._save()
+
+    def delete_training_plans(self, plan_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for plan_id in plan_ids:
+            self.delete_training_plan(plan_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
+
+    def get_scientific_reports(
+        self,
+        keyword: str | None = None,
+        status: str | None = None,
+        reviewer_name: str | None = None,
+    ) -> ScientificReportListResponse:
         items = list(self._list("scientific_reports"))
         if status:
             items = [item for item in items if item["report_status"] == status]
         if keyword:
-            term = keyword.lower()
-            items = [item for item in items if term in item["student_no"].lower() or term in item["student_name"].lower() or term in item["period_label"].lower()]
+            items = [
+                item
+                for item in items
+                if self._matches_keyword(item["student_no"], item["student_name"], item["period_label"], item["summary"], keyword=keyword)
+            ]
+        if reviewer_name:
+            items = [item for item in items if item.get("reviewer_name") == reviewer_name]
         return ScientificReportListResponse(items=[ScientificReportRecord(**item) for item in items], total=len(items))
 
     def create_scientific_report(self, payload: ScientificReportUpsert) -> ScientificReportRecord:
@@ -497,7 +776,7 @@ class DemoManagementStore:
             item = payload.model_dump()
             item["id"] = self._next_id("scientific_reports")
             self._list("scientific_reports").insert(0, item)
-            self._record_operation("培养管理", "科研报告", str(item["id"]), "新增", f'新增科研报告 {item["student_name"]}')
+            self._record_operation("培养管理", "科研报告", str(item["id"]), "登记报告", f'登记科研报告 {item["student_name"]}')
             self._save()
             return ScientificReportRecord(**item)
 
@@ -506,17 +785,44 @@ class DemoManagementStore:
             index, item = self._find_required("scientific_reports", report_id)
             updated = {**item, **payload.model_dump(), "id": report_id}
             self._list("scientific_reports")[index] = updated
-            self._record_operation("培养管理", "科研报告", str(report_id), "编辑", f'更新科研报告 {updated["student_name"]}')
+            self._record_operation("培养管理", "科研报告", str(report_id), "维护报告", f'维护科研报告 {updated["student_name"]}')
             self._save()
             return ScientificReportRecord(**updated)
 
-    def get_outbound_studies(self, keyword: str | None = None, status: str | None = None) -> OutboundStudyListResponse:
+    def delete_scientific_report(self, report_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("scientific_reports", report_id)
+            self._list("scientific_reports").pop(index)
+            self._record_operation("培养管理", "科研报告", str(report_id), "删除报告", f'删除科研报告 {item["student_name"]}')
+            self._save()
+
+    def delete_scientific_reports(self, report_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for report_id in report_ids:
+            self.delete_scientific_report(report_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
+
+    def get_outbound_studies(
+        self,
+        keyword: str | None = None,
+        status: str | None = None,
+        study_type: str | None = None,
+        advisor_name: str | None = None,
+    ) -> OutboundStudyListResponse:
         items = list(self._list("outbound_studies"))
         if status:
             items = [item for item in items if item["approval_status"] == status]
         if keyword:
-            term = keyword.lower()
-            items = [item for item in items if term in item["student_no"].lower() or term in item["student_name"].lower() or term in item["destination"].lower()]
+            items = [
+                item
+                for item in items
+                if self._matches_keyword(item["student_no"], item["student_name"], item["destination"], item.get("expected_outcome"), keyword=keyword)
+            ]
+        if study_type:
+            items = [item for item in items if item["study_type"] == study_type]
+        if advisor_name:
+            items = [item for item in items if item["advisor_name"] == advisor_name]
         return OutboundStudyListResponse(items=[OutboundStudyRecord(**item) for item in items], total=len(items))
 
     def create_outbound_study(self, payload: OutboundStudyUpsert) -> OutboundStudyRecord:
@@ -524,7 +830,7 @@ class DemoManagementStore:
             item = payload.model_dump()
             item["id"] = self._next_id("outbound_studies")
             self._list("outbound_studies").insert(0, item)
-            self._record_operation("培养管理", "外出研修", str(item["id"]), "新增", f'新增外出研修 {item["student_name"]}')
+            self._record_operation("培养管理", "外出研修", str(item["id"]), "发起研修", f'发起外出研修 {item["student_name"]}')
             self._save()
             return OutboundStudyRecord(**item)
 
@@ -533,9 +839,23 @@ class DemoManagementStore:
             index, item = self._find_required("outbound_studies", study_id)
             updated = {**item, **payload.model_dump(), "id": study_id}
             self._list("outbound_studies")[index] = updated
-            self._record_operation("培养管理", "外出研修", str(study_id), "编辑", f'更新外出研修 {updated["student_name"]}')
+            self._record_operation("培养管理", "外出研修", str(study_id), "维护研修", f'维护外出研修 {updated["student_name"]}')
             self._save()
             return OutboundStudyRecord(**updated)
+
+    def delete_outbound_study(self, study_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("outbound_studies", study_id)
+            self._list("outbound_studies").pop(index)
+            self._record_operation("培养管理", "外出研修", str(study_id), "删除研修", f'删除外出研修 {item["student_name"]}')
+            self._save()
+
+    def delete_outbound_studies(self, study_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for study_id in study_ids:
+            self.delete_outbound_study(study_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
 
     def get_training_stats(self) -> TrainingStats:
         return TrainingStats(
@@ -622,52 +942,163 @@ class DemoManagementStore:
             degree_granted_total=len([item for item in self._list("theses") if item["degree_status"] == "已授位"]),
         )
 
-    def get_roles(self) -> RoleListResponse:
-        items = [RoleRecord(**item) for item in self._list("roles")]
+    def get_roles(self, keyword: str | None = None, scope_name: str | None = None, permission: str | None = None) -> RoleListResponse:
+        items = list(self._list("roles"))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["role_code"], item["role_name"], item["scope_name"], keyword=keyword)]
+        if scope_name:
+            items = [item for item in items if item["scope_name"] == scope_name]
+        if permission:
+            items = [item for item in items if permission in item.get("permissions", [])]
+        items = [self._build_role_record(item) for item in items]
         return RoleListResponse(items=items, total=len(items))
 
     def create_role(self, payload: RoleUpsert) -> RoleRecord:
         with self._lock:
             item = payload.model_dump()
+            if any(role["role_code"] == item["role_code"] for role in self._list("roles")):
+                raise ValueError("Role code already exists")
+            item["permissions"] = self._validate_permissions(item.get("permissions", []))
             item["id"] = self._next_id("roles")
             self._list("roles").insert(0, item)
-            self._record_operation("系统治理", "角色", str(item["id"]), "新增", f'新增角色 {item["role_name"]}')
+            self._record_operation("系统治理", "角色", str(item["id"]), "新建角色", f'新建角色 {item["role_name"]}')
             self._save()
-            return RoleRecord(**item)
+            return self._build_role_record(item)
 
     def update_role(self, role_id: int, payload: RoleUpsert) -> RoleRecord:
         with self._lock:
             index, item = self._find_required("roles", role_id)
-            updated = {**item, **payload.model_dump(), "id": role_id}
+            new_values = payload.model_dump()
+            if any(role["role_code"] == new_values["role_code"] and role["id"] != role_id for role in self._list("roles")):
+                raise ValueError("Role code already exists")
+            new_values["permissions"] = self._validate_permissions(new_values.get("permissions", []))
+            updated = {**item, **new_values, "id": role_id}
             self._list("roles")[index] = updated
-            self._record_operation("系统治理", "角色", str(role_id), "编辑", f'更新角色 {updated["role_name"]}')
+            if item["role_code"] != updated["role_code"]:
+                for user_index, user in enumerate(self._list("system_users")):
+                    if user["role_code"] == item["role_code"]:
+                        self._list("system_users")[user_index] = {**user, "role_code": updated["role_code"]}
+                for username, profile in self.state.setdefault("profiles", {}).items():
+                    if profile.get("role_name") in {item["role_name"], item["role_code"]}:
+                        self.state["profiles"][username] = {**profile, "role_name": updated["role_name"]}
+            self._record_operation("系统治理", "角色", str(role_id), "调整权限", f'更新角色 {updated["role_name"]} 的权限配置')
             self._save()
-            return RoleRecord(**updated)
+            return self._build_role_record(updated)
 
-    def get_system_users(self) -> SystemUserListResponse:
-        items = [SystemUserRecord(**item) for item in self._list("system_users")]
+    def delete_role(self, role_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("roles", role_id)
+            in_use = next((user for user in self._list("system_users") if user["role_code"] == item["role_code"]), None)
+            if in_use:
+                raise ValueError("Role is assigned to users")
+            self._list("roles").pop(index)
+            self._record_operation("系统治理", "角色", str(role_id), "删除角色", f'删除角色 {item["role_name"]}')
+            self._save()
+
+    def delete_roles(self, role_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for role_id in role_ids:
+            self.delete_role(role_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
+
+    def get_system_users(
+        self,
+        keyword: str | None = None,
+        role_code: str | None = None,
+        account_status: str | None = None,
+        department_name: str | None = None,
+    ) -> SystemUserListResponse:
+        items = list(self._list("system_users"))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["username"], item["full_name"], item["department_name"], keyword=keyword)]
+        if role_code:
+            items = [item for item in items if item["role_code"] == role_code]
+        if account_status:
+            items = [item for item in items if item["account_status"] == account_status]
+        if department_name:
+            items = [item for item in items if department_name in item["department_name"]]
+        items = [self._build_system_user_record(item) for item in items]
         return SystemUserListResponse(items=items, total=len(items))
 
     def create_system_user(self, payload: SystemUserUpsert) -> SystemUserRecord:
         with self._lock:
             item = payload.model_dump()
+            if any(user["username"] == item["username"] for user in self._list("system_users")):
+                raise ValueError("Username already exists")
+            role = self._ensure_role_exists(item["role_code"])
             item["id"] = self._next_id("system_users")
+            item["password_hash"] = PASSWORD_CONTEXT.hash(item.pop("password") or DEFAULT_USER_PASSWORD)
+            item["last_login_at"] = None
             self._list("system_users").insert(0, item)
-            self._record_operation("系统治理", "系统用户", str(item["id"]), "新增", f'新增系统用户 {item["full_name"]}')
+            self.state.setdefault("profiles", {})[item["username"]] = {
+                "username": item["username"],
+                "full_name": item["full_name"],
+                "role_name": role["role_name"],
+                "department_name": item["department_name"],
+                "phone_number": item.get("phone_number"),
+                "email": None,
+                "theme_color": "#0f4cbd",
+            }
+            self._record_operation("系统治理", "系统用户", str(item["id"]), "新建账号", f'新建系统账号 {item["full_name"]}')
             self._save()
-            return SystemUserRecord(**item)
+            return self._build_system_user_record(item)
 
     def update_system_user(self, user_id: int, payload: SystemUserUpsert) -> SystemUserRecord:
         with self._lock:
             index, item = self._find_required("system_users", user_id)
-            updated = {**item, **payload.model_dump(), "id": user_id}
+            new_values = payload.model_dump()
+            if any(user["username"] == new_values["username"] and user["id"] != user_id for user in self._list("system_users")):
+                raise ValueError("Username already exists")
+            role = self._ensure_role_exists(new_values["role_code"])
+            password = new_values.pop("password")
+            updated = {**item, **new_values, "id": user_id}
+            if password:
+                updated["password_hash"] = PASSWORD_CONTEXT.hash(password)
             self._list("system_users")[index] = updated
-            self._record_operation("系统治理", "系统用户", str(user_id), "编辑", f'更新系统用户 {updated["full_name"]}')
+            profile = self.state.setdefault("profiles", {}).get(updated["username"], {})
+            self.state["profiles"][updated["username"]] = {
+                "username": updated["username"],
+                "full_name": updated["full_name"],
+                "role_name": role["role_name"],
+                "department_name": updated["department_name"],
+                "phone_number": updated.get("phone_number"),
+                "email": profile.get("email"),
+                "theme_color": profile.get("theme_color", "#0f4cbd"),
+            }
+            if item["username"] != updated["username"]:
+                old_profile = self.state.setdefault("profiles", {}).pop(item["username"], None)
+                if old_profile:
+                    self.state["profiles"][updated["username"]] = {**old_profile, "username": updated["username"]}
+            action_name = "停用账号" if updated["account_status"] != "启用" and item.get("account_status") == "启用" else "维护账号"
+            self._record_operation("系统治理", "系统用户", str(user_id), action_name, f'更新系统账号 {updated["full_name"]}')
             self._save()
-            return SystemUserRecord(**updated)
+            return self._build_system_user_record(updated)
 
-    def get_audit_policy_records(self) -> AuditPolicyListResponse:
-        items = [AuditPolicyRecord(**item) for item in self._list("audit_policies")]
+    def delete_system_user(self, user_id: int, current_username: str | None = None) -> None:
+        with self._lock:
+            index, item = self._find_required("system_users", user_id)
+            if current_username and item["username"] == current_username:
+                raise ValueError("Cannot delete current user")
+            self._list("system_users").pop(index)
+            self.state.setdefault("profiles", {}).pop(item["username"], None)
+            self._record_operation("系统治理", "系统用户", str(user_id), "删除账号", f'删除系统账号 {item["full_name"]}')
+            self._save()
+
+    def delete_system_users(self, user_ids: list[int], current_username: str | None = None) -> BulkActionResponse:
+        success_count = 0
+        for user_id in user_ids:
+            self.delete_system_user(user_id, current_username=current_username)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
+
+    def get_audit_policy_records(self, keyword: str | None = None, status: str | None = None) -> AuditPolicyListResponse:
+        items = list(self._list("audit_policies"))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["item"], item["policy"], keyword=keyword)]
+        if status:
+            items = [item for item in items if item["status"] == status]
+        items = [AuditPolicyRecord(**item) for item in items]
         return AuditPolicyListResponse(items=items, total=len(items))
 
     def create_audit_policy(self, payload: AuditPolicyUpsert) -> AuditPolicyRecord:
@@ -675,7 +1106,7 @@ class DemoManagementStore:
             item = payload.model_dump()
             item["id"] = self._next_id("audit_policies")
             self._list("audit_policies").insert(0, item)
-            self._record_operation("系统治理", "审计策略", str(item["id"]), "新增", f'新增审计策略 {item["item"]}')
+            self._record_operation("系统治理", "审计策略", str(item["id"]), "新建策略", f'新建审计策略 {item["item"]}')
             self._save()
             return AuditPolicyRecord(**item)
 
@@ -684,12 +1115,33 @@ class DemoManagementStore:
             index, item = self._find_required("audit_policies", policy_id)
             updated = {**item, **payload.model_dump(), "id": policy_id}
             self._list("audit_policies")[index] = updated
-            self._record_operation("系统治理", "审计策略", str(policy_id), "编辑", f'更新审计策略 {updated["item"]}')
+            self._record_operation("系统治理", "审计策略", str(policy_id), "维护策略", f'更新审计策略 {updated["item"]}')
             self._save()
             return AuditPolicyRecord(**updated)
 
-    def get_integrations(self) -> IntegrationListResponse:
-        items = [IntegrationRecord(**item) for item in self._list("integrations")]
+    def delete_audit_policy(self, policy_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("audit_policies", policy_id)
+            self._list("audit_policies").pop(index)
+            self._record_operation("系统治理", "审计策略", str(policy_id), "删除策略", f'删除审计策略 {item["item"]}')
+            self._save()
+
+    def delete_audit_policies(self, policy_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for policy_id in policy_ids:
+            self.delete_audit_policy(policy_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
+
+    def get_integrations(self, keyword: str | None = None, status: str | None = None, direction: str | None = None) -> IntegrationListResponse:
+        items = list(self._list("integrations"))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["name"], item["owner"], item["direction"], keyword=keyword)]
+        if status:
+            items = [item for item in items if item["status"] == status]
+        if direction:
+            items = [item for item in items if item["direction"] == direction]
+        items = [IntegrationRecord(**item) for item in items]
         return IntegrationListResponse(items=items, total=len(items))
 
     def create_integration(self, payload: IntegrationUpsert) -> IntegrationRecord:
@@ -697,7 +1149,7 @@ class DemoManagementStore:
             item = payload.model_dump()
             item["id"] = self._next_id("integrations")
             self._list("integrations").insert(0, item)
-            self._record_operation("系统治理", "集成链路", str(item["id"]), "新增", f'新增集成链路 {item["name"]}')
+            self._record_operation("系统治理", "集成链路", str(item["id"]), "新建链路", f'新建集成链路 {item["name"]}')
             self._save()
             return IntegrationRecord(**item)
 
@@ -706,16 +1158,44 @@ class DemoManagementStore:
             index, item = self._find_required("integrations", integration_id)
             updated = {**item, **payload.model_dump(), "id": integration_id}
             self._list("integrations")[index] = updated
-            self._record_operation("系统治理", "集成链路", str(integration_id), "编辑", f'更新集成链路 {updated["name"]}')
+            self._record_operation("系统治理", "集成链路", str(integration_id), "维护链路", f'更新集成链路 {updated["name"]}')
             self._save()
             return IntegrationRecord(**updated)
 
-    def get_operation_logs(self) -> OperationLogListResponse:
-        items = [OperationLogRecord(**item) for item in self._list("operation_logs")]
+    def delete_integration(self, integration_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("integrations", integration_id)
+            self._list("integrations").pop(index)
+            self._record_operation("系统治理", "集成链路", str(integration_id), "删除链路", f'删除集成链路 {item["name"]}')
+            self._save()
+
+    def delete_integrations(self, integration_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for integration_id in integration_ids:
+            self.delete_integration(integration_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
+
+    def get_operation_logs(self, keyword: str | None = None, module_name: str | None = None, result: str | None = None) -> OperationLogListResponse:
+        items = list(self._list("operation_logs"))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["operator_username"], item["entity_name"], item["summary"], keyword=keyword)]
+        if module_name:
+            items = [item for item in items if item["module_name"] == module_name]
+        if result:
+            items = [item for item in items if item["result"] == result]
+        items = [OperationLogRecord(**item) for item in items]
         return OperationLogListResponse(items=items, total=len(items))
 
-    def get_sync_logs(self) -> SyncLogListResponse:
-        items = [SyncLogRecord(**item) for item in self._list("sync_logs")]
+    def get_sync_logs(self, keyword: str | None = None, sync_status: str | None = None, source_system: str | None = None) -> SyncLogListResponse:
+        items = list(self._list("sync_logs"))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["source_system"], item["target_system"], item.get("failure_reason"), keyword=keyword)]
+        if sync_status:
+            items = [item for item in items if item["sync_status"] == sync_status]
+        if source_system:
+            items = [item for item in items if item["source_system"] == source_system]
+        items = [SyncLogRecord(**item) for item in items]
         return SyncLogListResponse(items=items, total=len(items))
 
     def get_system_architecture(self) -> SystemArchitecture:
@@ -788,10 +1268,11 @@ class DemoManagementStore:
             fallback = next((item for item in self._list("system_users") if item["username"] == username), None)
             if not fallback:
                 raise KeyError(username)
+            role = self._role_lookup().get(fallback["role_code"])
             profile = {
                 "username": fallback["username"],
                 "full_name": fallback["full_name"],
-                "role_name": fallback["role_code"],
+                "role_name": role["role_name"] if role else fallback["role_code"],
                 "department_name": fallback["department_name"],
                 "phone_number": fallback.get("phone_number"),
                 "email": None,

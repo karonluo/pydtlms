@@ -52,6 +52,7 @@ router.beforeEach(async (to) => {
 
   if (!to.meta.public) {
     if (!authStore.isAuthenticated) {
+      authStore.rememberRedirectTarget(to.fullPath)
       if (localStorage.getItem('dtlms-access-token') && authStore.sessionState !== 'ready') {
         try {
           await authStore.hydrateSession()
@@ -66,7 +67,7 @@ router.beforeEach(async (to) => {
   }
 
   if (to.path === '/login' && authStore.isAuthenticated) {
-    return '/dashboard'
+    return authStore.consumeRedirectTarget() || '/dashboard'
   }
 
   return true

@@ -4,49 +4,52 @@ defineProps<{
   value: string
   description: string
   status: 'healthy' | 'attention' | 'warning'
+  icon?: unknown
 }>()
 </script>
 
 <template>
-  <article class="kpi-card" :data-status="status">
-    <p class="kpi-card__title">{{ title }}</p>
-    <strong class="kpi-card__value">{{ value }}</strong>
-    <p class="kpi-card__description">{{ description }}</p>
+  <article class="kpi-card page-card" :data-status="status">
+    <div class="kpi-card__icon">
+      <el-icon v-if="icon"><component :is="icon" /></el-icon>
+    </div>
+    <div class="kpi-card__body">
+      <p class="kpi-card__title">{{ title }}</p>
+      <strong class="kpi-card__value">{{ value }}</strong>
+      <p class="kpi-card__description">{{ description }}</p>
+    </div>
   </article>
 </template>
 
 <style scoped>
 .kpi-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(18, 50, 95, 0.08);
-  border-radius: 24px;
-  padding: 22px;
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(239, 245, 255, 0.92));
-  box-shadow: 0 18px 45px rgba(15, 52, 106, 0.08);
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
 }
 
-.kpi-card::after {
-  content: '';
-  position: absolute;
-  inset: auto 16px 14px auto;
-  width: 78px;
-  height: 78px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.22);
-  filter: blur(4px);
+.kpi-card__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--brand);
+  color: #ffffff;
+  font-size: 20px;
+  box-shadow: 0 10px 22px rgba(34, 166, 238, 0.22);
 }
 
-.kpi-card[data-status='healthy'] {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(232, 248, 241, 0.96));
+.kpi-card[data-status='attention'] .kpi-card__icon {
+  background: #f2a531;
+  box-shadow: 0 10px 22px rgba(242, 165, 49, 0.22);
 }
 
-.kpi-card[data-status='attention'] {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(255, 243, 220, 0.96));
-}
-
-.kpi-card[data-status='warning'] {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(255, 233, 229, 0.96));
+.kpi-card[data-status='warning'] .kpi-card__icon {
+  background: #ea725b;
+  box-shadow: 0 10px 22px rgba(234, 114, 91, 0.22);
 }
 
 .kpi-card__title,
@@ -55,22 +58,20 @@ defineProps<{
 }
 
 .kpi-card__title {
-  color: #5f7090;
+  color: var(--text-subtle);
   font-size: 13px;
 }
 
 .kpi-card__value {
   display: block;
-  margin-top: 10px;
-  color: #10284d;
+  margin: 2px 0 4px;
+  color: var(--text-main);
+  font-family: var(--title-font);
   font-size: 28px;
-  line-height: 1.15;
 }
 
 .kpi-card__description {
-  margin-top: 10px;
-  color: #5c6985;
-  font-size: 13px;
-  max-width: 220px;
+  color: var(--text-subtle);
+  font-size: 12px;
 }
 </style>

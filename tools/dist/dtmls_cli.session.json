@@ -1,0 +1,37 @@
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImZ1bGxfbmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGVzIjpbInBsYXRmb3JtX2FkbWluIl0sInBlcm1pc3Npb25zIjpbImRhc2hib2FyZDpyZWFkIiwicmVjcnVpdG1lbnQ6cmVhZCIsInJlY3J1aXRtZW50OndyaXRlIiwic3R1ZGVudHM6cmVhZCIsInN0dWRlbnRzOndyaXRlIiwidHJhaW5pbmc6cmVhZCIsInRyYWluaW5nOndyaXRlIiwiZGVncmVlOnJlYWQiLCJkZWdyZWU6d3JpdGUiLCJhdWRpdDpyZWFkIiwiYXVkaXQ6d3JpdGUiLCJzeXN0ZW06cmVhZCIsInN5c3RlbTp3cml0ZSIsIndvcmtmbG93OnJlYWQiLCJ3b3JrZmxvdzp3cml0ZSJdLCJ0eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MDY4NTQ0fQ.td9vZ0tiOtix5_kRFBnikBHcJqwVpHTA-Ja8_cpCD2M",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGVzIjpbInBsYXRmb3JtX2FkbWluIl0sInR5cGUiOiJyZWZyZXNoIiwiZXhwIjoxNzc1NjcxNTQ0fQ.6Vksf7RUmaEW76zMZI82TcIVG2TBhXBcpJEat_2AOVw",
+  "principal": {
+    "username": "admin",
+    "full_name": "系统管理员",
+    "roles": [
+      "platform_admin"
+    ],
+    "permissions": [
+      "dashboard:read",
+      "recruitment:read",
+      "recruitment:write",
+      "students:read",
+      "students:write",
+      "training:read",
+      "training:write",
+      "degree:read",
+      "degree:write",
+      "audit:read",
+      "audit:write",
+      "system:read",
+      "system:write",
+      "workflow:read",
+      "workflow:write"
+    ]
+  },
+  "profile": {
+    "username": "admin",
+    "full_name": "系统管理员",
+    "role_name": "平台管理员",
+    "department_name": "学科与研究生管理处",
+    "phone_number": "13800000000",
+    "email": "admin@dtlms.local",
+    "theme_color": "#409eff"
+  }
+}

@@ -1,5 +1,16 @@
 import axios from 'axios'
 
+const REDIRECT_STORAGE_KEY = 'dtlms-post-login-redirect'
+
+
+function redirectToLogin() {
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (window.location.pathname !== '/login') {
+    sessionStorage.setItem(REDIRECT_STORAGE_KEY, currentPath)
+    window.location.replace(`/login?redirect=${encodeURIComponent(currentPath)}`)
+  }
+}
+
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1',
   timeout: 10000,
@@ -19,6 +30,7 @@ http.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('dtlms-access-token')
       localStorage.removeItem('dtlms-refresh-token')
+      redirectToLogin()
     }
     return Promise.reject(error)
   },

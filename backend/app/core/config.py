@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     postgres_port: int = 15431
     postgres_user: str = "postgre"
     postgres_password: str = "Pass@@word123!"
-    postgres_db: str = "pydtlms"
+    postgres_db: str = "db_dtlms"
     postgres_schema: str = "public"
     sqlalchemy_echo: bool = False
 

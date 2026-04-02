@@ -32,6 +32,57 @@ type TokenResponse = {
   refresh_token: string
 }
 
+const DEFAULT_THEME_COLOR = '#27A3EA'
+const REDIRECT_STORAGE_KEY = 'dtlms-post-login-redirect'
+
+function normalizeHexColor(value: string) {
+  const input = String(value || '').trim()
+  const normalized = input.startsWith('#') ? input.slice(1) : input
+  if (/^[0-9a-fA-F]{3}$/.test(normalized)) {
+    return `#${normalized
+      .split('')
+      .map((item) => `${item}${item}`)
+      .join('')
+      .toUpperCase()}`
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `#${normalized.toUpperCase()}`
+  }
+  return DEFAULT_THEME_COLOR
+}
+
+function hexToRgb(value: string) {
+  const normalized = normalizeHexColor(value).slice(1)
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16),
+  }
+}
+
+function rgbToHex(red: number, green: number, blue: number) {
+  return `#${[red, green, blue]
+    .map((item) => Math.max(0, Math.min(255, Math.round(item))).toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()}`
+}
+
+function mixColor(base: string, target: string, ratio: number) {
+  const baseColor = hexToRgb(base)
+  const targetColor = hexToRgb(target)
+  const weight = Math.max(0, Math.min(1, ratio))
+  return rgbToHex(
+    baseColor.r * (1 - weight) + targetColor.r * weight,
+    baseColor.g * (1 - weight) + targetColor.g * weight,
+    baseColor.b * (1 - weight) + targetColor.b * weight,
+  )
+}
+
+function rgbaString(base: string, alpha: number) {
+  const color = hexToRgb(base)
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`
+}
+
 
 export const useAuthStore = defineStore('auth', () => {
   const username = ref('')
@@ -44,7 +95,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const initials = computed(() => fullName.value.slice(0, 1) || 'D')
   const isAuthenticated = computed(() => Boolean(localStorage.getItem('dtlms-access-token')) && sessionState.value === 'ready')
-  const themeColor = computed(() => profile.value?.theme_color || '#0f4cbd')
+  const themeColor = computed(() => profile.value?.theme_color || '#409eff')
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
 
@@ -53,6 +104,26 @@ export const useAuthStore = defineStore('auth', () => {
     fullName.value = principal.full_name || principal.username
     roleName.value = principal.roles.includes('platform_admin') ? '平台管理员' : principal.roles.join(' / ') || '未分配角色'
     permissions.value = principal.permissions
+  }
+
+  function applyThemeColor(color: string) {
+    const accent = normalizeHexColor(color)
+    const rootStyle = document.documentElement.style
+    rootStyle.setProperty('--brand-accent', accent)
+    rootStyle.setProperty('--brand', accent)
+    rootStyle.setProperty('--brand-strong', mixColor(accent, '#1E4B7D', 0.2))
+    rootStyle.setProperty('--brand-deep', mixColor(accent, '#16324D', 0.42))
+    rootStyle.setProperty('--brand-soft', mixColor(accent, '#FFFFFF', 0.82))
+    rootStyle.setProperty('--accent', mixColor(accent, '#FFFFFF', 0.56))
+    rootStyle.setProperty('--surface-dark', mixColor(accent, '#FFFFFF', 0.92))
+    rootStyle.setProperty('--surface-dark-2', mixColor(accent, '#FFFFFF', 0.86))
+    rootStyle.setProperty('--surface-tint', mixColor(accent, '#FFFFFF', 0.8))
+    rootStyle.setProperty('--hover-bg', rgbaString(accent, 0.12))
+    rootStyle.setProperty('--hover-bg-strong', rgbaString(accent, 0.18))
+    rootStyle.setProperty('--border', rgbaString(accent, 0.16))
+    rootStyle.setProperty('--border-strong', rgbaString(accent, 0.28))
+    rootStyle.setProperty('--table-header-bg', mixColor(accent, '#FFFFFF', 0.92))
+    rootStyle.setProperty('--table-row-hover-bg', mixColor(accent, '#FFFFFF', 0.95))
   }
 
   function clearSession() {
@@ -65,7 +136,20 @@ export const useAuthStore = defineStore('auth', () => {
     profile.value = null
     sessionState.value = 'idle'
     sessionError.value = ''
-    document.documentElement.style.setProperty('--brand-accent', '#0f4cbd')
+    applyThemeColor(DEFAULT_THEME_COLOR)
+  }
+
+  function rememberRedirectTarget(target: string) {
+    if (!target || target === '/login') {
+      return
+    }
+    sessionStorage.setItem(REDIRECT_STORAGE_KEY, target)
+  }
+
+  function consumeRedirectTarget() {
+    const target = sessionStorage.getItem(REDIRECT_STORAGE_KEY) || ''
+    sessionStorage.removeItem(REDIRECT_STORAGE_KEY)
+    return target
   }
 
   async function requestToken(usernameValue: string, password: string) {
@@ -94,7 +178,7 @@ export const useAuthStore = defineStore('auth', () => {
     profile.value = response.data
     fullName.value = response.data.full_name
     roleName.value = response.data.role_name
-    document.documentElement.style.setProperty('--brand-accent', response.data.theme_color)
+    applyThemeColor(response.data.theme_color)
   }
 
   async function hydrateSession() {
@@ -143,7 +227,7 @@ export const useAuthStore = defineStore('auth', () => {
     profile.value = response.data
     fullName.value = response.data.full_name
     roleName.value = response.data.role_name
-    document.documentElement.style.setProperty('--brand-accent', response.data.theme_color)
+    applyThemeColor(response.data.theme_color)
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {
@@ -153,7 +237,14 @@ export const useAuthStore = defineStore('auth', () => {
     })
   }
 
-  function logout() {
+  async function logout() {
+    if (localStorage.getItem('dtlms-access-token')) {
+      try {
+        await http.post('/auth/logout')
+      } catch {
+        // Ignore logout failures and still clear local session.
+      }
+    }
     clearSession()
   }
 
@@ -168,10 +259,13 @@ export const useAuthStore = defineStore('auth', () => {
     themeColor,
     sessionState,
     sessionError,
+    applyThemeColor,
     hydrateSession,
     login,
     logout,
     saveProfile,
     changePassword,
+    rememberRedirectTarget,
+    consumeRedirectTarget,
   }
 })

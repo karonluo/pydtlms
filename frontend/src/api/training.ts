@@ -1,6 +1,12 @@
 import http from './http'
 
 
+export type SelectOption = {
+  label: string
+  value: string
+}
+
+
 export type TrainingPlanRecord = {
   id: number
   student_no: string
@@ -49,6 +55,17 @@ export type OutboundStudyRecord = {
 export type OutboundStudyUpsert = Omit<OutboundStudyRecord, 'id'>
 
 
+export type TrainingOptions = {
+  plan_status_options: SelectOption[]
+  report_cycle_options: SelectOption[]
+  report_status_options: SelectOption[]
+  study_type_options: SelectOption[]
+  approval_status_options: SelectOption[]
+  advisor_options: SelectOption[]
+  reviewer_options: SelectOption[]
+}
+
+
 export type TrainingStats = {
   training_plan_total: number
   pending_confirmation_total: number
@@ -62,8 +79,13 @@ export function getTrainingStats() {
 }
 
 
-export function listTrainingPlans() {
-  return http.get<{ items: TrainingPlanRecord[]; total: number }>('/training/plans')
+export function getTrainingOptions() {
+  return http.get<TrainingOptions>('/training/options')
+}
+
+
+export function listTrainingPlans(params?: { keyword?: string; plan_status?: string; advisor_name?: string; report_cycle?: string }) {
+  return http.get<{ items: TrainingPlanRecord[]; total: number }>('/training/plans', { params })
 }
 
 
@@ -77,7 +99,17 @@ export function updateTrainingPlan(id: number, payload: TrainingPlanUpsert) {
 }
 
 
-export function listScientificReports(params?: { keyword?: string; status?: string }) {
+export function deleteTrainingPlan(id: number) {
+  return http.delete(`/training/plans/${id}`)
+}
+
+
+export function batchDeleteTrainingPlans(ids: number[]) {
+  return http.post<{ success_count: number }>('/training/plans/batch-delete', { ids })
+}
+
+
+export function listScientificReports(params?: { keyword?: string; status?: string; reviewer_name?: string }) {
   return http.get<{ items: ScientificReportRecord[]; total: number }>('/training/reports', { params })
 }
 
@@ -92,7 +124,17 @@ export function updateScientificReport(id: number, payload: ScientificReportUpse
 }
 
 
-export function listOutboundStudies(params?: { keyword?: string; status?: string }) {
+export function deleteScientificReport(id: number) {
+  return http.delete(`/training/reports/${id}`)
+}
+
+
+export function batchDeleteScientificReports(ids: number[]) {
+  return http.post<{ success_count: number }>('/training/reports/batch-delete', { ids })
+}
+
+
+export function listOutboundStudies(params?: { keyword?: string; status?: string; study_type?: string; advisor_name?: string }) {
   return http.get<{ items: OutboundStudyRecord[]; total: number }>('/training/outbound-studies', { params })
 }
 
@@ -104,4 +146,14 @@ export function createOutboundStudy(payload: OutboundStudyUpsert) {
 
 export function updateOutboundStudy(id: number, payload: OutboundStudyUpsert) {
   return http.put<OutboundStudyRecord>(`/training/outbound-studies/${id}`, payload)
+}
+
+
+export function deleteOutboundStudy(id: number) {
+  return http.delete(`/training/outbound-studies/${id}`)
+}
+
+
+export function batchDeleteOutboundStudies(ids: number[]) {
+  return http.post<{ success_count: number }>('/training/outbound-studies/batch-delete', { ids })
 }

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.schemas.system import SelectOption
+
 
 class TrainingTask(BaseModel):
     title: str
@@ -101,6 +103,16 @@ class OutboundStudyUpsert(BaseModel):
 class OutboundStudyListResponse(BaseModel):
     items: list[OutboundStudyRecord]
     total: int
+
+
+class TrainingOptionsResponse(BaseModel):
+    plan_status_options: list[SelectOption]
+    report_cycle_options: list[SelectOption]
+    report_status_options: list[SelectOption]
+    study_type_options: list[SelectOption]
+    approval_status_options: list[SelectOption]
+    advisor_options: list[SelectOption]
+    reviewer_options: list[SelectOption]
 
 
 class TrainingStats(BaseModel):

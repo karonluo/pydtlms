@@ -590,7 +590,7 @@ onMounted(() => {
 .stats-grid,
 .two-column-grid {
   display: grid;
-  gap: 22px;
+  gap: 14px;
 }
 
 .stats-grid {
@@ -604,17 +604,17 @@ onMounted(() => {
 .section-card,
 .stat-card {
   border: 1px solid rgba(18, 50, 95, 0.08);
-  border-radius: 26px;
+  border-radius: 20px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 18px 44px rgba(14, 40, 88, 0.07);
 }
 
 .section-card {
-  padding: 22px;
+  padding: 16px;
 }
 
 .stat-card {
-  padding: 20px 22px;
+  padding: 14px 16px;
 }
 
 .stat-card[data-tone='healthy'] {
@@ -637,21 +637,21 @@ onMounted(() => {
 
 .stat-card strong {
   display: block;
-  margin-top: 10px;
+  margin-top: 6px;
   color: #12284d;
-  font-size: 30px;
+  font-size: 24px;
 }
 
 .section-card__header {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .section-card__header.compact {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .section-tag,
@@ -663,14 +663,15 @@ onMounted(() => {
 
 .section-tag {
   color: #7183a0;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .section-card h2 {
-  margin-top: 6px;
+  margin-top: 4px;
   color: #12284d;
+  font-size: 16px;
 }
 
 .header-actions {
@@ -681,16 +682,16 @@ onMounted(() => {
 
 .summary-text {
   color: #60718f;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .filter-form {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .task-list {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -699,20 +700,35 @@ onMounted(() => {
 .task-list li {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
-  padding: 14px 16px;
-  border-radius: 18px;
+  padding: 10px 12px;
+  border-radius: 14px;
   background: linear-gradient(135deg, rgba(245, 248, 255, 0.98), rgba(252, 244, 221, 0.92));
 }
 
 .task-list strong {
   color: #12315e;
+  font-size: 14px;
 }
 
 .task-list p {
-  margin-top: 6px;
+  margin-top: 4px;
   color: #60718f;
+  font-size: 12px;
+}
+
+:deep(.el-steps) {
+  --el-step-icon-size: 24px;
+}
+
+:deep(.el-step__title) {
+  font-size: 14px;
+}
+
+:deep(.el-step__description) {
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .dialog-grid {

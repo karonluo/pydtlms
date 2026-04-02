@@ -3,11 +3,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.rbac import get_current_principal
 from app.core.security import (
-    authenticate_bootstrap_user,
-    create_access_token,
-    create_refresh_token,
-    update_bootstrap_user_password,
-    verify_password,
+    authenticate_system_user,
+    create_token_bundle,
+    logout_session,
+    record_user_login,
+    update_system_user_password,
+    oauth2_scheme,
 )
 from app.schemas.auth import PasswordChangeRequest, Principal, TokenResponse, UserProfile, UserProfileUpdate
 from app.services.management_service import store
@@ -18,12 +19,19 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/token", response_model=TokenResponse)
 def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenResponse:
-    user = authenticate_bootstrap_user(form_data.username, form_data.password)
+    user = authenticate_system_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    record_user_login(form_data.username)
+    access_token, refresh_token = create_token_bundle(
+        user["username"],
+        user["roles"],
+        user["permissions"],
+        full_name=user["full_name"],
+    )
     return TokenResponse(
-        access_token=create_access_token(user.username, user.roles, user.permissions, full_name=user.full_name),
-        refresh_token=create_refresh_token(user.username, user.roles),
+        access_token=access_token,
+        refresh_token=refresh_token,
     )
 
 
@@ -47,8 +55,14 @@ def update_profile(payload: UserProfileUpdate, principal: Principal = Depends(ge
 
 @router.post("/change-password")
 def change_password(payload: PasswordChangeRequest, principal: Principal = Depends(get_current_principal)) -> dict[str, str]:
-    user = authenticate_bootstrap_user(principal.username, payload.current_password)
-    if not user or not verify_password(payload.current_password, user.password_hash):
+    user = authenticate_system_user(principal.username, payload.current_password)
+    if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
-    update_bootstrap_user_password(principal.username, payload.new_password)
+    update_system_user_password(principal.username, payload.new_password)
     return {"message": "Password updated"}
+
+
+@router.post("/logout")
+def logout(token: str = Depends(oauth2_scheme), principal: Principal = Depends(get_current_principal)) -> dict[str, str]:
+    logout_session(token)
+    return {"message": "Logged out"}

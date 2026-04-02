@@ -1,4 +1,16 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class SelectOption(BaseModel):
+    label: str
+    value: str
+
+
+class PermissionOption(BaseModel):
+    code: str
+    name: str
+    module_name: str
+    description: str
 
 
 class RoleRecord(BaseModel):
@@ -7,13 +19,14 @@ class RoleRecord(BaseModel):
     role_name: str
     scope_name: str
     permissions: list[str]
+    user_count: int = 0
 
 
 class RoleUpsert(BaseModel):
     role_code: str
     role_name: str
     scope_name: str
-    permissions: list[str]
+    permissions: list[str] = Field(default_factory=list)
 
 
 class RoleListResponse(BaseModel):
@@ -26,9 +39,11 @@ class SystemUserRecord(BaseModel):
     username: str
     full_name: str
     role_code: str
+    role_name: str
     department_name: str
     phone_number: str | None = None
     account_status: str
+    last_login_at: str | None = None
 
 
 class SystemUserUpsert(BaseModel):
@@ -38,6 +53,7 @@ class SystemUserUpsert(BaseModel):
     department_name: str
     phone_number: str | None = None
     account_status: str
+    password: str | None = None
 
 
 class SystemUserListResponse(BaseModel):
@@ -49,11 +65,13 @@ class AuditPolicyRecord(BaseModel):
     id: int
     item: str
     policy: str
+    status: str
 
 
 class AuditPolicyUpsert(BaseModel):
     item: str
     policy: str
+    status: str
 
 
 class AuditPolicyListResponse(BaseModel):
@@ -113,6 +131,29 @@ class SyncLogRecord(BaseModel):
 class SyncLogListResponse(BaseModel):
     items: list[SyncLogRecord]
     total: int
+
+
+class PermissionCatalogResponse(BaseModel):
+    items: list[PermissionOption]
+
+
+class SystemOptionsResponse(BaseModel):
+    account_status_options: list[SelectOption]
+    role_scope_options: list[SelectOption]
+    integration_direction_options: list[SelectOption]
+    integration_cadence_options: list[SelectOption]
+    integration_status_options: list[SelectOption]
+    audit_status_options: list[SelectOption]
+    operation_result_options: list[SelectOption]
+    sync_status_options: list[SelectOption]
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class BulkActionResponse(BaseModel):
+    success_count: int
 
 
 class SystemArchitecture(BaseModel):

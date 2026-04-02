@@ -229,7 +229,7 @@ onMounted(() => {
 .content-stack,
 .stat-grid {
   display: grid;
-  gap: 22px;
+  gap: 14px;
 }
 
 .stat-grid {
@@ -238,8 +238,8 @@ onMounted(() => {
 
 .section-card {
   border: 1px solid rgba(18, 50, 95, 0.08);
-  border-radius: 26px;
-  padding: 22px;
+  border-radius: 20px;
+  padding: 16px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 18px 44px rgba(14, 40, 88, 0.07);
 }
@@ -247,9 +247,9 @@ onMounted(() => {
 .section-card__header {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .section-tag,
@@ -260,27 +260,28 @@ onMounted(() => {
 
 .section-tag {
   color: #7183a0;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .section-card h2 {
-  margin-top: 6px;
+  margin-top: 4px;
   color: #12284d;
+  font-size: 16px;
 }
 
 .pill-card {
-  padding: 18px;
-  border-radius: 22px;
+  padding: 14px 16px;
+  border-radius: 18px;
   background: linear-gradient(135deg, rgba(245, 248, 255, 0.98), rgba(235, 245, 255, 0.92));
 }
 
 .pill-card strong {
   display: block;
-  margin-top: 10px;
+  margin-top: 6px;
   color: #12315e;
-  font-size: 28px;
+  font-size: 22px;
 }
 
 .dialog-grid {

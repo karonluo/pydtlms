@@ -1,478 +1,439 @@
 <script setup lang="ts">
 import {
-  ArrowDown,
   DataAnalysis,
   DocumentChecked,
   Files,
   Histogram,
   Reading,
   Setting,
+  SwitchButton,
   UserFilled,
 } from '@element-plus/icons-vue'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../stores/auth'
 
+type MenuItem = {
+  path: string
+  label: string
+  icon: unknown
+  requiredPermission?: string
+}
+
+type MenuGroup = {
+  key: string
+  label: string
+  icon: unknown
+  items?: MenuItem[]
+  sections?: Array<{
+    key: string
+    label: string
+    icon: unknown
+    items: MenuItem[]
+  }>
+}
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const openedGroups = ref<string[]>([])
 
-const menuTree = [
+const menuGroups: MenuGroup[] = [
   {
-    key: 'dashboard',
+    key: 'workspace',
     label: '工作台',
     icon: DataAnalysis,
-    groups: [{ title: '全局视图', items: [{ path: '/dashboard', label: '数据驾驶舱', hint: '全局运行态' }] }],
+    items: [
+      { path: '/dashboard', label: '经营总览', icon: DataAnalysis, requiredPermission: 'dashboard:read' },
+      { path: '/workflow/tasks', label: '流程待办', icon: Files, requiredPermission: 'workflow:read' },
+    ],
   },
   {
     key: 'recruitment',
-    label: '招生',
+    label: '招生管理',
     icon: Histogram,
-    groups: [{ title: '招生执行', items: [{ path: '/recruitment', label: '招生计划与报名', hint: '计划、报名与录取' }] }],
+    items: [{ path: '/recruitment', label: '招生计划', icon: Histogram, requiredPermission: 'recruitment:read' }],
   },
   {
     key: 'students',
-    label: '学生',
+    label: '学生管理',
     icon: UserFilled,
-    groups: [{ title: '学生主数据', items: [{ path: '/students', label: '学生主档', hint: '主数据、导师与状态' }] }],
+    items: [{ path: '/students', label: '学生主档', icon: UserFilled, requiredPermission: 'students:read' }],
   },
   {
     key: 'training',
-    label: '培养',
+    label: '培养管理',
     icon: Reading,
-    groups: [
-      {
-        title: '培养执行',
-        items: [
-          { path: '/training/plans', label: '培养方案', hint: '版本、周期与目标' },
-          { path: '/training/reports', label: '科研报告', hint: '提交、审阅与评分' },
-          { path: '/training/outbound', label: '外出研修', hint: '联合培养与企业研修' },
-        ],
-      },
+    items: [
+      { path: '/training/plans', label: '培养方案', icon: Reading, requiredPermission: 'training:read' },
+      { path: '/training/reports', label: '科研报告', icon: Reading, requiredPermission: 'training:read' },
+      { path: '/training/outbound', label: '外出研修', icon: Reading, requiredPermission: 'training:read' },
     ],
   },
   {
     key: 'degree',
-    label: '学位',
+    label: '学位管理',
     icon: DocumentChecked,
-    groups: [
-      {
-        title: '学位通道',
-        items: [
-          { path: '/degree/theses', label: '论文主档', hint: '查重、盲审、答辩' },
-          { path: '/degree/reviews', label: '盲审意见', hint: '专家回执与评分' },
-        ],
-      },
+    items: [
+      { path: '/degree/theses', label: '论文主档', icon: DocumentChecked, requiredPermission: 'degree:read' },
+      { path: '/degree/reviews', label: '盲审意见', icon: DocumentChecked, requiredPermission: 'degree:read' },
     ],
   },
   {
-    key: 'workflow',
-    label: '审批',
-    icon: Files,
-    groups: [{ title: '流程中心', items: [{ path: '/workflow/tasks', label: '审批中心', hint: '待办、在途与归档' }] }],
-  },
-  {
     key: 'system',
-    label: '治理',
+    label: '系统管理',
     icon: Setting,
-    groups: [
+    items: [{ path: '/system/users', label: '用户管理', icon: Setting, requiredPermission: 'system:read' }],
+    sections: [
       {
-        title: '基础配置',
+        key: 'authority',
+        label: '权限配置',
+        icon: Setting,
         items: [
-          { path: '/system/users', label: '系统用户', hint: '账号、部门与状态' },
-          { path: '/system/roles', label: '角色权限', hint: '职责分离与授权' },
-          { path: '/system/audit', label: '审计策略', hint: '日志与留痕规则' },
-          { path: '/system/integrations', label: '集成链路', hint: '外部系统同步' },
+          { path: '/system/roles', label: '角色管理', icon: Setting, requiredPermission: 'system:read' },
+          { path: '/system/audit', label: '审计策略', icon: Setting, requiredPermission: 'audit:read' },
+          { path: '/system/integrations', label: '接口管理', icon: Setting, requiredPermission: 'system:read' },
         ],
       },
       {
-        title: '运行审计',
+        key: 'audit',
+        label: '审计日志',
+        icon: Files,
         items: [
-          { path: '/system/operation-logs', label: '操作日志', hint: '关键动作追踪' },
-          { path: '/system/sync-logs', label: '同步日志', hint: '外部同步回执' },
+          { path: '/system/operation-logs', label: '操作日志', icon: Files, requiredPermission: 'audit:read' },
+          { path: '/system/sync-logs', label: '同步日志', icon: Files, requiredPermission: 'audit:read' },
         ],
       },
     ],
   },
 ]
 
-const activeMainMenu = computed(() => menuTree.find((item) => route.path.startsWith(`/${item.key}`))?.key || 'dashboard')
-const activeMenu = computed(() => menuTree.find((item) => item.key === activeMainMenu.value) || menuTree[0])
+const currentTitle = computed(() => String(route.meta.title || '博士生生命周期管理系统'))
+const visibleMenuGroups = computed(() => {
+  const permissionSet = new Set(authStore.permissions)
+  const hasPermission = (permission?: string) => !permission || permissionSet.has(permission)
+
+  return menuGroups
+    .map((group) => {
+      const items = (group.items || []).filter((item) => hasPermission(item.requiredPermission))
+      const sections = (group.sections || [])
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => hasPermission(item.requiredPermission)),
+        }))
+        .filter((section) => section.items.length > 0)
+
+      return {
+        ...group,
+        items,
+        sections,
+      }
+    })
+    .filter((group) => (group.items || []).length > 0 || (group.sections || []).length > 0)
+})
+const headerAvatarText = computed(() => {
+  const displayText = String(authStore.fullName || authStore.username || '').trim()
+  return displayText ? displayText.slice(0, 1).toUpperCase() : '博'
+})
+
+function isGroupActive(group: MenuGroup) {
+  return (group.items || []).some((item) => route.path === item.path)
+    || (group.sections || []).some((section) => section.items.some((item) => route.path === item.path))
+}
+
+function syncOpenedGroups() {
+  const activeGroup = visibleMenuGroups.value.find((group) => isGroupActive(group))
+  openedGroups.value = activeGroup ? [activeGroup.key] : []
+}
+
+async function goLogout() {
+  await authStore.logout()
+  router.push('/login')
+}
 
 function goProfile() {
   router.push('/profile')
 }
 
-function logout() {
-  authStore.logout()
-  router.push('/login')
-}
+watch(() => route.path, syncOpenedGroups, { immediate: true })
 </script>
 
 <template>
-  <div class="shell">
-    <aside class="shell-sidebar">
-      <div class="main-rail">
-        <div class="brand-mark">D</div>
-        <button
-          v-for="item in menuTree"
-          :key="item.key"
-          class="main-rail__item"
-          :class="{ 'is-active': activeMainMenu === item.key }"
-          type="button"
-          @click="router.push(item.groups[0].items[0].path)"
-        >
-          <component :is="item.icon" class="main-rail__icon" />
-          <span>{{ item.label }}</span>
-        </button>
-      </div>
-
-      <div class="menu-panel">
-        <div class="brand-block">
-          <div>
-            <strong>DTLMS</strong>
-            <p>博士生生命周期管理系统</p>
-          </div>
-        </div>
-
-        <section v-for="group in activeMenu.groups" :key="group.title" class="menu-group">
-          <p class="menu-group__title">{{ group.title }}</p>
-          <button
-            v-for="item in group.items"
-            :key="item.path"
-            class="nav-item"
-            :class="{ 'is-active': route.path === item.path }"
-            type="button"
-            @click="router.push(item.path)"
-          >
-            <span>
-              <strong>{{ item.label }}</strong>
-              <small>{{ item.hint }}</small>
-            </span>
-          </button>
-        </section>
-
-        <section class="sidebar-callout">
-          <p>治理要点</p>
-          <strong>CTDTLMS_</strong>
-          <span>Redis Key 前缀统一管理，便于哨兵主从切换与缓存隔离。</span>
-        </section>
-      </div>
-    </aside>
-
-    <main class="shell-main">
-      <header class="shell-header">
+  <el-container class="layout-shell">
+    <el-aside class="layout-aside" width="252px">
+      <div class="brand-block">
+        <div class="brand-badge">DT</div>
         <div>
-          <p class="eyebrow">前后端分离 · Vue3 + FastAPI · PostgreSQL + Redis Sentinel</p>
-          <h1>{{ route.meta.title || '博士生生命周期管理系统' }}</h1>
+          <h1>博士生仪表</h1>
+          <p>招生到归档全流程协同</p>
         </div>
+      </div>
 
-        <el-dropdown trigger="click">
-          <div class="user-panel">
-            <div class="user-avatar">{{ authStore.initials }}</div>
-            <div>
+      <div class="menu-scroll-host">
+        <el-scrollbar>
+          <el-menu :default-active="route.path" :default-openeds="openedGroups" :unique-opened="true" router class="side-menu">
+            <el-sub-menu v-for="group in visibleMenuGroups" :key="group.key" :index="group.key">
+              <template #title>
+                <el-icon><component :is="group.icon" /></el-icon>
+                <span>{{ group.label }}</span>
+              </template>
+
+              <el-menu-item v-for="item in group.items || []" :key="item.path" :index="item.path">
+                <el-icon><component :is="item.icon" /></el-icon>
+                <span>{{ item.label }}</span>
+              </el-menu-item>
+
+              <el-sub-menu v-for="section in group.sections || []" :key="section.key" :index="`${group.key}:${section.key}`">
+                <template #title>
+                  <el-icon><component :is="section.icon" /></el-icon>
+                  <span>{{ section.label }}</span>
+                </template>
+
+                <el-menu-item v-for="item in section.items" :key="item.path" :index="item.path">
+                  <el-icon><component :is="item.icon" /></el-icon>
+                  <span>{{ item.label }}</span>
+                </el-menu-item>
+              </el-sub-menu>
+            </el-sub-menu>
+          </el-menu>
+        </el-scrollbar>
+      </div>
+    </el-aside>
+
+    <el-container>
+      <el-header class="layout-header">
+        <div>
+          <h2>{{ currentTitle }}</h2>
+        </div>
+        <div class="header-actions">
+          <el-tag type="success" effect="light">登录成功</el-tag>
+
+          <button class="user-panel" type="button" @click="goProfile">
+            <div class="user-panel__avatar">{{ headerAvatarText }}</div>
+            <div class="user-panel__meta">
               <strong>{{ authStore.fullName }}</strong>
-              <p>{{ authStore.roleName }}</p>
+              <span>{{ authStore.username }}</span>
             </div>
-            <el-icon><ArrowDown /></el-icon>
-          </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item @click="goProfile">个人空间</el-dropdown-item>
-              <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </header>
+          </button>
 
-      <section class="hero-band">
-        <div>
-          <p class="hero-band__title">业务已落地</p>
-          <strong>当前已接入招生计划、报名申请、学生主数据三类核心管理操作，支持直接维护与状态流转。</strong>
+          <el-button plain @click="goLogout">
+            <el-icon><SwitchButton /></el-icon>
+            <span>退出登录</span>
+          </el-button>
         </div>
-        <el-space wrap>
-          <el-tag type="success" effect="dark">RBAC</el-tag>
-          <el-tag type="warning" effect="dark">JWT</el-tag>
-          <el-tag type="info" effect="dark">审计日志</el-tag>
-          <el-tag type="primary" effect="dark">管理页</el-tag>
-        </el-space>
-      </section>
+      </el-header>
 
-      <router-view />
-    </main>
-  </div>
+      <el-main class="layout-main">
+        <router-view />
+      </el-main>
+    </el-container>
+  </el-container>
 </template>
 
 <style scoped>
-.shell {
-  display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+.layout-shell {
   min-height: 100vh;
 }
 
-.shell-sidebar {
-  position: sticky;
-  top: 0;
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(54, 130, 255, 0.18), transparent 32%),
-    linear-gradient(180deg, #0c2f63 0%, #0d2145 45%, #09182f 100%);
-  color: #f5f9ff;
-}
-
-.main-rail {
+.layout-aside {
+  background: var(--surface-dark);
+  color: var(--text-main);
+  padding: 18px 14px;
+  box-shadow: inset -1px 0 0 var(--border);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: center;
-  padding: 26px 14px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.main-rail__item {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 12px 8px;
-  border: 0;
-  border-radius: 18px;
-  background: transparent;
-  color: rgba(245, 249, 255, 0.8);
-  cursor: pointer;
-}
-
-.main-rail__item.is-active {
-  background: rgba(255, 255, 255, 0.14);
-  color: #ffffff;
-}
-
-.main-rail__item span {
-  font-size: 12px;
-}
-
-.main-rail__icon {
-  font-size: 18px;
-}
-
-.menu-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  padding: 28px 22px;
 }
 
 .brand-block {
   display: flex;
+  gap: 12px;
   align-items: center;
+  margin-bottom: 16px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--panel-shadow-soft);
 }
 
-.brand-block p,
-.sidebar-callout p,
-.sidebar-callout span {
-  margin: 0;
-}
-
-.brand-mark {
+.brand-badge {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--brand-strong);
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  background: linear-gradient(145deg, #f4fbff, #72aef8);
-  color: #0d2a57;
-  font-size: 24px;
+  color: var(--brand-contrast);
+  font-family: var(--title-font);
   font-weight: 700;
+  box-shadow: var(--panel-shadow-strong);
 }
 
-.menu-group {
-  display: grid;
-  gap: 10px;
-}
-
-.menu-group__title {
+.brand-block h1 {
   margin: 0;
-  color: rgba(245, 249, 255, 0.56);
+  font-family: var(--title-font);
+  font-size: 18px;
+}
+
+.brand-block p {
+  margin: 4px 0 0;
+  color: var(--text-subtle);
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
-.nav-item {
-  display: block;
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.2s ease, background 0.2s ease;
+.menu-scroll-host {
+  flex: 1;
+  min-height: 0;
 }
 
-.nav-item:hover {
-  transform: translateX(4px);
-  background: rgba(255, 255, 255, 0.12);
+.menu-scroll-host :deep(.el-scrollbar) {
+  height: 100%;
 }
 
-.nav-item strong,
-.nav-item small {
-  display: block;
+.menu-scroll-host :deep(.el-scrollbar__wrap) {
+  overflow-x: hidden;
 }
 
-.nav-item small {
-  margin-top: 4px;
-  color: rgba(245, 249, 255, 0.66);
+.side-menu {
+  background: transparent;
 }
 
-.nav-item.is-active {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(124, 177, 255, 0.28));
-  border-color: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
-}
-
-.sidebar-callout {
-  margin-top: auto;
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.sidebar-callout p {
-  color: rgba(245, 249, 255, 0.7);
+.side-menu :deep(.el-sub-menu__title),
+.side-menu :deep(.el-menu-item) {
+  height: 40px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  color: var(--text-subtle);
+  font-weight: 600;
   font-size: 13px;
 }
 
-.sidebar-callout strong {
-  display: block;
-  margin: 10px 0 8px;
-  font-size: 24px;
+.side-menu :deep(.el-sub-menu .el-menu) {
+  background: transparent;
 }
 
-.sidebar-callout span {
-  display: block;
-  color: rgba(245, 249, 255, 0.78);
-  line-height: 1.6;
+.side-menu :deep(.el-sub-menu__title:hover),
+.side-menu :deep(.el-menu-item:hover) {
+  background: var(--hover-bg-strong);
+  color: var(--brand-deep);
 }
 
-.shell-main {
-  padding: 28px;
+.side-menu :deep(.el-menu-item.is-active) {
+  background: var(--brand-strong);
+  color: var(--brand-contrast);
+  box-shadow: var(--panel-shadow-strong);
 }
 
-.shell-header {
+.side-menu :deep(.el-sub-menu.is-opened > .el-sub-menu__title) {
+  background: var(--brand);
+  color: var(--brand-contrast);
+}
+
+.side-menu :deep(.el-sub-menu .el-menu-item),
+.side-menu :deep(.el-sub-menu .el-sub-menu__title) {
+  margin-left: 8px;
+  min-width: unset;
+}
+
+.side-menu :deep(.el-sub-menu .el-sub-menu .el-menu-item) {
+  margin-left: 16px;
+}
+
+.layout-header {
+  height: auto;
+  padding: 10px 18px 6px;
   display: flex;
   justify-content: space-between;
-  gap: 24px;
   align-items: center;
+  gap: 12px;
+  background: var(--surface-strong);
+  border-bottom: 1px solid var(--border);
 }
 
-.eyebrow,
-.hero-band__title,
-.user-panel p {
+.layout-header h2 {
   margin: 0;
+  font-family: var(--title-font);
+  font-size: 24px;
 }
 
-.shell-header h1 {
-  margin: 8px 0 0;
-  color: #12284d;
-  font-size: 34px;
-}
-
-.eyebrow {
-  color: #5f7396;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .user-panel {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid rgba(18, 50, 95, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 12px 30px rgba(14, 40, 88, 0.06);
+  gap: 8px;
+  color: var(--text-subtle);
+  border: none;
+  background: transparent;
   cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 10px;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.user-avatar {
+.user-panel:hover {
+  background: var(--hover-bg);
+  color: var(--text-main);
+}
+
+.user-panel__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.user-panel strong,
+.user-panel span {
+  text-align: left;
+}
+
+.user-panel__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--brand-deep);
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  background: linear-gradient(145deg, #ffefc2, #fbcc6a);
-  color: #7c5412;
-  font-size: 22px;
   font-weight: 700;
+  flex: 0 0 auto;
 }
 
-.hero-band {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin: 24px 0 28px;
-  padding: 22px 24px;
-  border: 1px solid rgba(18, 50, 95, 0.08);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(251, 206, 107, 0.4), transparent 24%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(235, 245, 255, 0.94));
-}
-
-.hero-band__title {
-  color: #6b7d97;
+.user-panel__meta strong {
   font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
-.hero-band strong {
-  display: block;
-  margin-top: 8px;
-  color: #10284d;
-  font-size: 20px;
-  line-height: 1.5;
-  max-width: 720px;
+.user-panel__meta span {
+  font-size: 12px;
 }
 
-@media (max-width: 1180px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
-
-  .shell-sidebar {
-    position: static;
-    min-height: auto;
-    grid-template-columns: 1fr;
-  }
-
-  .main-rail {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
+.layout-main {
+  padding: 4px 18px 18px;
 }
 
-@media (max-width: 768px) {
-  .shell-main {
-    padding: 18px;
+@media (max-width: 960px) {
+  .layout-shell {
+    flex-direction: column;
   }
 
-  .shell-header,
-  .hero-band {
+  .layout-aside {
+    width: 100% !important;
+  }
+
+  .layout-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 </style>
