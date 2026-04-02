@@ -1,4 +1,5 @@
 import http from './http'
+import type { SelectOption } from './students'
 
 
 export type RecruitPlanRecord = {
@@ -78,8 +79,25 @@ export type RecruitWorkbench = {
 }
 
 
+export type RecruitmentOptions = {
+  semester_options: SelectOption[]
+  plan_stage_options: SelectOption[]
+  degree_options: SelectOption[]
+  material_status_options: SelectOption[]
+  application_status_options: SelectOption[]
+  intended_field_options: SelectOption[]
+  reviewer_options: SelectOption[]
+  graduation_school_options: SelectOption[]
+}
+
+
 export function getRecruitmentStats() {
   return http.get<RecruitStats>('/recruitment/stats')
+}
+
+
+export function getRecruitmentOptions() {
+  return http.get<RecruitmentOptions>('/recruitment/options')
 }
 
 

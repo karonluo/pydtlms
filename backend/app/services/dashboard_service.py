@@ -1,11 +1,23 @@
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.dashboard import DashboardOverview
-from app.schemas.recruitment import RecruitApplicationListResponse, RecruitPlanListResponse, RecruitStats, RecruitWorkbench
-from app.schemas.student import StudentLifecycleBoard, StudentManagementResponse, StudentStats, StudentUpsert
+from app.schemas.recruitment import RecruitApplicationListResponse, RecruitPlanListResponse, RecruitmentOptionsResponse, RecruitStats, RecruitWorkbench
+from app.schemas.student import (
+    StudentLifecycleBoard,
+    StudentManagementResponse,
+    StudentOptionsResponse,
+    StudentStats,
+    StudentUpsert,
+    TeamListResponse,
+    TeamUpsert,
+)
 from app.schemas.system import (
     AuditPolicyListResponse,
     AuditPolicyUpsert,
     BulkActionResponse,
+    DictDataListResponse,
+    DictDataUpsert,
+    DictTypeListResponse,
+    DictTypeUpsert,
     IntegrationListResponse,
     IntegrationUpsert,
     OperationLogListResponse,
@@ -20,6 +32,7 @@ from app.schemas.system import (
     SystemUserUpsert,
 )
 from app.schemas.training import (
+    DegreeOptionsResponse,
     DegreeStats,
     DegreeWorkbench,
     OutboundStudyListResponse,
@@ -36,7 +49,7 @@ from app.schemas.training import (
     TrainingStats,
     TrainingWorkbench,
 )
-from app.schemas.workflow import WorkflowStats, WorkflowTaskListResponse, WorkflowTaskUpsert
+from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskUpsert
 from app.services.management_service import store
 
 
@@ -64,8 +77,31 @@ def get_audit_policies() -> list[dict[str, str]]:
     return [item.model_dump() for item in store.get_audit_policy_records().items]
 
 
-def get_student_management_list(keyword: str | None = None, status: str | None = None, advisor_name: str | None = None) -> StudentManagementResponse:
-    return store.get_students(keyword=keyword, status=status, advisor_name=advisor_name)
+def get_student_management_list(
+    keyword: str | None = None,
+    status: str | None = None,
+    advisor_name: str | None = None,
+    team_name: str | None = None,
+) -> StudentManagementResponse:
+    return store.get_students(keyword=keyword, status=status, advisor_name=advisor_name, team_name=team_name)
+
+
+def get_student_options() -> StudentOptionsResponse:
+    return store.get_student_options()
+
+
+def get_team_list(
+    keyword: str | None = None,
+    status: str | None = None,
+    department_name: str | None = None,
+    lead_advisor_name: str | None = None,
+) -> TeamListResponse:
+    return store.get_teams(
+        keyword=keyword,
+        status=status,
+        department_name=department_name,
+        lead_advisor_name=lead_advisor_name,
+    )
 
 
 def get_student_stats() -> StudentStats:
@@ -82,6 +118,22 @@ def update_student(student_id: int, payload: StudentUpsert):
 
 def delete_student(student_id: int) -> None:
     store.delete_student(student_id)
+
+
+def create_team(payload: TeamUpsert):
+    return store.create_team(payload)
+
+
+def update_team(team_id: int, payload: TeamUpsert):
+    return store.update_team(team_id, payload)
+
+
+def delete_team(team_id: int) -> None:
+    store.delete_team(team_id)
+
+
+def delete_teams(team_ids: list[int]):
+    return store.delete_teams(team_ids)
 
 
 def get_recruitment_plan_list() -> RecruitPlanListResponse:
@@ -114,6 +166,10 @@ def delete_recruitment_application(application_id: int) -> None:
 
 def get_recruitment_stats() -> RecruitStats:
     return store.get_recruitment_stats()
+
+
+def get_recruitment_options() -> RecruitmentOptionsResponse:
+    return store.get_recruitment_options()
 
 
 def get_training_plan_list(
@@ -226,6 +282,10 @@ def get_degree_stats() -> DegreeStats:
     return store.get_degree_stats()
 
 
+def get_degree_options() -> DegreeOptionsResponse:
+    return store.get_degree_options()
+
+
 def get_role_list(keyword: str | None = None, scope_name: str | None = None, permission: str | None = None) -> RoleListResponse:
     return store.get_roles(keyword=keyword, scope_name=scope_name, permission=permission)
 
@@ -328,6 +388,38 @@ def get_system_permission_catalog() -> PermissionCatalogResponse:
     return store.get_permission_catalog()
 
 
+def get_dict_type_list(keyword: str | None = None, status: str | None = None) -> DictTypeListResponse:
+    return store.get_dict_types(keyword=keyword, status=status)
+
+
+def create_dict_type(payload: DictTypeUpsert):
+    return store.create_dict_type(payload)
+
+
+def update_dict_type(dict_type_id: int, payload: DictTypeUpsert):
+    return store.update_dict_type(dict_type_id, payload)
+
+
+def delete_dict_type(dict_type_id: int) -> None:
+    store.delete_dict_type(dict_type_id)
+
+
+def get_dict_data_list(keyword: str | None = None, dict_type: str | None = None, status: str | None = None) -> DictDataListResponse:
+    return store.get_dict_data(keyword=keyword, dict_type=dict_type, status=status)
+
+
+def create_dict_data(payload: DictDataUpsert):
+    return store.create_dict_data(payload)
+
+
+def update_dict_data(dict_data_id: int, payload: DictDataUpsert):
+    return store.update_dict_data(dict_data_id, payload)
+
+
+def delete_dict_data(dict_data_id: int) -> None:
+    store.delete_dict_data(dict_data_id)
+
+
 def get_system_options() -> SystemOptionsResponse:
     return store.get_system_options()
 
@@ -358,6 +450,10 @@ def delete_workflow_task(task_id: int) -> None:
 
 def get_workflow_stats() -> WorkflowStats:
     return store.get_workflow_stats()
+
+
+def get_workflow_options() -> WorkflowOptionsResponse:
+    return store.get_workflow_options()
 
 
 def get_user_profile(username: str) -> UserProfile:

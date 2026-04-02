@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.schemas.system import SelectOption
+
 
 class RecruitPlanSummary(BaseModel):
     plan_name: str
@@ -73,6 +75,17 @@ class RecruitApplicationUpsert(BaseModel):
 class RecruitApplicationListResponse(BaseModel):
     items: list[RecruitApplicationRecord]
     total: int
+
+
+class RecruitmentOptionsResponse(BaseModel):
+    semester_options: list[SelectOption]
+    plan_stage_options: list[SelectOption]
+    degree_options: list[SelectOption]
+    material_status_options: list[SelectOption]
+    application_status_options: list[SelectOption]
+    intended_field_options: list[SelectOption]
+    reviewer_options: list[SelectOption]
+    graduation_school_options: list[SelectOption]
 
 
 class RecruitStats(BaseModel):

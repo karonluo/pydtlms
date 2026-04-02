@@ -8,6 +8,12 @@ from app.schemas.system import (
     AuditPolicyUpsert,
     BulkActionResponse,
     BulkDeleteRequest,
+    DictDataListResponse,
+    DictDataRecord,
+    DictDataUpsert,
+    DictTypeListResponse,
+    DictTypeRecord,
+    DictTypeUpsert,
     IntegrationListResponse,
     IntegrationRecord,
     IntegrationUpsert,
@@ -31,6 +37,8 @@ from app.services.dashboard_service import (
     create_system_user,
     delete_audit_policies,
     delete_audit_policy,
+    delete_dict_data,
+    delete_dict_type,
     delete_integration,
     delete_integrations,
     delete_role,
@@ -38,6 +46,8 @@ from app.services.dashboard_service import (
     delete_system_user,
     delete_system_users,
     get_audit_policy_list,
+    get_dict_data_list,
+    get_dict_type_list,
     get_integration_list,
     get_operation_log_list,
     get_role_list,
@@ -48,6 +58,8 @@ from app.services.dashboard_service import (
     get_system_stats,
     get_system_user_list,
     update_audit_policy,
+    update_dict_data,
+    update_dict_type,
     update_integration,
     update_role,
     update_system_user,
@@ -74,6 +86,81 @@ def system_options(principal: Principal = Depends(require_permissions("system:re
 @router.get("/permissions", response_model=PermissionCatalogResponse)
 def system_permissions(principal: Principal = Depends(require_permissions("system:read"))) -> PermissionCatalogResponse:
     return get_system_permission_catalog()
+
+
+@router.get("/dict-types", response_model=DictTypeListResponse)
+def dict_types(
+    keyword: str | None = None,
+    status: str | None = None,
+    principal: Principal = Depends(require_permissions("system:read")),
+) -> DictTypeListResponse:
+    return get_dict_type_list(keyword=keyword, status=status)
+
+
+@router.post("/dict-types", response_model=DictTypeRecord, status_code=status.HTTP_201_CREATED)
+def create_dict_type_record(payload: DictTypeUpsert, principal: Principal = Depends(require_permissions("system:write"))) -> DictTypeRecord:
+    try:
+        return create_dict_type(payload)
+    except ValueError as exc:
+        _handle_service_error(exc)
+
+
+@router.put("/dict-types/{dict_type_id}", response_model=DictTypeRecord)
+def update_dict_type_record(dict_type_id: int, payload: DictTypeUpsert, principal: Principal = Depends(require_permissions("system:write"))) -> DictTypeRecord:
+    try:
+        return update_dict_type(dict_type_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dict type not found") from exc
+    except ValueError as exc:
+        _handle_service_error(exc)
+
+
+@router.delete("/dict-types/{dict_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dict_type_record(dict_type_id: int, principal: Principal = Depends(require_permissions("system:write"))) -> None:
+    try:
+        delete_dict_type(dict_type_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dict type not found") from exc
+    except ValueError as exc:
+        _handle_service_error(exc)
+
+
+@router.get("/dict-data", response_model=DictDataListResponse)
+def dict_data(
+    keyword: str | None = None,
+    dict_type: str | None = None,
+    status: str | None = None,
+    principal: Principal = Depends(require_permissions("system:read")),
+) -> DictDataListResponse:
+    return get_dict_data_list(keyword=keyword, dict_type=dict_type, status=status)
+
+
+@router.post("/dict-data", response_model=DictDataRecord, status_code=status.HTTP_201_CREATED)
+def create_dict_data_record(payload: DictDataUpsert, principal: Principal = Depends(require_permissions("system:write"))) -> DictDataRecord:
+    try:
+        return create_dict_data(payload)
+    except ValueError as exc:
+        _handle_service_error(exc)
+
+
+@router.put("/dict-data/{dict_data_id}", response_model=DictDataRecord)
+def update_dict_data_record(dict_data_id: int, payload: DictDataUpsert, principal: Principal = Depends(require_permissions("system:write"))) -> DictDataRecord:
+    try:
+        return update_dict_data(dict_data_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dict data not found") from exc
+    except ValueError as exc:
+        _handle_service_error(exc)
+
+
+@router.delete("/dict-data/{dict_data_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dict_data_record(dict_data_id: int, principal: Principal = Depends(require_permissions("system:write"))) -> None:
+    try:
+        delete_dict_data(dict_data_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dict data not found") from exc
+    except ValueError as exc:
+        _handle_service_error(exc)
 
 
 @router.get("/roles", response_model=RoleListResponse)

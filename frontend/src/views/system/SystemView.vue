@@ -3,6 +3,8 @@ import axios from 'axios'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
+import TableRowActions from '../../components/table/TableRowActions.vue'
+import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 
 import {
   batchDeleteAuditPolicies,
@@ -53,6 +55,7 @@ const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedIds = ref<number[]>([])
+const systemTagColors = ref<DictColorMap>({})
 
 const stats = ref<SystemStats>({
   integration_total: 0,
@@ -265,6 +268,13 @@ async function loadBootstrapData() {
     systemOptions.value = optionResponse.data
     permissionCatalog.value = permissionResponse.data.items
     roleReferenceList.value = roleResponse.data.items
+    systemTagColors.value = {
+      ...buildDictColorMap(optionResponse.data.account_status_options),
+      ...buildDictColorMap(optionResponse.data.integration_status_options),
+      ...buildDictColorMap(optionResponse.data.audit_status_options),
+      ...buildDictColorMap(optionResponse.data.operation_result_options),
+      ...buildDictColorMap(optionResponse.data.sync_status_options),
+    }
   } finally {
     bootstrapping.value = false
   }
@@ -580,10 +590,7 @@ function handleSelectionChange(rows: Array<{ id: number }>) {
 }
 
 function getTagType(status: string) {
-  if ([ '启用', '正常', 'success' ].includes(status)) return 'success'
-  if ([ '告警' ].includes(status)) return 'warning'
-  if ([ '停用', '锁定', 'failed' ].includes(status)) return 'danger'
-  return 'info'
+  return resolveDictTagType(status, systemTagColors.value)
 }
 
 function resultLabel(value: string) {
@@ -769,10 +776,9 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="phone_number" label="电话" min-width="160" />
         <el-table-column prop="last_login_at" label="最近登录" width="180" />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">维护账号</el-button>
-            <el-button link type="danger" @click="handleDelete(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护账号', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -790,10 +796,9 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">分配权限</el-button>
-            <el-button link type="danger" @click="handleDelete(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '分配权限', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -807,10 +812,9 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="policy" label="审计策略" min-width="420" />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">维护策略</el-button>
-            <el-button link type="danger" @click="handleDelete(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护策略', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -826,10 +830,9 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="owner" label="责任人" width="120" />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">维护链路</el-button>
-            <el-button link type="danger" @click="handleDelete(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护链路', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>

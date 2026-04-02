@@ -4,6 +4,8 @@ import http from './http'
 export type SelectOption = {
   label: string
   value: string
+  color_type?: string | null
+  css_class?: string | null
 }
 
 
@@ -12,6 +14,50 @@ export type PermissionOption = {
   name: string
   module_name: string
   description: string
+}
+
+
+export type DictTypeRecord = {
+  id: number
+  dict_name: string
+  dict_type: string
+  status: string
+  remark?: string | null
+  data_count: number
+}
+
+
+export type DictTypeUpsert = {
+  dict_name: string
+  dict_type: string
+  status: string
+  remark?: string | null
+}
+
+
+export type DictDataRecord = {
+  id: number
+  dict_type: string
+  dict_name: string
+  label: string
+  value: string
+  sort_order: number
+  status: string
+  color_type?: string | null
+  css_class?: string | null
+  remark?: string | null
+}
+
+
+export type DictDataUpsert = {
+  dict_type: string
+  label: string
+  value: string
+  sort_order: number
+  status: string
+  color_type?: string | null
+  css_class?: string | null
+  remark?: string | null
 }
 
 
@@ -154,6 +200,53 @@ export function getSystemOptions() {
 
 export function getPermissionCatalog() {
   return http.get<{ items: PermissionOption[] }>('/system/permissions')
+}
+
+
+export function listDictTypes(params?: {
+  keyword?: string
+  status?: string
+}) {
+  return http.get<{ items: DictTypeRecord[]; total: number }>('/system/dict-types', { params })
+}
+
+
+export function createDictType(payload: DictTypeUpsert) {
+  return http.post<DictTypeRecord>('/system/dict-types', payload)
+}
+
+
+export function updateDictType(id: number, payload: DictTypeUpsert) {
+  return http.put<DictTypeRecord>(`/system/dict-types/${id}`, payload)
+}
+
+
+export function deleteDictType(id: number) {
+  return http.delete(`/system/dict-types/${id}`)
+}
+
+
+export function listDictData(params?: {
+  keyword?: string
+  dict_type?: string
+  status?: string
+}) {
+  return http.get<{ items: DictDataRecord[]; total: number }>('/system/dict-data', { params })
+}
+
+
+export function createDictData(payload: DictDataUpsert) {
+  return http.post<DictDataRecord>('/system/dict-data', payload)
+}
+
+
+export function updateDictData(id: number, payload: DictDataUpsert) {
+  return http.put<DictDataRecord>(`/system/dict-data/${id}`, payload)
+}
+
+
+export function deleteDictData(id: number) {
+  return http.delete(`/system/dict-data/${id}`)
 }
 
 

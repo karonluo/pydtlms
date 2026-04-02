@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.schemas.system import SelectOption
+
 
 class WorkflowTaskRecord(BaseModel):
     id: int
@@ -45,3 +47,13 @@ class WorkflowStats(BaseModel):
     approved_total: int
     rejected_total: int
     overdue_total: int
+
+
+class WorkflowOptionsResponse(BaseModel):
+    workflow_name_options: list[SelectOption]
+    business_module_options: list[SelectOption]
+    applicant_options: list[SelectOption]
+    handler_options: list[SelectOption]
+    current_node_options: list[SelectOption]
+    priority_options: list[SelectOption]
+    status_options: list[SelectOption]

@@ -1,4 +1,5 @@
 import http from './http'
+import type { SelectOption } from './students'
 
 
 export type ThesisRecord = {
@@ -41,8 +42,26 @@ export type DegreeStats = {
 }
 
 
+export type DegreeOptions = {
+  student_options: SelectOption[]
+  advisor_options: SelectOption[]
+  thesis_options: SelectOption[]
+  thesis_status_options: SelectOption[]
+  blind_review_status_options: SelectOption[]
+  defense_status_options: SelectOption[]
+  degree_status_options: SelectOption[]
+  expert_options: SelectOption[]
+  review_status_options: SelectOption[]
+}
+
+
 export function getDegreeStats() {
   return http.get<DegreeStats>('/degree/stats')
+}
+
+
+export function getDegreeOptions() {
+  return http.get<DegreeOptions>('/degree/options')
 }
 
 

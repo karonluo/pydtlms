@@ -1,4 +1,5 @@
 import http from './http'
+import type { SelectOption } from './students'
 
 
 export type WorkflowTaskRecord = {
@@ -31,8 +32,24 @@ export type WorkflowStats = {
 }
 
 
+export type WorkflowOptions = {
+  workflow_name_options: SelectOption[]
+  business_module_options: SelectOption[]
+  applicant_options: SelectOption[]
+  handler_options: SelectOption[]
+  current_node_options: SelectOption[]
+  priority_options: SelectOption[]
+  status_options: SelectOption[]
+}
+
+
 export function getWorkflowStats() {
   return http.get<WorkflowStats>('/workflow/stats')
+}
+
+
+export function getWorkflowOptions() {
+  return http.get<WorkflowOptions>('/workflow/options')
 }
 
 

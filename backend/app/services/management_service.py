@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
 from datetime import datetime
-from pathlib import Path
 from threading import Lock
 from typing import Any
 
@@ -19,23 +17,35 @@ from app.schemas.recruitment import (
     RecruitPlanRecord,
     RecruitPlanSummary,
     RecruitPlanUpsert,
+    RecruitmentOptionsResponse,
     RecruitStats,
     RecruitWorkbench,
 )
 from app.schemas.student import (
     StudentLifecycleBoard,
     StudentManagementResponse,
+    StudentOptionsResponse,
     StudentRecord,
     StudentStateItem,
     StudentStats,
     StudentSummary,
     StudentUpsert,
+    TeamAdvisorMapItem,
+    TeamListResponse,
+    TeamRecord,
+    TeamUpsert,
 )
 from app.schemas.system import (
     AuditPolicyListResponse,
     AuditPolicyRecord,
     AuditPolicyUpsert,
     BulkActionResponse,
+    DictDataListResponse,
+    DictDataRecord,
+    DictDataUpsert,
+    DictTypeListResponse,
+    DictTypeRecord,
+    DictTypeUpsert,
     IntegrationListResponse,
     IntegrationRecord,
     IntegrationUpsert,
@@ -71,6 +81,8 @@ from app.schemas.training import (
     ThesisReviewRecord,
     ThesisReviewUpsert,
     ThesisUpsert,
+    DegreeOptionsResponse,
+    TrainingStudentOption,
     TrainingOptionsResponse,
     TrainingPlanListResponse,
     TrainingPlanRecord,
@@ -79,7 +91,7 @@ from app.schemas.training import (
     TrainingTask,
     TrainingWorkbench,
 )
-from app.schemas.workflow import WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
+from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
 from app.services.postgres_state_store import PostgresStateStore
 
 
@@ -107,186 +119,35 @@ PERMISSION_CATALOG: list[dict[str, str]] = [
     {"code": "workflow:read", "name": "查看流程任务", "module_name": "流程中心", "description": "查看审批任务和流程状态。"},
     {"code": "workflow:write", "name": "处理流程任务", "module_name": "流程中心", "description": "处理审批任务和推进流程节点。"},
 ]
-ACCOUNT_STATUS_OPTIONS = ["启用", "停用", "锁定"]
-ROLE_SCOPE_OPTIONS = ["系统治理", "招生管理", "学生管理", "培养与学位", "学位管理", "跨部门协同"]
-INTEGRATION_DIRECTION_OPTIONS = ["主数据导入 / 录取回传", "考勤 / 门禁 / 请假同步", "待办通知 / 审批提醒 / 回执", "双向同步", "主数据下发"]
-INTEGRATION_CADENCE_OPTIONS = ["实时", "实时 + 每日对账", "实时事件 + 定时补偿", "每小时", "每日"]
-INTEGRATION_STATUS_OPTIONS = ["正常", "告警", "停用"]
-AUDIT_STATUS_OPTIONS = ["启用", "停用"]
-OPERATION_RESULT_OPTIONS = [
-    {"label": "成功", "value": "success"},
-    {"label": "失败", "value": "failed"},
-]
-SYNC_STATUS_OPTIONS = [
-    {"label": "成功", "value": "success"},
-    {"label": "失败", "value": "failed"},
-]
-TRAINING_PLAN_STATUS_OPTIONS = ["待学生确认", "执行中", "已归档"]
-TRAINING_REPORT_CYCLE_OPTIONS = ["月度", "双月", "季度", "半年度"]
-TRAINING_REPORT_STATUS_OPTIONS = ["待导师审阅", "已通过", "退回修改"]
-OUTBOUND_STUDY_TYPE_OPTIONS = ["联合培养", "企业研修", "访学交流", "学术会议"]
-OUTBOUND_APPROVAL_STATUS_OPTIONS = ["审批中", "已批准", "研修中", "已结束", "已驳回"]
 
 
 class DemoManagementStore:
     def __init__(self) -> None:
         self._lock = Lock()
-        self._data_path = Path(__file__).resolve().parents[2] / "data" / "demo_store.json"
-        self._data_path.parent.mkdir(parents=True, exist_ok=True)
         self._postgres_store = PostgresStateStore()
         self.state = self._load_state()
-        if self._migrate_state():
-            self._write_state(self.state)
         self._counters = self.state.setdefault("counters", {})
-
-    def _seed_state(self) -> dict[str, Any]:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        return {
-            "counters": {
-                "students": 1000,
-                "recruitment_plans": 100,
-                "recruitment_applications": 5000,
-                "training_plans": 300,
-                "scientific_reports": 800,
-                "outbound_studies": 120,
-                "theses": 400,
-                "thesis_reviews": 900,
-                "roles": 30,
-                "system_users": 300,
-                "audit_policies": 60,
-                "integrations": 40,
-                "operation_logs": 10000,
-                "sync_logs": 600,
-                "workflow_tasks": 2000,
-            },
-            "profiles": {
-                "admin": {
-                    "username": "admin",
-                    "full_name": "系统管理员",
-                    "role_name": "平台管理员",
-                    "department_name": "学科与研究生管理处",
-                    "phone_number": "13800000000",
-                    "email": "admin@dtlms.local",
-                    "theme_color": "#0f4cbd",
-                },
-                "mentor.demo": {
-                    "username": "mentor.demo",
-                    "full_name": "导师示例账号",
-                    "role_name": "导师",
-                    "department_name": "智能制造学院",
-                    "phone_number": "13800000088",
-                    "email": "mentor.demo@dtlms.local",
-                    "theme_color": "#13795b",
-                },
-                "secretary.demo": {
-                    "username": "secretary.demo",
-                    "full_name": "学位秘书示例账号",
-                    "role_name": "学位秘书",
-                    "department_name": "学位办公室",
-                    "phone_number": "13800000066",
-                    "email": "secretary.demo@dtlms.local",
-                    "theme_color": "#A66B1F",
-                },
-            },
-            "students": [
-                {"id": 1, "student_no": "D20240001", "full_name": "陈一鸣", "status": "在校", "advisor_name": "刘亚", "team_name": "智能制造团队", "degree_type": "工程博士", "enrollment_year": 2024, "phone_number": "13800000001", "political_status": "中共党员"},
-                {"id": 2, "student_no": "D20240007", "full_name": "王书宁", "status": "外出研修", "advisor_name": "刘亚", "team_name": "智能制造团队", "degree_type": "学术博士", "enrollment_year": 2024, "phone_number": "13800000007", "political_status": "共青团员"},
-                {"id": 3, "student_no": "D20230018", "full_name": "张乐之", "status": "学位论文阶段", "advisor_name": "袁野", "team_name": "数据智能团队", "degree_type": "工程博士", "enrollment_year": 2023, "phone_number": "13800000018", "political_status": "群众"},
-                {"id": 4, "student_no": "D20220009", "full_name": "赵嘉霖", "status": "实习中", "advisor_name": "徐素天", "team_name": "工业软件团队", "degree_type": "工程博士", "enrollment_year": 2022, "phone_number": "13800000009", "political_status": "中共预备党员"}
-            ],
-            "recruitment_plans": [
-                {"id": 1, "plan_name": "2026 学术交流周", "academic_year": "2026", "semester": "秋", "current_stage": "资格审核", "target_quota": 120, "interview_group_count": 8, "is_open": True},
-                {"id": 2, "plan_name": "2026 工程博士专项", "academic_year": "2026", "semester": "秋", "current_stage": "评分推荐", "target_quota": 80, "interview_group_count": 6, "is_open": True},
-                {"id": 3, "plan_name": "2026 秋季招生", "academic_year": "2026", "semester": "秋", "current_stage": "预录取", "target_quota": 32, "interview_group_count": 4, "is_open": False}
-            ],
-            "recruitment_applications": [
-                {"id": 1, "plan_id": 1, "candidate_no": "A20260001", "student_name": "李书航", "graduation_school": "东南大学", "highest_degree": "硕士", "intended_field": "智能制造", "material_status": "材料齐全", "application_status": "资格审核通过", "reviewer_name": "王天舒", "final_score": None},
-                {"id": 2, "plan_id": 1, "candidate_no": "A20260002", "student_name": "周亦凡", "graduation_school": "同济大学", "highest_degree": "硕士", "intended_field": "控制科学", "material_status": "待补材料", "application_status": "报名已提交", "reviewer_name": None, "final_score": None},
-                {"id": 3, "plan_id": 2, "candidate_no": "A20261018", "student_name": "陈思语", "graduation_school": "哈尔滨工业大学", "highest_degree": "硕士", "intended_field": "机器人", "material_status": "材料齐全", "application_status": "材料评分中", "reviewer_name": "刘亚", "final_score": 86.5},
-                {"id": 4, "plan_id": 3, "candidate_no": "A20262021", "student_name": "吴启程", "graduation_school": "华中科技大学", "highest_degree": "硕士", "intended_field": "工业软件", "material_status": "材料齐全", "application_status": "预录取", "reviewer_name": "袁野", "final_score": 92.0}
-            ],
-            "training_plans": [
-                {"id": 1, "student_no": "D20240001", "student_name": "陈一鸣", "advisor_name": "刘亚", "version_no": "v1.0", "report_cycle": "季度", "plan_status": "待学生确认", "scientific_goal": "完成智能制造调度知识图谱构建与实验验证", "assessment_rule": "每季度提交科研报告，年度中期考核"},
-                {"id": 2, "student_no": "D20240007", "student_name": "王书宁", "advisor_name": "刘亚", "version_no": "v1.1", "report_cycle": "双月", "plan_status": "执行中", "scientific_goal": "完成控制科学方向仿真平台与论文投稿", "assessment_rule": "双月例会 + 阶段性成果复盘"},
-                {"id": 3, "student_no": "D20230018", "student_name": "张乐之", "advisor_name": "袁野", "version_no": "v2.0", "report_cycle": "月度", "plan_status": "执行中", "scientific_goal": "完成论文定稿和学位前成果归档", "assessment_rule": "月度报告 + 论文节点检查"}
-            ],
-            "scientific_reports": [
-                {"id": 1, "student_no": "D20240001", "student_name": "陈一鸣", "period_label": "2026Q1", "report_status": "待导师审阅", "reviewer_name": "刘亚", "review_score": None, "summary": "已完成知识图谱本体建模与基础规则整理。"},
-                {"id": 2, "student_no": "D20240007", "student_name": "王书宁", "period_label": "2026-02", "report_status": "已通过", "reviewer_name": "刘亚", "review_score": 90.0, "summary": "已完成控制算法仿真验证。"},
-                {"id": 3, "student_no": "D20230018", "student_name": "张乐之", "period_label": "2026-03", "report_status": "退回修改", "reviewer_name": "袁野", "review_score": 78.0, "summary": "论文实验部分需要补充对照组。"}
-            ],
-            "outbound_studies": [
-                {"id": 1, "student_no": "D20240007", "student_name": "王书宁", "advisor_name": "刘亚", "study_type": "联合培养", "destination": "新加坡国立大学", "start_date": "2026-04-15", "end_date": "2026-10-15", "approval_status": "审批中", "expected_outcome": "完成联合课题实验与论文合作"},
-                {"id": 2, "student_no": "D20220009", "student_name": "赵嘉霖", "advisor_name": "徐素天", "study_type": "企业研修", "destination": "无锡厚德自动化仪表有限公司", "start_date": "2026-03-01", "end_date": "2026-06-30", "approval_status": "研修中", "expected_outcome": "完成工业软件接口适配与案例沉淀"}
-            ],
-            "theses": [
-                {"id": 1, "student_no": "D20230018", "student_name": "张乐之", "advisor_name": "袁野", "title": "高校博士生培养过程指标预测模型", "plagiarism_rate": 22.3, "thesis_status": "退回修改", "blind_review_status": "未送审", "defense_status": "未进入", "degree_status": "待申请"},
-                {"id": 2, "student_no": "D20240001", "student_name": "陈一鸣", "advisor_name": "刘亚", "title": "智能制造知识图谱驱动调度研究", "plagiarism_rate": 18.4, "thesis_status": "查重通过", "blind_review_status": "进行中", "defense_status": "待安排", "degree_status": "授位审批中"},
-                {"id": 3, "student_no": "D20220009", "student_name": "赵嘉霖", "advisor_name": "徐素天", "title": "多源日志语义融合与审计异常检测", "plagiarism_rate": 12.7, "thesis_status": "盲审通过", "blind_review_status": "已通过", "defense_status": "预答辩完成", "degree_status": "待正式答辩"}
-            ],
-            "thesis_reviews": [
-                {"id": 1, "thesis_id": 2, "thesis_title": "智能制造知识图谱驱动调度研究", "expert_name": "专家A", "review_score": 88.0, "review_status": "已提交", "review_comment": "选题较好，建议补充案例。"},
-                {"id": 2, "thesis_id": 3, "thesis_title": "多源日志语义融合与审计异常检测", "expert_name": "专家B", "review_score": 92.0, "review_status": "已通过", "review_comment": "结构完整，可进入答辩。"}
-            ],
-            "roles": [
-                {"id": 1, "role_code": "platform_admin", "role_name": "平台管理员", "scope_name": "系统治理", "permissions": ["dashboard:read", "recruitment:read", "recruitment:write", "students:read", "students:write", "training:read", "training:write", "degree:read", "degree:write", "audit:read", "audit:write", "system:read", "system:write", "workflow:read", "workflow:write"]},
-                {"id": 2, "role_code": "advisor", "role_name": "导师", "scope_name": "培养与学位", "permissions": ["dashboard:read", "students:read", "training:read", "training:write", "degree:read", "degree:write", "workflow:read"]},
-                {"id": 3, "role_code": "secretary", "role_name": "学位秘书", "scope_name": "学位管理", "permissions": ["degree:read", "degree:write", "workflow:read", "workflow:write"]}
-            ],
-            "system_users": [
-                {"id": 1, "username": "admin", "full_name": "系统管理员", "role_code": "platform_admin", "department_name": "学科与研究生管理处", "phone_number": "13800000000", "account_status": "启用", "password_hash": PASSWORD_CONTEXT.hash("Admin@123456"), "last_login_at": None},
-                {"id": 2, "username": "mentor.demo", "full_name": "导师示例账号", "role_code": "advisor", "department_name": "智能制造学院", "phone_number": "13800000088", "account_status": "启用", "password_hash": PASSWORD_CONTEXT.hash("Mentor@123456"), "last_login_at": None},
-                {"id": 3, "username": "secretary.demo", "full_name": "学位秘书示例账号", "role_code": "secretary", "department_name": "学位办公室", "phone_number": "13800000066", "account_status": "启用", "password_hash": PASSWORD_CONTEXT.hash("Secretary@123456"), "last_login_at": None}
-            ],
-            "audit_policies": [
-                {"id": 1, "item": "登录日志", "policy": "成功、失败、锁定、异地登录均留痕，保留 5 年。", "status": "启用"},
-                {"id": 2, "item": "操作日志", "policy": "关键实体的增删改审必须记录前后值、IP、设备和结果。", "status": "启用"},
-                {"id": 3, "item": "同步日志", "policy": "外部系统同步需记录总量、成功量、失败量和失败原因。", "status": "启用"},
-                {"id": 4, "item": "权限治理", "policy": "职责分离，禁止录入、评分、审批同人闭环完成。", "status": "启用"}
-            ],
-            "integrations": [
-                {"id": 1, "name": "招生系统", "direction": "主数据导入 / 录取回传", "cadence": "实时 + 每日对账", "status": "正常", "owner": "招生办公室"},
-                {"id": 2, "name": "实验室 OA", "direction": "考勤 / 门禁 / 请假同步", "cadence": "实时事件 + 定时补偿", "status": "正常", "owner": "学院办公室"},
-                {"id": 3, "name": "飞书", "direction": "待办通知 / 审批提醒 / 回执", "cadence": "实时", "status": "告警", "owner": "学合管理员"}
-            ],
-            "operation_logs": [
-                {"id": 1, "operated_at": now, "operator_username": "admin", "module_name": "招生管理", "entity_name": "报名申请", "entity_id": "4", "action": "预录取确认", "result": "success", "summary": "确认吴启程进入预录取池。"},
-                {"id": 2, "operated_at": now, "operator_username": "admin", "module_name": "培养管理", "entity_name": "培养方案", "entity_id": "2", "action": "发布版本", "result": "success", "summary": "王书宁培养方案版本发布为 v1.1。"}
-            ],
-            "sync_logs": [
-                {"id": 1, "source_system": "招生系统", "target_system": "DTLMS", "sync_status": "success", "record_count": 120, "executed_at": now, "failure_reason": None},
-                {"id": 2, "source_system": "DTLMS", "target_system": "飞书", "sync_status": "failed", "record_count": 4, "executed_at": now, "failure_reason": "回执接口超时"}
-            ],
-            "workflow_tasks": [
-                {"id": 1, "workflow_name": "外出研修审批", "business_module": "培养管理", "business_key": "OUT-1", "title": "王书宁联合培养申请", "applicant_name": "王书宁", "current_handler": "刘亚", "current_node": "导师审核", "priority": "高", "status": "处理中", "created_at": now, "due_at": "2026-04-05 18:00:00", "form_summary": "研修地点：新加坡国立大学；周期：6个月", "latest_comment": "待导师确认联合培养计划。"},
-                {"id": 2, "workflow_name": "学位申请审批", "business_module": "学位管理", "business_key": "DEG-2", "title": "陈一鸣授位审批", "applicant_name": "陈一鸣", "current_handler": "学位秘书", "current_node": "材料复核", "priority": "中", "status": "待处理", "created_at": now, "due_at": "2026-04-03 12:00:00", "form_summary": "论文查重通过，盲审进行中。", "latest_comment": "待核验盲审回执。"},
-                {"id": 3, "workflow_name": "导师变更审批", "business_module": "学生管理", "business_key": "ADV-3", "title": "赵嘉霖导师变更申请", "applicant_name": "赵嘉霖", "current_handler": "学合管理员", "current_node": "管理员统筹", "priority": "中", "status": "已通过", "created_at": now, "due_at": "2026-03-20 17:00:00", "form_summary": "原导师：刘亚，新导师：徐素天", "latest_comment": "已完成权限级联刷新。"}
-            ]
-        }
+        if self._migrate_state():
+            self._save()
 
     def _load_state(self) -> dict[str, Any]:
         postgres_state = self._postgres_store.load_state()
         if postgres_state:
-            self._write_json_snapshot(postgres_state)
             return postgres_state
-        if not self._data_path.exists():
-            state = self._seed_state()
-            self._write_state(state)
-            return state
-        return json.loads(self._data_path.read_text(encoding="utf-8"))
+        raise RuntimeError("PostgreSQL runtime state is required. Initialize and sync PostgreSQL before starting the application.")
 
     def _write_state(self, state: dict[str, Any] | None = None) -> None:
         payload = state or self.state
-        self._write_json_snapshot(payload)
         self._postgres_store.save_state(payload)
-
-    def _write_json_snapshot(self, payload: dict[str, Any]) -> None:
-        self._data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _migrate_state(self) -> bool:
         changed = False
         role_lookup = {item["role_code"]: item for item in self.state.setdefault("roles", [])}
         profiles = self.state.setdefault("profiles", {})
+        if "teams" not in self.state:
+            self.state["teams"] = self._bootstrap_teams_from_students()
+            changed = True
+        self._counters.setdefault("teams", max([item.get("id", 0) for item in self.state.setdefault("teams", [])], default=0))
 
         for user in self.state.setdefault("system_users", []):
             if not user.get("password_hash"):
@@ -316,6 +177,37 @@ class DemoManagementStore:
         for policy in self.state.setdefault("audit_policies", []):
             if not policy.get("status"):
                 policy["status"] = "启用"
+                changed = True
+
+        team_lookup = {item["team_name"]: item for item in self.state.setdefault("teams", [])}
+        for team in self.state.setdefault("teams", []):
+            team.setdefault("team_code", f"TEAM-{team['id']:03d}")
+            team.setdefault("department_name", "未分配院系")
+            team.setdefault("discipline_name", "未分配学科")
+            team.setdefault("lead_advisor_name", (team.get("advisor_names") or [""])[0])
+            team["advisor_names"] = self._normalize_name_list(team.get("advisor_names", []), team.get("lead_advisor_name"))
+            team["research_directions"] = self._normalize_name_list(team.get("research_directions", []))
+            team.setdefault("status", "启用")
+            team.setdefault("established_on", None)
+            team.setdefault("description", None)
+        for student in self.state.setdefault("students", []):
+            if student.get("team_name") and student["team_name"] not in team_lookup:
+                next_team_id = max([item.get("id", 0) for item in self.state["teams"]], default=0) + 1
+                self.state["teams"].append(
+                    {
+                        "id": next_team_id,
+                        "team_code": f"TEAM-AUTO-{next_team_id:03d}",
+                        "team_name": student["team_name"],
+                        "department_name": "未分配院系",
+                        "discipline_name": "未分配学科",
+                        "lead_advisor_name": student.get("advisor_name", ""),
+                        "advisor_names": self._normalize_name_list([student.get("advisor_name", "")]),
+                        "research_directions": [],
+                        "status": "启用",
+                        "established_on": None,
+                        "description": "由历史学生主档自动迁移生成的团队记录。",
+                    }
+                )
                 changed = True
 
         return changed
@@ -357,6 +249,121 @@ class DemoManagementStore:
         haystack = " ".join(str(value or "") for value in values).lower()
         return needle in haystack
 
+    def _normalize_name_list(self, values: list[str] | tuple[str, ...] | set[str] | None, *extra_values: str | None) -> list[str]:
+        merged = [*(values or []), *extra_values]
+        return list(dict.fromkeys(str(item).strip() for item in merged if str(item or "").strip()))
+
+    def _bootstrap_teams_from_students(self) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for item in self.state.get("students", []):
+            team_name = str(item.get("team_name") or "").strip()
+            if not team_name:
+                continue
+            current = grouped.setdefault(
+                team_name,
+                {
+                    "id": len(grouped) + 1,
+                    "team_code": f"TEAM-AUTO-{len(grouped) + 1:03d}",
+                    "team_name": team_name,
+                    "department_name": "未分配院系",
+                    "discipline_name": "未分配学科",
+                    "lead_advisor_name": item.get("advisor_name", ""),
+                    "advisor_names": [],
+                    "research_directions": [],
+                    "status": "启用",
+                    "established_on": None,
+                    "description": "由历史学生主档自动生成的团队记录。",
+                },
+            )
+            current["advisor_names"] = self._normalize_name_list(current.get("advisor_names", []), item.get("advisor_name"))
+        return list(grouped.values())
+
+    def _advisor_name_values(self) -> list[str]:
+        values = {
+            *[item.get("lead_advisor_name") for item in self._list("teams") if item.get("lead_advisor_name")],
+            *[advisor for item in self._list("teams") for advisor in item.get("advisor_names", []) if advisor],
+            *[item.get("advisor_name") for item in self._list("students") if item.get("advisor_name")],
+            *[item.get("advisor_name") for item in self._list("training_plans") if item.get("advisor_name")],
+            *[item.get("advisor_name") for item in self._list("outbound_studies") if item.get("advisor_name")],
+            *[item.get("advisor_name") for item in self._list("theses") if item.get("advisor_name")],
+        }
+        return sorted(str(item).strip() for item in values if str(item or "").strip())
+
+    def _system_user_name_values(self) -> list[str]:
+        values = {item.get("full_name") for item in self._list("system_users") if item.get("full_name")}
+        return sorted(str(item).strip() for item in values if str(item or "").strip())
+
+    def _student_option_values(self) -> list[SelectOption]:
+        items = sorted(self._list("students"), key=lambda item: str(item.get("student_no") or ""))
+        return [SelectOption(label=f'{item["full_name"]}（{item["student_no"]}）', value=item["student_no"]) for item in items]
+
+    def _training_student_options(self) -> list[TrainingStudentOption]:
+        items = sorted(self._list("students"), key=lambda item: str(item.get("student_no") or ""))
+        return [
+            TrainingStudentOption(
+                student_no=item["student_no"],
+                student_name=item["full_name"],
+                advisor_name=item["advisor_name"],
+                label=f'{item["full_name"]}（{item["student_no"]}）',
+            )
+            for item in items
+        ]
+
+    def _select_options_from_values(self, values: list[str | None] | set[str | None] | tuple[str | None, ...]) -> list[SelectOption]:
+        return [SelectOption(label=item, value=item) for item in sorted({str(value).strip() for value in values if str(value or "").strip()})]
+
+    def _team_lookup_by_name(self) -> dict[str, dict[str, Any]]:
+        return {item["team_name"]: item for item in self._list("teams")}
+
+    def _build_team_record(self, item: dict[str, Any]) -> TeamRecord:
+        members = [student for student in self._list("students") if student.get("team_name") == item["team_name"]]
+        active_statuses = {"在校", "实习中", "外出研修", "请假中", "学位论文阶段"}
+        return TeamRecord(
+            id=item["id"],
+            team_code=item["team_code"],
+            team_name=item["team_name"],
+            department_name=item["department_name"],
+            discipline_name=item["discipline_name"],
+            lead_advisor_name=item["lead_advisor_name"],
+            advisor_names=self._normalize_name_list(item.get("advisor_names", []), item.get("lead_advisor_name")),
+            research_directions=self._normalize_name_list(item.get("research_directions", [])),
+            status=item["status"],
+            established_on=item.get("established_on"),
+            description=item.get("description"),
+            member_student_count=len(members),
+            active_student_count=len([student for student in members if student.get("status") in active_statuses]),
+        )
+
+    def _ensure_team_exists(self, team_name: str) -> dict[str, Any]:
+        team = self._team_lookup_by_name().get(team_name)
+        if not team:
+            raise ValueError("Selected team not found")
+        return team
+
+    def _validate_student_payload(self, payload: StudentUpsert, current_student_id: int | None = None) -> None:
+        for item in self._list("students"):
+            if item["student_no"] == payload.student_no and item["id"] != current_student_id:
+                raise ValueError("Student number already exists")
+        team = self._ensure_team_exists(payload.team_name)
+        team_advisors = self._normalize_name_list(team.get("advisor_names", []), team.get("lead_advisor_name"))
+        if payload.advisor_name not in team_advisors:
+            raise ValueError("Selected advisor does not belong to the selected team")
+
+    def _validate_team_payload(self, payload: TeamUpsert, current_team_id: int | None = None) -> dict[str, Any]:
+        for item in self._list("teams"):
+            if item["team_code"] == payload.team_code and item["id"] != current_team_id:
+                raise ValueError("Team code already exists")
+            if item["team_name"] == payload.team_name and item["id"] != current_team_id:
+                raise ValueError("Team name already exists")
+        advisor_names = self._normalize_name_list(payload.advisor_names, payload.lead_advisor_name)
+        if not advisor_names:
+            raise ValueError("Team must contain at least one advisor")
+        return {
+            **payload.model_dump(),
+            "advisor_names": advisor_names,
+            "research_directions": self._normalize_name_list(payload.research_directions),
+        }
+
     def _role_lookup(self) -> dict[str, dict[str, Any]]:
         return {item["role_code"]: item for item in self._list("roles")}
 
@@ -394,16 +401,30 @@ class DemoManagementStore:
     def get_permission_catalog(self) -> PermissionCatalogResponse:
         return PermissionCatalogResponse(items=[PermissionOption(**item) for item in PERMISSION_CATALOG])
 
+    def _dict_options(self, dict_type: str) -> list[SelectOption]:
+        return [
+            SelectOption(
+                label=item["label"],
+                value=item["value"],
+                color_type=item.get("color_type"),
+                css_class=item.get("css_class"),
+            )
+            for item in self._postgres_store.list_dict_options(dict_type)
+        ]
+
+    def _dict_option_values(self, dict_type: str) -> list[str]:
+        return [item.value for item in self._dict_options(dict_type)]
+
     def get_system_options(self) -> SystemOptionsResponse:
         return SystemOptionsResponse(
-            account_status_options=[SelectOption(label=item, value=item) for item in ACCOUNT_STATUS_OPTIONS],
-            role_scope_options=[SelectOption(label=item, value=item) for item in ROLE_SCOPE_OPTIONS],
-            integration_direction_options=[SelectOption(label=item, value=item) for item in INTEGRATION_DIRECTION_OPTIONS],
-            integration_cadence_options=[SelectOption(label=item, value=item) for item in INTEGRATION_CADENCE_OPTIONS],
-            integration_status_options=[SelectOption(label=item, value=item) for item in INTEGRATION_STATUS_OPTIONS],
-            audit_status_options=[SelectOption(label=item, value=item) for item in AUDIT_STATUS_OPTIONS],
-            operation_result_options=[SelectOption(**item) for item in OPERATION_RESULT_OPTIONS],
-            sync_status_options=[SelectOption(**item) for item in SYNC_STATUS_OPTIONS],
+            account_status_options=self._dict_options("system_account_status"),
+            role_scope_options=self._dict_options("system_role_scope"),
+            integration_direction_options=self._dict_options("system_integration_direction"),
+            integration_cadence_options=self._dict_options("system_integration_cadence"),
+            integration_status_options=self._dict_options("system_integration_status"),
+            audit_status_options=self._dict_options("system_audit_status"),
+            operation_result_options=self._dict_options("system_operation_result"),
+            sync_status_options=self._dict_options("system_sync_status"),
         )
 
     def get_training_options(self) -> TrainingOptionsResponse:
@@ -421,13 +442,86 @@ class DemoManagementStore:
             }
         )
         return TrainingOptionsResponse(
-            plan_status_options=[SelectOption(label=item, value=item) for item in TRAINING_PLAN_STATUS_OPTIONS],
-            report_cycle_options=[SelectOption(label=item, value=item) for item in TRAINING_REPORT_CYCLE_OPTIONS],
-            report_status_options=[SelectOption(label=item, value=item) for item in TRAINING_REPORT_STATUS_OPTIONS],
-            study_type_options=[SelectOption(label=item, value=item) for item in OUTBOUND_STUDY_TYPE_OPTIONS],
-            approval_status_options=[SelectOption(label=item, value=item) for item in OUTBOUND_APPROVAL_STATUS_OPTIONS],
+            plan_status_options=self._dict_options("training_plan_status"),
+            report_cycle_options=self._dict_options("training_report_cycle"),
+            report_status_options=self._dict_options("training_report_status"),
+            study_type_options=self._dict_options("training_outbound_study_type"),
+            approval_status_options=self._dict_options("training_outbound_approval_status"),
             advisor_options=[SelectOption(label=item, value=item) for item in advisor_values],
             reviewer_options=[SelectOption(label=item, value=item) for item in reviewer_values],
+            student_options=self._training_student_options(),
+        )
+
+    def get_degree_options(self) -> DegreeOptionsResponse:
+        advisor_values = self._advisor_name_values()
+        expert_values = {
+            *[item.get("expert_name") for item in self._list("thesis_reviews") if item.get("expert_name")],
+            *advisor_values,
+            *self._system_user_name_values(),
+        }
+        thesis_options = [
+            SelectOption(label=f'{item["title"]}｜{item["student_name"]}', value=str(item["id"]))
+            for item in sorted(self._list("theses"), key=lambda thesis: thesis["id"])
+        ]
+        return DegreeOptionsResponse(
+            student_options=self._student_option_values(),
+            advisor_options=[SelectOption(label=item, value=item) for item in advisor_values],
+            thesis_options=thesis_options,
+            thesis_status_options=self._dict_options("degree_thesis_status"),
+            blind_review_status_options=self._dict_options("degree_blind_review_status"),
+            defense_status_options=self._dict_options("degree_defense_status"),
+            degree_status_options=self._dict_options("degree_status"),
+            expert_options=self._select_options_from_values(expert_values),
+            review_status_options=self._dict_options("degree_review_status"),
+        )
+
+    def get_recruitment_options(self) -> RecruitmentOptionsResponse:
+        intended_fields = {
+            *[field for team in self._list("teams") for field in team.get("research_directions", []) if field],
+            *[item.get("intended_field") for item in self._list("recruitment_applications") if item.get("intended_field")],
+        }
+        graduation_schools = {item.get("graduation_school") for item in self._list("recruitment_applications") if item.get("graduation_school")}
+        reviewers = {
+            *[item.get("reviewer_name") for item in self._list("recruitment_applications") if item.get("reviewer_name")],
+            *self._advisor_name_values(),
+            *self._system_user_name_values(),
+        }
+        return RecruitmentOptionsResponse(
+            semester_options=self._dict_options("recruitment_semester"),
+            plan_stage_options=self._dict_options("recruitment_plan_stage"),
+            degree_options=self._dict_options("recruitment_degree"),
+            material_status_options=self._dict_options("recruitment_material_status"),
+            application_status_options=self._dict_options("recruitment_application_status"),
+            intended_field_options=self._select_options_from_values(intended_fields),
+            reviewer_options=self._select_options_from_values(reviewers),
+            graduation_school_options=self._select_options_from_values(graduation_schools),
+        )
+
+    def get_student_options(self) -> StudentOptionsResponse:
+        teams = [self._build_team_record(item) for item in self._list("teams")]
+        advisor_values = self._advisor_name_values()
+        department_values = {item.department_name for item in teams if item.department_name}
+        discipline_values = {item.discipline_name for item in teams if item.discipline_name}
+        political_values = {
+            *self._dict_option_values("student_political_status"),
+            *[item.get("political_status") for item in self._list("students") if item.get("political_status")],
+        }
+        return StudentOptionsResponse(
+            status_options=self._dict_options("student_status"),
+            degree_options=self._dict_options("student_degree_type"),
+            advisor_options=[SelectOption(label=item, value=item) for item in advisor_values],
+            team_options=[SelectOption(label=item.team_name, value=item.team_name) for item in teams if item.status != "停用"],
+            team_status_options=self._dict_options("student_team_status"),
+            political_status_options=self._select_options_from_values(political_values),
+            department_options=self._select_options_from_values(department_values),
+            discipline_options=self._select_options_from_values(discipline_values),
+            team_advisor_map=[
+                TeamAdvisorMapItem(
+                    team_name=item.team_name,
+                    advisors=[SelectOption(label=advisor, value=advisor) for advisor in item.advisor_names],
+                )
+                for item in teams
+            ],
         )
 
     def authenticate_system_user(self, username: str, password: str) -> dict[str, Any] | None:
@@ -632,7 +726,13 @@ class DemoManagementStore:
             state_distribution=[StudentStateItem(label=label, count=count) for label, count in distribution.items()],
         )
 
-    def get_students(self, keyword: str | None = None, status: str | None = None, advisor_name: str | None = None) -> StudentManagementResponse:
+    def get_students(
+        self,
+        keyword: str | None = None,
+        status: str | None = None,
+        advisor_name: str | None = None,
+        team_name: str | None = None,
+    ) -> StudentManagementResponse:
         items = list(self._list("students"))
         if keyword:
             term = keyword.lower()
@@ -641,20 +741,56 @@ class DemoManagementStore:
             items = [item for item in items if item["status"] == status]
         if advisor_name:
             items = [item for item in items if item["advisor_name"] == advisor_name]
+        if team_name:
+            items = [item for item in items if item["team_name"] == team_name]
         return StudentManagementResponse(items=[StudentRecord(**item) for item in items], total=len(items))
+
+    def get_teams(
+        self,
+        keyword: str | None = None,
+        status: str | None = None,
+        department_name: str | None = None,
+        lead_advisor_name: str | None = None,
+    ) -> TeamListResponse:
+        items = list(self._list("teams"))
+        if keyword:
+            items = [
+                item for item in items
+                if self._matches_keyword(
+                    item.get("team_code"),
+                    item.get("team_name"),
+                    item.get("department_name"),
+                    item.get("discipline_name"),
+                    item.get("lead_advisor_name"),
+                    *(item.get("research_directions") or []),
+                    keyword=keyword,
+                )
+            ]
+        if status:
+            items = [item for item in items if item["status"] == status]
+        if department_name:
+            items = [item for item in items if item["department_name"] == department_name]
+        if lead_advisor_name:
+            items = [item for item in items if item["lead_advisor_name"] == lead_advisor_name]
+        records = [self._build_team_record(item) for item in items]
+        return TeamListResponse(items=records, total=len(records))
 
     def get_student_stats(self) -> StudentStats:
         distribution = Counter(item["status"] for item in self._list("students"))
+        teams = self._list("teams")
         return StudentStats(
             total_students=len(self._list("students")),
             active_students=distribution.get("在校", 0) + distribution.get("实习中", 0),
             outbound_students=distribution.get("外出研修", 0),
             thesis_students=distribution.get("学位论文阶段", 0),
             advisor_count=len({item["advisor_name"] for item in self._list("students")}),
+            team_total=len(teams),
+            active_team_total=len([item for item in teams if item.get("status") == "启用"]),
         )
 
     def create_student(self, payload: StudentUpsert) -> StudentRecord:
         with self._lock:
+            self._validate_student_payload(payload)
             item = payload.model_dump()
             item["id"] = self._next_id("students")
             self._list("students").insert(0, item)
@@ -664,6 +800,7 @@ class DemoManagementStore:
 
     def update_student(self, student_id: int, payload: StudentUpsert) -> StudentRecord:
         with self._lock:
+            self._validate_student_payload(payload, current_student_id=student_id)
             index, item = self._find_required("students", student_id)
             updated = {**item, **payload.model_dump(), "id": student_id}
             self._list("students")[index] = updated
@@ -677,6 +814,47 @@ class DemoManagementStore:
             self._list("students").pop(index)
             self._record_operation("学生管理", "学生主档", str(student_id), "删除", f'删除学生 {item["full_name"]}')
             self._save()
+
+    def create_team(self, payload: TeamUpsert) -> TeamRecord:
+        with self._lock:
+            item = self._validate_team_payload(payload)
+            item["id"] = self._next_id("teams")
+            self._list("teams").insert(0, item)
+            self._record_operation("学生管理", "团队主数据", str(item["id"]), "新增团队", f'新增团队 {item["team_name"]}')
+            self._save()
+            return self._build_team_record(item)
+
+    def update_team(self, team_id: int, payload: TeamUpsert) -> TeamRecord:
+        with self._lock:
+            index, current = self._find_required("teams", team_id)
+            validated = self._validate_team_payload(payload, current_team_id=team_id)
+            if current["team_name"] != validated["team_name"]:
+                for student in self._list("students"):
+                    if student.get("team_name") == current["team_name"]:
+                        student["team_name"] = validated["team_name"]
+            if any(student.get("team_name") == validated["team_name"] and student.get("advisor_name") not in validated["advisor_names"] for student in self._list("students")):
+                raise ValueError("Current team members contain advisors outside the selected advisor set")
+            updated = {**current, **validated, "id": team_id}
+            self._list("teams")[index] = updated
+            self._record_operation("学生管理", "团队主数据", str(team_id), "编辑团队", f'更新团队 {updated["team_name"]}')
+            self._save()
+            return self._build_team_record(updated)
+
+    def delete_team(self, team_id: int) -> None:
+        with self._lock:
+            index, item = self._find_required("teams", team_id)
+            if any(student.get("team_name") == item["team_name"] for student in self._list("students")):
+                raise ValueError("Team still has assigned students and cannot be deleted")
+            self._list("teams").pop(index)
+            self._record_operation("学生管理", "团队主数据", str(team_id), "删除团队", f'删除团队 {item["team_name"]}')
+            self._save()
+
+    def delete_teams(self, team_ids: list[int]) -> BulkActionResponse:
+        success_count = 0
+        for team_id in team_ids:
+            self.delete_team(team_id)
+            success_count += 1
+        return BulkActionResponse(success_count=success_count)
 
     def get_training_workbench(self) -> TrainingWorkbench:
         outbound_counter = Counter(item["approval_status"] for item in self._list("outbound_studies"))
@@ -941,6 +1119,56 @@ class DemoManagementStore:
             defense_pending_total=len([item for item in self._list("theses") if item["defense_status"] in {"待安排", "未进入"}]),
             degree_granted_total=len([item for item in self._list("theses") if item["degree_status"] == "已授位"]),
         )
+
+    def get_workflow_options(self) -> WorkflowOptionsResponse:
+        applicants = {
+            *[item.get("applicant_name") for item in self._list("workflow_tasks") if item.get("applicant_name")],
+            *[item.get("full_name") for item in self._list("students") if item.get("full_name")],
+        }
+        handlers = {
+            *[item.get("current_handler") for item in self._list("workflow_tasks") if item.get("current_handler")],
+            *self._advisor_name_values(),
+            *self._system_user_name_values(),
+        }
+        return WorkflowOptionsResponse(
+            workflow_name_options=self._select_options_from_values([item.get("workflow_name") for item in self._list("workflow_tasks")]),
+            business_module_options=self._select_options_from_values([item.get("business_module") for item in self._list("workflow_tasks")]),
+            applicant_options=self._select_options_from_values(applicants),
+            handler_options=self._select_options_from_values(handlers),
+            current_node_options=self._select_options_from_values([item.get("current_node") for item in self._list("workflow_tasks")]),
+            priority_options=self._dict_options("workflow_priority"),
+            status_options=self._dict_options("workflow_status"),
+        )
+
+    def get_dict_types(self, keyword: str | None = None, status: str | None = None) -> DictTypeListResponse:
+        records = self._postgres_store.list_dict_types(keyword=keyword, status=status)
+        return DictTypeListResponse(items=[DictTypeRecord(**item) for item in records], total=len(records))
+
+    def create_dict_type(self, payload: DictTypeUpsert) -> DictTypeRecord:
+        record = self._postgres_store.create_dict_type(payload.model_dump())
+        return DictTypeRecord(**record)
+
+    def update_dict_type(self, dict_type_id: int, payload: DictTypeUpsert) -> DictTypeRecord:
+        record = self._postgres_store.update_dict_type(dict_type_id, payload.model_dump())
+        return DictTypeRecord(**record)
+
+    def delete_dict_type(self, dict_type_id: int) -> None:
+        self._postgres_store.delete_dict_type(dict_type_id)
+
+    def get_dict_data(self, keyword: str | None = None, dict_type: str | None = None, status: str | None = None) -> DictDataListResponse:
+        records = self._postgres_store.list_dict_data(keyword=keyword, dict_type=dict_type, status=status)
+        return DictDataListResponse(items=[DictDataRecord(**item) for item in records], total=len(records))
+
+    def create_dict_data(self, payload: DictDataUpsert) -> DictDataRecord:
+        record = self._postgres_store.create_dict_data(payload.model_dump())
+        return DictDataRecord(**record)
+
+    def update_dict_data(self, dict_data_id: int, payload: DictDataUpsert) -> DictDataRecord:
+        record = self._postgres_store.update_dict_data(dict_data_id, payload.model_dump())
+        return DictDataRecord(**record)
+
+    def delete_dict_data(self, dict_data_id: int) -> None:
+        self._postgres_store.delete_dict_data(dict_data_id)
 
     def get_roles(self, keyword: str | None = None, scope_name: str | None = None, permission: str | None = None) -> RoleListResponse:
         items = list(self._list("roles"))

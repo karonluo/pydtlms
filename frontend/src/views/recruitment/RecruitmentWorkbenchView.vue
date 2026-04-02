@@ -2,11 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import TableRowActions from '../../components/table/TableRowActions.vue'
+import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 
 import {
   createRecruitmentApplication,
   createRecruitmentPlan,
   deleteRecruitmentApplication,
+  getRecruitmentOptions,
   getRecruitmentStats,
   getRecruitmentWorkbench,
   listRecruitmentApplications,
@@ -15,6 +18,7 @@ import {
   updateRecruitmentPlan,
   type RecruitApplicationRecord,
   type RecruitApplicationUpsert,
+  type RecruitmentOptions,
   type RecruitPlanRecord,
   type RecruitPlanUpsert,
   type RecruitStats,
@@ -30,14 +34,18 @@ const stageMeta = [
   { title: '预录取', detail: '拟录取、候补和结果确认' },
 ]
 
-const semesterOptions = ['春', '秋']
-const planStageOptions = ['报名配置', '资格审核', '评分推荐', '材料评分', '面试执行', '预录取']
-const materialStatusOptions = ['材料齐全', '待补材料', '已退回修改']
-const applicationStatusOptions = ['报名已提交', '资格审核通过', '材料评分中', '面试待安排', '面试完成', '预录取', '同意录取', '不录取']
-const degreeOptions = ['硕士', '本科', '博士']
-
 const plans = ref<RecruitPlanRecord[]>([])
 const applications = ref<RecruitApplicationRecord[]>([])
+const options = ref<RecruitmentOptions>({
+  semester_options: [],
+  plan_stage_options: [],
+  degree_options: [],
+  material_status_options: [],
+  application_status_options: [],
+  intended_field_options: [],
+  reviewer_options: [],
+  graduation_school_options: [],
+})
 const workbench = ref<RecruitWorkbench>({ plans: [], pipeline: [], pending_tasks: [] })
 const stats = ref<RecruitStats>({
   plan_count: 0,
@@ -58,6 +66,8 @@ const applicationSubmitting = ref(false)
 const selectedPlanId = ref<number | undefined>()
 const editingPlanId = ref<number | null>(null)
 const editingApplicationId = ref<number | null>(null)
+const applicationStatusColors = ref<DictColorMap>({})
+const materialStatusColors = ref<DictColorMap>({})
 
 const planFormRef = ref<FormInstance>()
 const applicationFormRef = ref<FormInstance>()
@@ -136,32 +146,20 @@ const currentStepIndex = computed(() => {
 })
 
 function applicationTagType(status: string) {
-  if (['预录取', '同意录取'].includes(status)) {
-    return 'success'
-  }
-  if (['资格审核通过', '材料评分中', '面试完成'].includes(status)) {
-    return 'warning'
-  }
-  if (status === '不录取') {
-    return 'danger'
-  }
-  return 'info'
+  return resolveDictTagType(status, applicationStatusColors.value)
 }
 
 function materialTagType(status: string) {
-  if (status === '材料齐全') {
-    return 'success'
-  }
-  if (status === '待补材料') {
-    return 'warning'
-  }
-  return 'danger'
+  return resolveDictTagType(status, materialStatusColors.value)
 }
 
 async function loadOverview() {
-  const [statsResponse, workbenchResponse] = await Promise.all([getRecruitmentStats(), getRecruitmentWorkbench()])
+  const [statsResponse, workbenchResponse, optionsResponse] = await Promise.all([getRecruitmentStats(), getRecruitmentWorkbench(), getRecruitmentOptions()])
   stats.value = statsResponse.data
   workbench.value = workbenchResponse.data
+  options.value = optionsResponse.data
+  applicationStatusColors.value = buildDictColorMap(optionsResponse.data.application_status_options)
+  materialStatusColors.value = buildDictColorMap(optionsResponse.data.material_status_options)
 }
 
 async function loadPlans() {
@@ -417,9 +415,9 @@ onMounted(() => {
               <el-tag :type="scope.row.is_open ? 'success' : 'info'">{{ scope.row.is_open ? '开放中' : '已关闭' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right">
+          <el-table-column label="操作" width="96" align="center">
             <template #default="scope">
-              <el-button link type="primary" @click.stop="openEditPlanDialog(scope.row)">编辑</el-button>
+              <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditPlanDialog }]" />
             </template>
           </el-table-column>
         </el-table>
@@ -462,7 +460,7 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="申请状态">
           <el-select v-model="applicationFilters.status" placeholder="全部状态" clearable style="width: 180px">
-            <el-option v-for="item in applicationStatusOptions" :key="item" :label="item" :value="item" />
+            <el-option v-for="item in options.application_status_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -489,10 +487,9 @@ onMounted(() => {
         </el-table-column>
         <el-table-column prop="reviewer_name" label="审核人" width="110" />
         <el-table-column prop="final_score" label="得分" width="90" />
-        <el-table-column label="操作" fixed="right" width="170">
+        <el-table-column label="操作" width="118" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditApplicationDialog(scope.row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDeleteApplication(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditApplicationDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteApplication }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -509,12 +506,12 @@ onMounted(() => {
           </el-form-item>
           <el-form-item label="学期" prop="semester">
             <el-select v-model="planForm.semester" placeholder="请选择学期">
-              <el-option v-for="item in semesterOptions" :key="item" :label="item" :value="item" />
+              <el-option v-for="item in options.semester_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="当前阶段" prop="current_stage">
             <el-select v-model="planForm.current_stage" placeholder="请选择阶段">
-              <el-option v-for="item in planStageOptions" :key="item" :label="item" :value="item" />
+              <el-option v-for="item in options.plan_stage_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="计划名额" prop="target_quota">
@@ -549,28 +546,34 @@ onMounted(() => {
             <el-input v-model="applicationForm.student_name" placeholder="请输入姓名" />
           </el-form-item>
           <el-form-item label="毕业院校" prop="graduation_school">
-            <el-input v-model="applicationForm.graduation_school" placeholder="请输入毕业院校" />
+            <el-select v-model="applicationForm.graduation_school" filterable allow-create default-first-option placeholder="请选择或录入毕业院校">
+              <el-option v-for="item in options.graduation_school_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
           </el-form-item>
           <el-form-item label="最高学历" prop="highest_degree">
             <el-select v-model="applicationForm.highest_degree" placeholder="请选择学历">
-              <el-option v-for="item in degreeOptions" :key="item" :label="item" :value="item" />
+              <el-option v-for="item in options.degree_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="研究方向" prop="intended_field">
-            <el-input v-model="applicationForm.intended_field" placeholder="请输入研究方向" />
+            <el-select v-model="applicationForm.intended_field" filterable allow-create default-first-option placeholder="请选择研究方向">
+              <el-option v-for="item in options.intended_field_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
           </el-form-item>
           <el-form-item label="材料状态" prop="material_status">
             <el-select v-model="applicationForm.material_status" placeholder="请选择材料状态">
-              <el-option v-for="item in materialStatusOptions" :key="item" :label="item" :value="item" />
+              <el-option v-for="item in options.material_status_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="申请状态" prop="application_status">
             <el-select v-model="applicationForm.application_status" placeholder="请选择申请状态">
-              <el-option v-for="item in applicationStatusOptions" :key="item" :label="item" :value="item" />
+              <el-option v-for="item in options.application_status_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="审核人">
-            <el-input v-model="applicationForm.reviewer_name" placeholder="请输入审核人" />
+            <el-select v-model="applicationForm.reviewer_name" filterable allow-create default-first-option placeholder="请选择审核人">
+              <el-option v-for="item in options.reviewer_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
           </el-form-item>
           <el-form-item label="材料得分">
             <el-input-number v-model="applicationForm.final_score" :min="0" :max="100" :precision="1" controls-position="right" />

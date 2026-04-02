@@ -10,6 +10,7 @@ const StudentsView = () => import('../views/students/StudentsView.vue')
 const TrainingView = () => import('../views/training/TrainingView.vue')
 const DegreeView = () => import('../views/degree/DegreeView.vue')
 const SystemView = () => import('../views/system/SystemView.vue')
+const DictView = () => import('../views/system/DictView.vue')
 const WorkflowCenterView = () => import('../views/workflow/WorkflowCenterView.vue')
 const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
@@ -25,7 +26,9 @@ const router = createRouter({
         { path: '', redirect: '/dashboard' },
         { path: 'dashboard', component: DashboardView, meta: { title: '驾驶舱' } },
         { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生管理' } },
-        { path: 'students', component: StudentsView, meta: { title: '学生管理' } },
+        { path: 'students', redirect: '/students/records' },
+        { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records' } },
+        { path: 'students/teams', component: StudentsView, meta: { title: '团队管理', section: 'teams' } },
         { path: 'training', redirect: '/training/plans' },
         { path: 'training/plans', component: TrainingView, meta: { title: '培养方案管理', section: 'plans' } },
         { path: 'training/reports', component: TrainingView, meta: { title: '科研报告管理', section: 'reports' } },
@@ -37,6 +40,8 @@ const router = createRouter({
         { path: 'system', redirect: '/system/users' },
         { path: 'system/users', component: SystemView, meta: { title: '系统用户管理', section: 'users' } },
         { path: 'system/roles', component: SystemView, meta: { title: '角色权限管理', section: 'roles' } },
+        { path: 'system/dict-types', component: DictView, meta: { title: '字典类型管理', section: 'dict-types' } },
+        { path: 'system/dict-data', component: DictView, meta: { title: '字典数据管理', section: 'dict-data' } },
         { path: 'system/audit', component: SystemView, meta: { title: '审计策略管理', section: 'audit' } },
         { path: 'system/integrations', component: SystemView, meta: { title: '集成链路管理', section: 'integrations' } },
         { path: 'system/operation-logs', component: SystemView, meta: { title: '操作日志查询', section: 'operation-logs' } },
@@ -49,11 +54,20 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const authStore = useAuthStore()
+  const hasAccessToken = Boolean(localStorage.getItem('dtlms-access-token'))
+
+  if (to.path === '/login' && hasAccessToken && authStore.sessionState !== 'ready') {
+    try {
+      await authStore.hydrateSession()
+    } catch {
+      // Let unauthenticated users stay on login.
+    }
+  }
 
   if (!to.meta.public) {
     if (!authStore.isAuthenticated) {
       authStore.rememberRedirectTarget(to.fullPath)
-      if (localStorage.getItem('dtlms-access-token') && authStore.sessionState !== 'ready') {
+      if (hasAccessToken && authStore.sessionState !== 'ready') {
         try {
           await authStore.hydrateSession()
         } catch {
@@ -67,7 +81,8 @@ router.beforeEach(async (to) => {
   }
 
   if (to.path === '/login' && authStore.isAuthenticated) {
-    return authStore.consumeRedirectTarget() || '/dashboard'
+    const queryRedirect = typeof to.query.redirect === 'string' ? to.query.redirect : ''
+    return authStore.consumeRedirectTarget() || queryRedirect || '/dashboard'
   }
 
   return true

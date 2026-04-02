@@ -4,6 +4,16 @@ import http from './http'
 export type SelectOption = {
   label: string
   value: string
+  color_type?: string | null
+  css_class?: string | null
+}
+
+
+export type TrainingStudentOption = {
+  student_no: string
+  student_name: string
+  advisor_name: string
+  label: string
 }
 
 
@@ -63,6 +73,7 @@ export type TrainingOptions = {
   approval_status_options: SelectOption[]
   advisor_options: SelectOption[]
   reviewer_options: SelectOption[]
+  student_options: TrainingStudentOption[]
 }
 
 

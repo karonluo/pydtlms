@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -24,7 +24,12 @@ async function submit() {
     ElMessage.success('登录成功')
     const queryRedirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
     const redirect = queryRedirect || authStore.consumeRedirectTarget() || '/dashboard'
-    await router.replace(redirect === '/login' ? '/dashboard' : redirect)
+    const target = redirect === '/login' ? '/dashboard' : redirect
+    await router.replace(target)
+    await nextTick()
+    if (router.currentRoute.value.path === '/login' || window.location.pathname === '/login') {
+      window.location.replace(target)
+    }
   } catch {
     ElMessage.error(authStore.sessionError || '登录失败')
   } finally {

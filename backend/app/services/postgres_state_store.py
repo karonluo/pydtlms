@@ -37,9 +37,11 @@ class PostgresStateStore:
     SQL_FILES: tuple[str, ...] = (
         "000_create_database.sql",
         "010_init_schema.sql",
+        "015_team_schema_migration.sql",
         "020_views.sql",
         "030_seed_rbac.sql",
         "040_runtime_store.sql",
+        "050_dict_schema.sql",
     )
 
     def __init__(self) -> None:
@@ -113,7 +115,7 @@ class PostgresStateStore:
                             state[dataset] = rows
                     return state
         except Exception as exc:
-            logger.warning("Load state from PostgreSQL failed, fallback to JSON snapshot: %s", exc)
+            logger.warning("Load state from PostgreSQL failed: %s", exc)
             return None
 
     def save_state(self, state: dict[str, Any]) -> None:
@@ -150,7 +152,8 @@ class PostgresStateStore:
     def _seed_relational_tables(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
         self._seed_users_and_roles(cur, state)
         advisor_map = self._seed_advisors(cur, state)
-        student_map = self._seed_students(cur, state, advisor_map)
+        team_map = self._seed_teams(cur, state, advisor_map)
+        student_map = self._seed_students(cur, state, advisor_map, team_map)
         plan_map = self._seed_recruitment(cur, state)
         training_plan_map = self._seed_training(cur, state, student_map, advisor_map)
         thesis_map = self._seed_degree(cur, state, student_map, advisor_map)
@@ -217,16 +220,67 @@ class PostgresStateStore:
             advisor_map[name] = index
         return advisor_map
 
-    def _seed_students(self, cur: psycopg.Cursor[Any], state: dict[str, Any], advisor_map: dict[str, int]) -> dict[str, int]:
+    def _seed_teams(self, cur: psycopg.Cursor[Any], state: dict[str, Any], advisor_map: dict[str, int]) -> dict[str, int]:
+        cur.execute("TRUNCATE TABLE dtlms_student_team_history, dtlms_team_advisors, dtlms_teams RESTART IDENTITY CASCADE")
+        team_map: dict[str, int] = {}
+        for item in state.get("teams", []):
+            team_id = int(item["id"])
+            lead_advisor_name = item.get("lead_advisor_name")
+            lead_advisor_id = advisor_map.get(lead_advisor_name) if lead_advisor_name else None
+            cur.execute(
+                """
+                INSERT INTO dtlms_teams (
+                    id, team_code, team_name, department_name, discipline_name, lead_advisor_id,
+                    research_directions, team_status, established_on, description, is_deleted
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                """,
+                (
+                    team_id,
+                    item["team_code"],
+                    item["team_name"],
+                    item.get("department_name") or "未分配院系",
+                    item.get("discipline_name"),
+                    lead_advisor_id,
+                    self._normalize_research_directions(item.get("research_directions")),
+                    self._map_team_status(item.get("status", "启用")),
+                    item.get("established_on"),
+                    item.get("description"),
+                ),
+            )
+            team_map[item["team_name"]] = team_id
+
+            advisor_names = self._normalize_name_list(item.get("advisor_names"))
+            if lead_advisor_name and lead_advisor_name not in advisor_names:
+                advisor_names.insert(0, lead_advisor_name)
+
+            inserted_advisors: set[int] = set()
+            for advisor_name in advisor_names:
+                advisor_id = advisor_map.get(advisor_name)
+                if not advisor_id or advisor_id in inserted_advisors:
+                    continue
+                inserted_advisors.add(advisor_id)
+                advisor_role = "lead" if advisor_name == lead_advisor_name else "member"
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_team_advisors (
+                        team_id, advisor_id, advisor_role, joined_on, left_on, is_deleted
+                    ) VALUES (%s, %s, %s, %s, NULL, FALSE)
+                    """,
+                    (team_id, advisor_id, advisor_role, item.get("established_on")),
+                )
+        return team_map
+
+    def _seed_students(self, cur: psycopg.Cursor[Any], state: dict[str, Any], advisor_map: dict[str, int], team_map: dict[str, int]) -> dict[str, int]:
         cur.execute("TRUNCATE TABLE dtlms_students RESTART IDENTITY CASCADE")
         student_map: dict[str, int] = {}
         for item in state.get("students", []):
             status = self._map_student_status(item.get("status", "在校"))
+            team_id = team_map.get(item.get("team_name")) if item.get("team_name") else None
             cur.execute(
                 """
                 INSERT INTO dtlms_students (
                     id, student_no, full_name, gender, political_status, phone_number, identity_no,
-                    enrollment_year, degree_type, team_name, current_status, primary_advisor_id, is_deleted
+                    enrollment_year, degree_type, team_id, current_status, primary_advisor_id, is_deleted
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
@@ -239,12 +293,20 @@ class PostgresStateStore:
                     f"ID-{item['student_no']}",
                     int(item["enrollment_year"]),
                     item["degree_type"],
-                    item.get("team_name"),
+                    team_id,
                     status,
                     advisor_map.get(item.get("advisor_name")),
                 ),
             )
             student_map[item["student_no"]] = int(item["id"])
+            if team_id:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_student_team_history (student_id, team_id, start_date, end_date, change_reason)
+                    VALUES (%s, %s, %s, NULL, %s)
+                    """,
+                    (int(item["id"]), team_id, f"{item['enrollment_year']}-09-01", "初始化导入"),
+                )
             advisor_id = advisor_map.get(item.get("advisor_name"))
             if advisor_id:
                 cur.execute(
@@ -584,9 +646,274 @@ class PostgresStateStore:
             return {str(row["key"]): row["id"] for row in rows}
         return {str(row[1]): row[0] for row in rows}
 
+    def list_dict_types(self, keyword: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                where_clauses = ["t.is_deleted = FALSE"]
+                params: list[Any] = []
+                if status:
+                    where_clauses.append("t.status = %s")
+                    params.append(status)
+                if keyword:
+                    where_clauses.append("(t.dict_name ILIKE %s OR t.dict_type ILIKE %s)")
+                    params.extend([f"%{keyword}%", f"%{keyword}%"])
+                sql_text = f"""
+                    SELECT t.id, t.dict_name, t.dict_type, t.status, t.remark, COUNT(d.id) AS data_count
+                    FROM dtlms_dict_types t
+                    LEFT JOIN dtlms_dict_data d ON d.dict_type_id = t.id AND d.is_deleted = FALSE
+                    WHERE {' AND '.join(where_clauses)}
+                    GROUP BY t.id
+                    ORDER BY t.id DESC
+                """
+                cur.execute(sql_text, params)
+                return [self._normalize_dict_row(dict(row) | {"data_count": int(row["data_count"])} ) for row in cur.fetchall()]
+
+    def list_dict_data(self, keyword: str | None = None, dict_type: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                where_clauses = ["d.is_deleted = FALSE", "t.is_deleted = FALSE"]
+                params: list[Any] = []
+                if dict_type:
+                    where_clauses.append("d.dict_type = %s")
+                    params.append(dict_type)
+                if status:
+                    where_clauses.append("d.status = %s")
+                    params.append(status)
+                if keyword:
+                    where_clauses.append("(d.label ILIKE %s OR d.value ILIKE %s OR d.dict_type ILIKE %s)")
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql_text = f"""
+                    SELECT d.id, d.dict_type, t.dict_name, d.label, d.value, d.sort_order, d.status, d.color_type, d.css_class, d.remark
+                    FROM dtlms_dict_data d
+                    JOIN dtlms_dict_types t ON t.id = d.dict_type_id
+                    WHERE {' AND '.join(where_clauses)}
+                    ORDER BY d.dict_type ASC, d.sort_order ASC, d.id ASC
+                """
+                cur.execute(sql_text, params)
+                return [self._normalize_dict_row(dict(row)) for row in cur.fetchall()]
+
+    def list_dict_options(self, dict_type: str) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT label, value, color_type, css_class
+                    FROM dtlms_dict_data
+                    WHERE is_deleted = FALSE AND status = '启用' AND dict_type = %s
+                    ORDER BY sort_order ASC, id ASC
+                    """,
+                    (dict_type,),
+                )
+                return [self._normalize_dict_row(dict(row)) for row in cur.fetchall()]
+
+    def create_dict_type(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM dtlms_dict_types WHERE is_deleted = FALSE AND dict_type = %s", (payload["dict_type"],))
+                if cur.fetchone():
+                    raise ValueError("Dict type already exists")
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_dict_types (dict_name, dict_type, status, remark)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, dict_name, dict_type, status, remark
+                    """,
+                    (payload["dict_name"], payload["dict_type"], payload["status"], payload.get("remark")),
+                )
+                record = self._normalize_dict_row(dict(cur.fetchone()))
+            conn.commit()
+        return record | {"data_count": 0}
+
+    def update_dict_type(self, dict_type_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, dict_type FROM dtlms_dict_types WHERE id = %s AND is_deleted = FALSE", (dict_type_id,))
+                current = cur.fetchone()
+                if not current:
+                    raise KeyError(dict_type_id)
+                cur.execute(
+                    "SELECT id FROM dtlms_dict_types WHERE is_deleted = FALSE AND dict_type = %s AND id <> %s",
+                    (payload["dict_type"], dict_type_id),
+                )
+                if cur.fetchone():
+                    raise ValueError("Dict type already exists")
+                cur.execute(
+                    """
+                    UPDATE dtlms_dict_types
+                    SET dict_name = %s, dict_type = %s, status = %s, remark = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, dict_name, dict_type, status, remark
+                    """,
+                    (payload["dict_name"], payload["dict_type"], payload["status"], payload.get("remark"), dict_type_id),
+                )
+                record = self._normalize_dict_row(dict(cur.fetchone()))
+                if current["dict_type"] != payload["dict_type"]:
+                    cur.execute(
+                        "UPDATE dtlms_dict_data SET dict_type = %s, updated_at = CURRENT_TIMESTAMP WHERE dict_type_id = %s AND is_deleted = FALSE",
+                        (payload["dict_type"], dict_type_id),
+                    )
+                cur.execute("SELECT COUNT(*) AS count FROM dtlms_dict_data WHERE dict_type_id = %s AND is_deleted = FALSE", (dict_type_id,))
+                count_row = cur.fetchone()
+            conn.commit()
+        return record | {"data_count": int(count_row["count"])}
+
+    def delete_dict_type(self, dict_type_id: int) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM dtlms_dict_types WHERE id = %s AND is_deleted = FALSE", (dict_type_id,))
+                if not cur.fetchone():
+                    raise KeyError(dict_type_id)
+                cur.execute("SELECT COUNT(*) FROM dtlms_dict_data WHERE dict_type_id = %s AND is_deleted = FALSE", (dict_type_id,))
+                if int(cur.fetchone()[0]) > 0:
+                    raise ValueError("Dict type still has dict data")
+                cur.execute("UPDATE dtlms_dict_types SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (dict_type_id,))
+            conn.commit()
+
+    def create_dict_data(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, dict_name FROM dtlms_dict_types WHERE dict_type = %s AND is_deleted = FALSE",
+                    (payload["dict_type"],),
+                )
+                dict_type_row = cur.fetchone()
+                if not dict_type_row:
+                    raise ValueError("Dict type does not exist")
+                cur.execute(
+                    "SELECT id FROM dtlms_dict_data WHERE dict_type = %s AND value = %s AND is_deleted = FALSE",
+                    (payload["dict_type"], payload["value"]),
+                )
+                if cur.fetchone():
+                    raise ValueError("Dict value already exists")
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_dict_data (dict_type_id, dict_type, label, value, sort_order, status, color_type, css_class, remark)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id, dict_type, label, value, sort_order, status, color_type, css_class, remark
+                    """,
+                    (
+                        int(dict_type_row["id"]),
+                        payload["dict_type"],
+                        payload["label"],
+                        payload["value"],
+                        int(payload.get("sort_order", 0)),
+                        payload["status"],
+                        payload.get("color_type"),
+                        payload.get("css_class"),
+                        payload.get("remark"),
+                    ),
+                )
+                record = self._normalize_dict_row(dict(cur.fetchone()))
+            conn.commit()
+        return record | {"dict_name": dict_type_row["dict_name"]}
+
+    def update_dict_data(self, dict_data_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM dtlms_dict_data WHERE id = %s AND is_deleted = FALSE", (dict_data_id,))
+                if not cur.fetchone():
+                    raise KeyError(dict_data_id)
+                cur.execute(
+                    "SELECT id, dict_name FROM dtlms_dict_types WHERE dict_type = %s AND is_deleted = FALSE",
+                    (payload["dict_type"],),
+                )
+                dict_type_row = cur.fetchone()
+                if not dict_type_row:
+                    raise ValueError("Dict type does not exist")
+                cur.execute(
+                    "SELECT id FROM dtlms_dict_data WHERE dict_type = %s AND value = %s AND is_deleted = FALSE AND id <> %s",
+                    (payload["dict_type"], payload["value"], dict_data_id),
+                )
+                if cur.fetchone():
+                    raise ValueError("Dict value already exists")
+                cur.execute(
+                    """
+                    UPDATE dtlms_dict_data
+                    SET dict_type_id = %s,
+                        dict_type = %s,
+                        label = %s,
+                        value = %s,
+                        sort_order = %s,
+                        status = %s,
+                        color_type = %s,
+                        css_class = %s,
+                        remark = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, dict_type, label, value, sort_order, status, color_type, css_class, remark
+                    """,
+                    (
+                        int(dict_type_row["id"]),
+                        payload["dict_type"],
+                        payload["label"],
+                        payload["value"],
+                        int(payload.get("sort_order", 0)),
+                        payload["status"],
+                        payload.get("color_type"),
+                        payload.get("css_class"),
+                        payload.get("remark"),
+                        dict_data_id,
+                    ),
+                )
+                record = self._normalize_dict_row(dict(cur.fetchone()))
+            conn.commit()
+        return record | {"dict_name": dict_type_row["dict_name"]}
+
+    @staticmethod
+    def _normalize_dict_row(row: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in row.items():
+            if isinstance(value, str):
+                normalized[key] = value.strip()
+            else:
+                normalized[key] = value
+        return normalized
+
+    def delete_dict_data(self, dict_data_id: int) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM dtlms_dict_data WHERE id = %s AND is_deleted = FALSE", (dict_data_id,))
+                if not cur.fetchone():
+                    raise KeyError(dict_data_id)
+                cur.execute("UPDATE dtlms_dict_data SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (dict_data_id,))
+            conn.commit()
+
     @staticmethod
     def _json_payload(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _normalize_name_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return []
+
+    @staticmethod
+    def _normalize_research_directions(value: Any) -> str | None:
+        if isinstance(value, list):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return "、".join(items) if items else None
+        if isinstance(value, str):
+            return value.strip() or None
+        return None
 
     @staticmethod
     def _map_student_status(value: str) -> str:
@@ -597,6 +924,16 @@ class PostgresStateStore:
             "实习中": "internship",
         }
         return mapping.get(value, "enrolled")
+
+    @staticmethod
+    def _map_team_status(value: str) -> str:
+        mapping = {
+            "启用": "active",
+            "停用": "inactive",
+            "筹建": "planning",
+            "归档": "archived",
+        }
+        return mapping.get(value, "active")
 
     @staticmethod
     def _map_training_plan_status(value: str) -> str:

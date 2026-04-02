@@ -2,19 +2,20 @@
   "counters": {
     "students": 1000,
     "recruitment_plans": 100,
-    "recruitment_applications": 5000,
+    "recruitment_applications": 5001,
     "training_plans": 300,
     "scientific_reports": 800,
     "outbound_studies": 120,
-    "theses": 400,
-    "thesis_reviews": 900,
+    "theses": 401,
+    "thesis_reviews": 901,
     "roles": 30,
     "system_users": 300,
     "audit_policies": 60,
     "integrations": 40,
-    "operation_logs": 10006,
+    "operation_logs": 10015,
     "sync_logs": 600,
-    "workflow_tasks": 2000
+    "workflow_tasks": 2001,
+    "teams": 3
   },
   "profiles": {
     "mentor.demo": {
@@ -276,6 +277,18 @@
   ],
   "theses": [
     {
+      "student_no": "D20220009",
+      "student_name": "赵嘉霖",
+      "advisor_name": "刘亚",
+      "title": "联调论文主档",
+      "plagiarism_rate": 15.6,
+      "thesis_status": "待查重",
+      "blind_review_status": "待送审",
+      "defense_status": "未进入",
+      "degree_status": "待申请",
+      "id": 401
+    },
+    {
       "id": 3,
       "title": "多源日志语义融合与审计异常检测",
       "student_no": "D20220009",
@@ -313,6 +326,15 @@
     }
   ],
   "thesis_reviews": [
+    {
+      "thesis_id": 401,
+      "thesis_title": "联调论文主档",
+      "expert_name": "专家A",
+      "review_score": 93.5,
+      "review_status": "已提交",
+      "review_comment": "联调评审-更新",
+      "id": 901
+    },
     {
       "id": 2,
       "thesis_id": 3,
@@ -413,7 +435,7 @@
       "full_name": "系统管理员",
       "role_code": "platform_admin",
       "phone_number": "13800000000",
-      "last_login_at": "2026-04-02 10:19:05",
+      "last_login_at": "2026-04-02 17:40:59",
       "password_hash": "$pbkdf2-sha256$29000$2pvTmhMiZCxFiNFayzmHsA$ZIQxVGOYcZl/RPoJTZ4DRIStaKf0UUFUw86QHKTr47w",
       "account_status": "启用",
       "department_name": "学科与研究生管理处"
@@ -472,6 +494,105 @@
     }
   ],
   "operation_logs": [
+    {
+      "id": 10015,
+      "operated_at": "2026-04-02 16:43:01",
+      "operator_username": "admin",
+      "module_name": "招生管理",
+      "entity_name": "报名申请",
+      "entity_id": "5001",
+      "action": "删除",
+      "result": "success",
+      "summary": "删除报名申请 联调考生"
+    },
+    {
+      "id": 10014,
+      "operated_at": "2026-04-02 16:42:57",
+      "operator_username": "admin",
+      "module_name": "招生管理",
+      "entity_name": "报名申请",
+      "entity_id": "5001",
+      "action": "编辑",
+      "result": "success",
+      "summary": "更新报名申请 联调考生"
+    },
+    {
+      "id": 10013,
+      "operated_at": "2026-04-02 16:42:54",
+      "operator_username": "admin",
+      "module_name": "招生管理",
+      "entity_name": "报名申请",
+      "entity_id": "5001",
+      "action": "新增",
+      "result": "success",
+      "summary": "新增报名申请 联调考生"
+    },
+    {
+      "id": 10012,
+      "operated_at": "2026-04-02 16:42:50",
+      "operator_username": "admin",
+      "module_name": "学位管理",
+      "entity_name": "盲审意见",
+      "entity_id": "901",
+      "action": "编辑",
+      "result": "success",
+      "summary": "更新盲审意见 专家A"
+    },
+    {
+      "id": 10011,
+      "operated_at": "2026-04-02 16:42:47",
+      "operator_username": "admin",
+      "module_name": "学位管理",
+      "entity_name": "盲审意见",
+      "entity_id": "901",
+      "action": "新增",
+      "result": "success",
+      "summary": "新增盲审意见 专家A"
+    },
+    {
+      "id": 10010,
+      "operated_at": "2026-04-02 16:42:44",
+      "operator_username": "admin",
+      "module_name": "学位管理",
+      "entity_name": "论文主档",
+      "entity_id": "401",
+      "action": "新增",
+      "result": "success",
+      "summary": "新增论文 赵嘉霖"
+    },
+    {
+      "id": 10009,
+      "operated_at": "2026-04-02 16:42:40",
+      "operator_username": "admin",
+      "module_name": "审批中心",
+      "entity_name": "审批任务",
+      "entity_id": "2001",
+      "action": "删除",
+      "result": "success",
+      "summary": "删除审批任务 联调审批任务-已更新"
+    },
+    {
+      "id": 10008,
+      "operated_at": "2026-04-02 16:42:36",
+      "operator_username": "admin",
+      "module_name": "审批中心",
+      "entity_name": "审批任务",
+      "entity_id": "2001",
+      "action": "编辑",
+      "result": "success",
+      "summary": "更新审批任务 联调审批任务-已更新"
+    },
+    {
+      "id": 10007,
+      "operated_at": "2026-04-02 16:42:33",
+      "operator_username": "admin",
+      "module_name": "审批中心",
+      "entity_name": "审批任务",
+      "entity_id": "2001",
+      "action": "新增",
+      "result": "success",
+      "summary": "新增审批任务 联调审批任务"
+    },
     {
       "id": 10006,
       "action": "编辑",
@@ -629,6 +750,53 @@
       "latest_comment": "待导师确认联合培养计划。",
       "business_module": "培养管理",
       "current_handler": "刘亚"
+    }
+  ],
+  "teams": [
+    {
+      "id": 1,
+      "team_code": "TEAM-AUTO-001",
+      "team_name": "工业软件团队",
+      "department_name": "未分配院系",
+      "discipline_name": "未分配学科",
+      "lead_advisor_name": "徐素天",
+      "advisor_names": [
+        "徐素天"
+      ],
+      "research_directions": [],
+      "status": "启用",
+      "established_on": null,
+      "description": "由历史学生主档自动生成的团队记录。"
+    },
+    {
+      "id": 2,
+      "team_code": "TEAM-AUTO-002",
+      "team_name": "数据智能团队",
+      "department_name": "未分配院系",
+      "discipline_name": "未分配学科",
+      "lead_advisor_name": "袁野",
+      "advisor_names": [
+        "袁野"
+      ],
+      "research_directions": [],
+      "status": "启用",
+      "established_on": null,
+      "description": "由历史学生主档自动生成的团队记录。"
+    },
+    {
+      "id": 3,
+      "team_code": "TEAM-AUTO-003",
+      "team_name": "智能制造团队",
+      "department_name": "未分配院系",
+      "discipline_name": "未分配学科",
+      "lead_advisor_name": "刘亚",
+      "advisor_names": [
+        "刘亚"
+      ],
+      "research_directions": [],
+      "status": "启用",
+      "established_on": null,
+      "description": "由历史学生主档自动生成的团队记录。"
     }
   ]
 }

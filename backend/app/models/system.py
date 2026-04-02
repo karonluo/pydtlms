@@ -107,3 +107,28 @@ class SystemConfig(Base, TimestampMixin):
     config_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     config_value: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+
+
+class DictType(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "dtlms_dict_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dict_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    dict_type: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="启用")
+    remark: Mapped[str | None] = mapped_column(Text)
+
+
+class DictData(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "dtlms_dict_data"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dict_type_id: Mapped[int] = mapped_column(ForeignKey("dtlms_dict_types.id"), nullable=False)
+    dict_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[str] = mapped_column(String(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="启用")
+    color_type: Mapped[str | None] = mapped_column(String(32))
+    css_class: Mapped[str | None] = mapped_column(String(128))
+    remark: Mapped[str | None] = mapped_column(Text)

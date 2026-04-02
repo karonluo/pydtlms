@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 class SelectOption(BaseModel):
     label: str
     value: str
+    color_type: str | None = None
+    css_class: str | None = None
 
 
 class PermissionOption(BaseModel):
@@ -135,6 +137,56 @@ class SyncLogListResponse(BaseModel):
 
 class PermissionCatalogResponse(BaseModel):
     items: list[PermissionOption]
+
+
+class DictTypeRecord(BaseModel):
+    id: int
+    dict_name: str
+    dict_type: str
+    status: str
+    remark: str | None = None
+    data_count: int = 0
+
+
+class DictTypeUpsert(BaseModel):
+    dict_name: str
+    dict_type: str
+    status: str
+    remark: str | None = None
+
+
+class DictTypeListResponse(BaseModel):
+    items: list[DictTypeRecord]
+    total: int
+
+
+class DictDataRecord(BaseModel):
+    id: int
+    dict_type: str
+    dict_name: str
+    label: str
+    value: str
+    sort_order: int
+    status: str
+    color_type: str | None = None
+    css_class: str | None = None
+    remark: str | None = None
+
+
+class DictDataUpsert(BaseModel):
+    dict_type: str
+    label: str
+    value: str
+    sort_order: int = 0
+    status: str
+    color_type: str | None = None
+    css_class: str | None = None
+    remark: str | None = None
+
+
+class DictDataListResponse(BaseModel):
+    items: list[DictDataRecord]
+    total: int
 
 
 class SystemOptionsResponse(BaseModel):

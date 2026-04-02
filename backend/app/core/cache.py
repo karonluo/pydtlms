@@ -22,10 +22,26 @@ def get_cache_client() -> Redis:
     sentinel = get_sentinel()
     try:
         host, port = sentinel.discover_master(settings.redis_sentinel_name)
-        return Redis(host=host, port=port, password=settings.redis_password or None, decode_responses=True)
+        return Redis(
+            host=host,
+            port=port,
+            password=settings.redis_password or None,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+            retry_on_timeout=False,
+        )
     except Exception:
         host, port = settings.redis_sentinel_nodes[0]
-        return Redis(host=host, port=port, password=settings.redis_password or None, decode_responses=True)
+        return Redis(
+            host=host,
+            port=port,
+            password=settings.redis_password or None,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+            retry_on_timeout=False,
+        )
 
 
 def build_cache_key(*segments: str) -> str:

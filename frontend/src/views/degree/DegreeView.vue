@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
+import TableRowActions from '../../components/table/TableRowActions.vue'
 
 import {
   createThesis,
   createThesisReview,
+  getDegreeOptions,
   getDegreeStats,
   listTheses,
   listThesisReviews,
   updateThesis,
   updateThesisReview,
+  type DegreeOptions,
   type DegreeStats,
   type ThesisRecord,
   type ThesisReviewRecord,
@@ -35,6 +38,17 @@ const stats = ref<DegreeStats>({
 
 const theses = ref<ThesisRecord[]>([])
 const reviews = ref<ThesisReviewRecord[]>([])
+const options = ref<DegreeOptions>({
+  student_options: [],
+  advisor_options: [],
+  thesis_options: [],
+  thesis_status_options: [],
+  blind_review_status_options: [],
+  defense_status_options: [],
+  degree_status_options: [],
+  expert_options: [],
+  review_status_options: [],
+})
 
 const thesisForm = reactive<ThesisUpsert>({
   student_no: '',
@@ -92,18 +106,47 @@ function resetForms() {
 async function loadData() {
   loading.value = true
   try {
-    const [statsResponse, thesisResponse, reviewResponse] = await Promise.all([
+    const [statsResponse, thesisResponse, reviewResponse, optionsResponse] = await Promise.all([
       getDegreeStats(),
       listTheses(),
       listThesisReviews(),
+      getDegreeOptions(),
     ])
     stats.value = statsResponse.data
     theses.value = thesisResponse.data.items
     reviews.value = reviewResponse.data.items
+    options.value = optionsResponse.data
   } finally {
     loading.value = false
   }
 }
+
+const thesisLookup = computed(() => {
+  return new Map(theses.value.map((item) => [item.id, item]))
+})
+
+watch(
+  () => thesisForm.student_no,
+  (studentNo) => {
+    const matched = thesisLookup.value.size ? theses.value.find((item) => item.student_no === studentNo) : undefined
+    if (!matched) {
+      return
+    }
+    thesisForm.student_name = matched.student_name
+    thesisForm.advisor_name = matched.advisor_name
+  },
+)
+
+watch(
+  () => reviewForm.thesis_id,
+  (thesisId) => {
+    const matched = thesisLookup.value.get(thesisId)
+    if (!matched) {
+      return
+    }
+    reviewForm.thesis_title = matched.title
+  },
+)
 
 function openCreateDialog() {
   dialogMode.value = 'create'
@@ -178,8 +221,8 @@ onMounted(() => {
         <el-table-column prop="blind_review_status" label="盲审状态" width="120" />
         <el-table-column prop="defense_status" label="答辩状态" width="120" />
         <el-table-column prop="degree_status" label="授位状态" width="120" />
-        <el-table-column label="操作" width="100">
-          <template #default="scope"><el-button link type="primary" @click="openEditDialog(scope.row)">编辑</el-button></template>
+        <el-table-column label="操作" width="90" align="center">
+          <template #default="scope"><TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog }]" /></template>
         </el-table-column>
       </el-table>
 
@@ -190,30 +233,68 @@ onMounted(() => {
         <el-table-column prop="review_score" label="评分" width="100" />
         <el-table-column prop="review_status" label="评审状态" width="120" />
         <el-table-column prop="review_comment" label="评审意见" min-width="260" />
-        <el-table-column label="操作" width="100">
-          <template #default="scope"><el-button link type="primary" @click="openEditDialog(scope.row)">编辑</el-button></template>
+        <el-table-column label="操作" width="90" align="center">
+          <template #default="scope"><TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog }]" /></template>
         </el-table-column>
       </el-table>
     </section>
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? `新增${sectionTitle}` : `编辑${sectionTitle}`" width="760px">
       <el-form v-if="activeSection === 'theses'" label-width="110px" class="dialog-grid">
-        <el-form-item label="学号"><el-input v-model="thesisForm.student_no" /></el-form-item>
-        <el-form-item label="学生"><el-input v-model="thesisForm.student_name" /></el-form-item>
-        <el-form-item label="导师"><el-input v-model="thesisForm.advisor_name" /></el-form-item>
-        <el-form-item label="论文状态"><el-input v-model="thesisForm.thesis_status" /></el-form-item>
-        <el-form-item label="盲审状态"><el-input v-model="thesisForm.blind_review_status" /></el-form-item>
-        <el-form-item label="答辩状态"><el-input v-model="thesisForm.defense_status" /></el-form-item>
-        <el-form-item label="授位状态"><el-input v-model="thesisForm.degree_status" /></el-form-item>
+        <el-form-item label="学生">
+          <el-select v-model="thesisForm.student_no" filterable placeholder="请选择学生">
+            <el-option v-for="item in options.student_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="学号"><el-input v-model="thesisForm.student_no" disabled /></el-form-item>
+        <el-form-item label="学生姓名"><el-input v-model="thesisForm.student_name" disabled /></el-form-item>
+        <el-form-item label="导师">
+          <el-select v-model="thesisForm.advisor_name" filterable placeholder="请选择导师">
+            <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="论文状态">
+          <el-select v-model="thesisForm.thesis_status" placeholder="请选择论文状态">
+            <el-option v-for="item in options.thesis_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="盲审状态">
+          <el-select v-model="thesisForm.blind_review_status" placeholder="请选择盲审状态">
+            <el-option v-for="item in options.blind_review_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="答辩状态">
+          <el-select v-model="thesisForm.defense_status" placeholder="请选择答辩状态">
+            <el-option v-for="item in options.defense_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="授位状态">
+          <el-select v-model="thesisForm.degree_status" placeholder="请选择授位状态">
+            <el-option v-for="item in options.degree_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="查重率"><el-input-number v-model="thesisForm.plagiarism_rate" :min="0" :max="100" :precision="1" controls-position="right" /></el-form-item>
         <el-form-item label="论文题目" class="dialog-grid__full"><el-input v-model="thesisForm.title" type="textarea" :rows="3" /></el-form-item>
       </el-form>
 
       <el-form v-else label-width="110px" class="dialog-grid">
-        <el-form-item label="论文ID"><el-input-number v-model="reviewForm.thesis_id" :min="1" controls-position="right" /></el-form-item>
-        <el-form-item label="论文题目"><el-input v-model="reviewForm.thesis_title" /></el-form-item>
-        <el-form-item label="评审专家"><el-input v-model="reviewForm.expert_name" /></el-form-item>
-        <el-form-item label="评审状态"><el-input v-model="reviewForm.review_status" /></el-form-item>
+        <el-form-item label="论文主档">
+          <el-select v-model="reviewForm.thesis_id" filterable placeholder="请选择论文" style="width: 100%">
+            <el-option v-for="item in options.thesis_options" :key="item.value" :label="item.label" :value="Number(item.value)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="论文ID"><el-input-number v-model="reviewForm.thesis_id" :min="1" controls-position="right" disabled /></el-form-item>
+        <el-form-item label="论文题目"><el-input v-model="reviewForm.thesis_title" disabled /></el-form-item>
+        <el-form-item label="评审专家">
+          <el-select v-model="reviewForm.expert_name" filterable allow-create default-first-option placeholder="请选择评审专家">
+            <el-option v-for="item in options.expert_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="评审状态">
+          <el-select v-model="reviewForm.review_status" placeholder="请选择评审状态">
+            <el-option v-for="item in options.review_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="评分"><el-input-number v-model="reviewForm.review_score" :min="0" :max="100" :precision="1" controls-position="right" /></el-form-item>
         <el-form-item label="评审意见" class="dialog-grid__full"><el-input v-model="reviewForm.review_comment" type="textarea" :rows="4" /></el-form-item>
       </el-form>

@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
-from app.schemas.workflow import WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
+from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
 from app.services.dashboard_service import (
     create_workflow_task,
     delete_workflow_task,
+    get_workflow_options,
     get_workflow_stats,
     get_workflow_task_list,
     update_workflow_task,
@@ -18,6 +19,11 @@ router = APIRouter(prefix="/workflow", tags=["workflow"])
 @router.get("/stats", response_model=WorkflowStats)
 def workflow_stats(principal: Principal = Depends(require_permissions("workflow:read"))) -> WorkflowStats:
     return get_workflow_stats()
+
+
+@router.get("/options", response_model=WorkflowOptionsResponse)
+def workflow_options(principal: Principal = Depends(require_permissions("workflow:read"))) -> WorkflowOptionsResponse:
+    return get_workflow_options()
 
 
 @router.get("/tasks", response_model=WorkflowTaskListResponse)

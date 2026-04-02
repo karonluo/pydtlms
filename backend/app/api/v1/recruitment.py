@@ -9,6 +9,7 @@ from app.schemas.recruitment import (
     RecruitPlanListResponse,
     RecruitPlanRecord,
     RecruitPlanUpsert,
+    RecruitmentOptionsResponse,
     RecruitStats,
     RecruitWorkbench,
 )
@@ -17,6 +18,7 @@ from app.services.dashboard_service import (
     create_recruitment_plan,
     delete_recruitment_application,
     get_recruitment_application_list,
+    get_recruitment_options,
     get_recruitment_plan_list,
     get_recruitment_stats,
     get_recruitment_workbench,
@@ -36,6 +38,11 @@ def recruitment_workbench(principal: Principal = Depends(require_permissions("re
 @router.get("/stats", response_model=RecruitStats)
 def recruitment_stats(principal: Principal = Depends(require_permissions("recruitment:read"))) -> RecruitStats:
     return get_recruitment_stats()
+
+
+@router.get("/options", response_model=RecruitmentOptionsResponse)
+def recruitment_options(principal: Principal = Depends(require_permissions("recruitment:read"))) -> RecruitmentOptionsResponse:
+    return get_recruitment_options()
 
 
 @router.get("/plans", response_model=RecruitPlanListResponse)

@@ -59,7 +59,10 @@ const menuGroups: MenuGroup[] = [
     key: 'students',
     label: '学生管理',
     icon: UserFilled,
-    items: [{ path: '/students', label: '学生主档', icon: UserFilled, requiredPermission: 'students:read' }],
+    items: [
+      { path: '/students/records', label: '学生主档', icon: UserFilled, requiredPermission: 'students:read' },
+      { path: '/students/teams', label: '团队管理', icon: UserFilled, requiredPermission: 'students:read' },
+    ],
   },
   {
     key: 'training',
@@ -92,6 +95,8 @@ const menuGroups: MenuGroup[] = [
         icon: Setting,
         items: [
           { path: '/system/roles', label: '角色管理', icon: Setting, requiredPermission: 'system:read' },
+          { path: '/system/dict-types', label: '字典类型', icon: Setting, requiredPermission: 'system:read' },
+          { path: '/system/dict-data', label: '字典数据', icon: Setting, requiredPermission: 'system:read' },
           { path: '/system/audit', label: '审计策略', icon: Setting, requiredPermission: 'audit:read' },
           { path: '/system/integrations', label: '接口管理', icon: Setting, requiredPermission: 'system:read' },
         ],
@@ -225,7 +230,9 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
       </el-header>
 
       <el-main class="layout-main">
-        <router-view />
+        <div class="layout-view-host">
+          <router-view />
+        </div>
       </el-main>
     </el-container>
   </el-container>
@@ -233,7 +240,8 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
 
 <style scoped>
 .layout-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .layout-aside {
@@ -415,6 +423,13 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
 
 .layout-main {
   padding: 4px 18px 18px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-view-host {
+  height: 100%;
+  min-height: 0;
 }
 
 @media (max-width: 960px) {

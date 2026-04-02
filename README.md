@@ -8,7 +8,7 @@
 - `documents/images/`：详细设计文档引用的 SVG 与 PNG 图像资产。
 - `documents/baseline/`：从 Markdown、Word、PDF、PPTX 抽取的需求基线文本。
 - `backend/`：FastAPI 后端工程，包含配置、JWT/RBAC、模型、SQL 脚本，以及招生管理、学生管理等联调接口。
-- `frontend/`：Vue3 + Element Plus 前端工程，已提供驾驶舱、招生管理、学生管理、培养、学位、系统治理六个视图。
+- `frontend/`：Vue3 + Element Plus 前端工程，已提供驾驶舱、招生管理、学生管理、团队管理、培养、学位、系统治理六个业务视图与若干治理子页。
 - `tools/generate_design_assets.py`：一键再生 SVG、PNG 和详细设计文档的脚本。
 - `tools/dtmls_cli.py`：DTLMS 命令行工具，支持登录、查询、删除学生、斜杠命令菜单和通用 API 调用。
 - `tools/dist/dtmls_cli.exe`：已编译的 Windows 可执行版 CLI，需与同目录 INI 配置一起使用。
@@ -57,17 +57,34 @@ pydtlms/
 
 ### 2. 后端配置
 
-将 `backend/.env.example` 复制为 `backend/.env` 后按实际环境调整。
+后端运行时只会读取 `backend/.env` 和 `backend/.env.local`，不会直接读取 `backend/.env.example`。因此修改示例文件后，还需要同步生成实际配置文件。
+
+推荐流程：
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+```
+
+Redis Sentinel 相关配置示例：
+
+```text
+REDIS_HOST_LIST=47.117.107.23:41104,47.117.107.23:41105,47.117.107.23:41106
+REDIS_PASSWORD=Pass@@word123!
+REDIS_SENTINEL_NAME=mymaster
+REDIS_KEY_PREFIX=CTDTLMS_
+```
+
+当前联调已验证：上述 Sentinel 地址可发现 master `47.117.107.23:41102`，并可完成登录会话的创建、读取与注销。
 
 ### 3. 初始化数据库
 
-推荐直接执行一键初始化脚本，脚本会自动完成建库、建表、视图、RBAC 和模拟数据导入：
+推荐直接执行一键初始化脚本，脚本会自动完成建库、建表、视图、RBAC 和 PostgreSQL 运行态数据同步：
 
 ```powershell
 .\.venv\Scripts\python.exe backend\scripts\init_postgres.py
 ```
 
-如果只想快速检查导入结果，可执行：
+如果只想快速检查同步结果，可执行：
 
 ```powershell
 .\.venv\Scripts\python.exe backend\scripts\init_postgres.py --summary
@@ -105,6 +122,24 @@ npm run dev
 
 - 管理员：`admin / Admin@123456`
 - 导师：`mentor.demo / Mentor@123456`
+
+### 5.2 登录与会话联调说明
+
+本轮认证改造已经接入 Redis 会话存储，前后端联调遵循以下机制：
+
+- 登录成功后，前端优先跳转到 `redirect` 指定页面；如果是会话中断后重新登录，则恢复到中断前页面。
+- 路由守卫会在访问受保护页面前记录目标地址，避免登录后只回到默认首页。
+- Axios 在收到 `401` 时会清理本地 token，并自动回到登录页，同时保留当前地址用于重新登录后的恢复。
+- 后端 `POST /api/v1/auth/logout` 会撤销 Redis 中的会话，旧 token 会立即失效。
+- 如果 Redis Sentinel 不可用，登录接口会快速返回 `503 Redis session store unavailable`，不会无限挂起。
+
+本地已完成的 HTTP 级验证包括：
+
+- 管理员账号成功完成用户名密码认证。
+- access token 与 refresh token 均可成功签发与解码。
+- 注销后再次使用旧 token 访问，立即返回 `401 Session expired, please login again`。
+
+提示：当前工具链可完整验证 HTTP 登录与 Redis 会话失效，但不支持自动点击浏览器控件，因此“登录后页面跳转”和“会话超时回跳”是通过前端路由守卫、拦截器和接口联调共同确认，而不是录制式浏览器自动化。
 
 ### 5.1 一键启动脚本
 
@@ -271,8 +306,8 @@ Set-Location tools\dist
 - `frontend/src/layouts/AppLayout.vue`：整体框架、侧边导航、顶部状态区。
 - `frontend/src/views/dashboard/`：数据驾驶舱与指标总览。
 - `frontend/src/views/recruitment/`：招生计划、报名申请、状态筛选、计划维护与申请维护。
-- `frontend/src/views/students/`：学生主档查询、新增、编辑、删除与状态管理。
-- `frontend/src/views/training/`：培养过程、科研报告、外出研修规则视图。
+- `frontend/src/views/students/`：学生主档与团队主数据治理页，支持学生新增编辑时的导师/团队受控选择、团队维护、负责人配置与批量删除。
+- `frontend/src/views/training/`：培养方案、科研报告、外出研修三类治理页，支持查询、状态筛选、字典选择、单删与批量删除。
 - `frontend/src/views/degree/`：论文、盲审、答辩流水线视图。
 - `frontend/src/views/system/`：安全、审计、集成和部署治理视图。
 
@@ -282,7 +317,11 @@ Set-Location tools\dist
 - 已落地招生、学生、培养、学位、流程审批、系统治理等管理页面，并接入统一后端接口。
 - 当前业务服务已支持 PostgreSQL 真实持久化，同时保留 JSON 快照作为离线回退与调试副本。
 - 已导入一套完整模拟数据到 PostgreSQL，覆盖用户、学生、招生计划、报名申请、培养方案、科研报告、外出研修、论文、审批任务与审计日志。
+- 学生管理已补充团队主数据实体，学生新增/编辑时的导师和团队改为受控选择，并通过团队-导师约束避免脏数据。
+- 团队主数据支持团队编码、负责人导师、团队导师集合、研究方向、团队状态、学生归属统计等治理能力。
 - CLI 已支持登录、资料维护、学生删除、多模块查询与通用 API 调用；尚未把所有 Web 写操作都做成专用命令，但可通过 `/api` 命令覆盖调用。
+- 认证链路已接入 Redis Sentinel 会话，支持登录、登出、会话失效校验与 401 回登录页。
+- 培养管理模块已升级为治理页交互，覆盖培养方案、科研报告、外出研修的筛选、字典项、业务化按钮与批量删除。
 - Redis Sentinel、更多外部系统同步、审批引擎细化和自动化测试仍可继续深化。
 
 ## 后续研发优先级建议

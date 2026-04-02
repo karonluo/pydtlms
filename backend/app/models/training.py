@@ -20,6 +20,32 @@ class Advisor(Base, TimestampMixin, SoftDeleteMixin):
     annual_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class Team(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "dtlms_teams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    team_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    team_name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    department_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    discipline_name: Mapped[str | None] = mapped_column(String(128))
+    lead_advisor_id: Mapped[int | None] = mapped_column(ForeignKey("dtlms_advisors.id"))
+    research_directions: Mapped[str | None] = mapped_column(Text)
+    team_status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    established_on: Mapped[date | None] = mapped_column(Date)
+    description: Mapped[str | None] = mapped_column(Text)
+
+
+class TeamAdvisor(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "dtlms_team_advisors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("dtlms_teams.id"), nullable=False)
+    advisor_id: Mapped[int] = mapped_column(ForeignKey("dtlms_advisors.id"), nullable=False)
+    advisor_role: Mapped[str] = mapped_column(String(32), nullable=False, default="member")
+    joined_on: Mapped[date | None] = mapped_column(Date)
+    left_on: Mapped[date | None] = mapped_column(Date)
+
+
 class Student(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "dtlms_students"
 
@@ -32,9 +58,20 @@ class Student(Base, TimestampMixin, SoftDeleteMixin):
     identity_no: Mapped[str | None] = mapped_column(String(64))
     enrollment_year: Mapped[int] = mapped_column(Integer, nullable=False)
     degree_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    team_name: Mapped[str | None] = mapped_column(String(128))
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("dtlms_teams.id"))
     current_status: Mapped[str] = mapped_column(String(32), nullable=False, default="enrolled")
     primary_advisor_id: Mapped[int | None] = mapped_column(ForeignKey("dtlms_advisors.id"))
+
+
+class StudentTeamHistory(Base, TimestampMixin):
+    __tablename__ = "dtlms_student_team_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("dtlms_students.id"), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("dtlms_teams.id"), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    change_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class StudentAdvisorHistory(Base, TimestampMixin):

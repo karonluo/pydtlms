@@ -62,6 +62,38 @@ CREATE TABLE IF NOT EXISTS dtlms_advisors (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS dtlms_teams (
+    id BIGSERIAL PRIMARY KEY,
+    team_code VARCHAR(32) NOT NULL UNIQUE,
+    team_name VARCHAR(128) NOT NULL UNIQUE,
+    department_name VARCHAR(128) NOT NULL,
+    discipline_name VARCHAR(128),
+    lead_advisor_id BIGINT REFERENCES dtlms_advisors(id),
+    research_directions TEXT,
+    team_status VARCHAR(32) NOT NULL DEFAULT 'active',
+    established_on DATE,
+    description TEXT,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (team_status IN ('active', 'inactive', 'planning', 'archived'))
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_team_advisors (
+    id BIGSERIAL PRIMARY KEY,
+    team_id BIGINT NOT NULL REFERENCES dtlms_teams(id),
+    advisor_id BIGINT NOT NULL REFERENCES dtlms_advisors(id),
+    advisor_role VARCHAR(32) NOT NULL DEFAULT 'member',
+    joined_on DATE,
+    left_on DATE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (team_id, advisor_id),
+    CHECK (advisor_role IN ('lead', 'member', 'co_advisor')),
+    CHECK (left_on IS NULL OR joined_on IS NULL OR left_on >= joined_on)
+);
+
 CREATE TABLE IF NOT EXISTS dtlms_students (
     id BIGSERIAL PRIMARY KEY,
     student_no VARCHAR(32) NOT NULL UNIQUE,
@@ -72,12 +104,24 @@ CREATE TABLE IF NOT EXISTS dtlms_students (
     identity_no VARCHAR(64),
     enrollment_year INTEGER NOT NULL,
     degree_type VARCHAR(32) NOT NULL,
-    team_name VARCHAR(128),
+    team_id BIGINT REFERENCES dtlms_teams(id),
     current_status VARCHAR(32) NOT NULL DEFAULT 'enrolled',
     primary_advisor_id BIGINT REFERENCES dtlms_advisors(id),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_student_team_history (
+    id BIGSERIAL PRIMARY KEY,
+    student_id BIGINT NOT NULL REFERENCES dtlms_students(id),
+    team_id BIGINT NOT NULL REFERENCES dtlms_teams(id),
+    start_date DATE NOT NULL,
+    end_date DATE,
+    change_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
 CREATE TABLE IF NOT EXISTS dtlms_student_advisor_history (

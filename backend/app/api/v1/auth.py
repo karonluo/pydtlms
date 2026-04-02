@@ -23,12 +23,15 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenResponse:
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
     record_user_login(form_data.username)
-    access_token, refresh_token = create_token_bundle(
-        user["username"],
-        user["roles"],
-        user["permissions"],
-        full_name=user["full_name"],
-    )
+    try:
+        access_token, refresh_token = create_token_bundle(
+            user["username"],
+            user["roles"],
+            user["permissions"],
+            full_name=user["full_name"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Redis session store unavailable") from exc
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,

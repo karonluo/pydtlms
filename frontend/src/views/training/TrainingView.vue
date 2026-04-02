@@ -3,6 +3,8 @@ import axios from 'axios'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
+import TableRowActions from '../../components/table/TableRowActions.vue'
+import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 
 import {
   batchDeleteOutboundStudies,
@@ -40,6 +42,7 @@ const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedIds = ref<number[]>([])
+const trainingStatusColors = ref<DictColorMap>({})
 
 const stats = ref<TrainingStats>({
   training_plan_total: 0,
@@ -56,6 +59,7 @@ const trainingOptions = ref<TrainingOptions>({
   approval_status_options: [],
   advisor_options: [],
   reviewer_options: [],
+  student_options: [],
 })
 
 const trainingPlans = ref<TrainingPlanRecord[]>([])
@@ -124,6 +128,9 @@ const sectionMeta: Record<string, { title: string; tag: string; createLabel: str
 const sectionConfig = computed(() => sectionMeta[activeSection.value] || sectionMeta.plans)
 const advisorOptions = computed(() => trainingOptions.value.advisor_options)
 const reviewerOptions = computed(() => trainingOptions.value.reviewer_options)
+const trainingStudentMap = computed(() => {
+  return new Map(trainingOptions.value.student_options.map((item) => [item.student_no, item]))
+})
 const currentTotal = computed(() => {
   if (activeSection.value === 'plans') return trainingPlans.value.length
   if (activeSection.value === 'reports') return scientificReports.value.length
@@ -144,10 +151,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function getStatusTagType(status: string) {
-  if (['执行中', '已通过', '已批准', '研修中'].includes(status)) return 'success'
-  if (['待学生确认', '待导师审阅', '审批中'].includes(status)) return 'warning'
-  if (['退回修改', '已驳回'].includes(status)) return 'danger'
-  return 'info'
+  return resolveDictTagType(status, trainingStatusColors.value)
 }
 
 function resetSelection() {
@@ -188,6 +192,32 @@ function resetForms() {
   })
 }
 
+function syncPlanStudent(studentNo: string) {
+  const matched = trainingStudentMap.value.get(studentNo)
+  if (!matched) {
+    return
+  }
+  planForm.student_name = matched.student_name
+  planForm.advisor_name = matched.advisor_name
+}
+
+function syncReportStudent(studentNo: string) {
+  const matched = trainingStudentMap.value.get(studentNo)
+  if (!matched) {
+    return
+  }
+  reportForm.student_name = matched.student_name
+}
+
+function syncOutboundStudent(studentNo: string) {
+  const matched = trainingStudentMap.value.get(studentNo)
+  if (!matched) {
+    return
+  }
+  outboundForm.student_name = matched.student_name
+  outboundForm.advisor_name = matched.advisor_name
+}
+
 function openCreateDialog() {
   dialogMode.value = 'create'
   resetForms()
@@ -222,6 +252,11 @@ async function loadBootstrapData() {
     const [statsResponse, optionsResponse] = await Promise.all([getTrainingStats(), getTrainingOptions()])
     stats.value = statsResponse.data
     trainingOptions.value = optionsResponse.data
+    trainingStatusColors.value = {
+      ...buildDictColorMap(optionsResponse.data.plan_status_options),
+      ...buildDictColorMap(optionsResponse.data.report_status_options),
+      ...buildDictColorMap(optionsResponse.data.approval_status_options),
+    }
   } finally {
     bootstrapping.value = false
   }
@@ -343,6 +378,27 @@ watch(
   },
 )
 
+watch(
+  () => planForm.student_no,
+  (studentNo) => {
+    syncPlanStudent(studentNo)
+  },
+)
+
+watch(
+  () => reportForm.student_no,
+  (studentNo) => {
+    syncReportStudent(studentNo)
+  },
+)
+
+watch(
+  () => outboundForm.student_no,
+  (studentNo) => {
+    syncOutboundStudent(studentNo)
+  },
+)
+
 onMounted(() => {
   void loadBootstrapData().then(() => loadCurrentSection())
 })
@@ -429,10 +485,9 @@ onMounted(() => {
           <template #default="scope"><el-tag :type="getStatusTagType(scope.row.plan_status)">{{ scope.row.plan_status }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="scientific_goal" label="科研目标" min-width="220" />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">维护方案</el-button>
-            <el-button link type="danger" @click="removeCurrentRecord(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护方案', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: removeCurrentRecord }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -448,10 +503,9 @@ onMounted(() => {
         <el-table-column prop="reviewer_name" label="审阅人" width="110" />
         <el-table-column prop="review_score" label="评分" width="90" />
         <el-table-column prop="summary" label="摘要" min-width="240" />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">维护报告</el-button>
-            <el-button link type="danger" @click="removeCurrentRecord(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护报告', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: removeCurrentRecord }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -467,10 +521,9 @@ onMounted(() => {
           <template #default="scope"><el-tag :type="getStatusTagType(scope.row.approval_status)">{{ scope.row.approval_status }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="expected_outcome" label="预期成果" min-width="220" />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="128" align="center">
           <template #default="scope">
-            <el-button link type="primary" @click="openEditDialog(scope.row)">维护研修</el-button>
-            <el-button link type="danger" @click="removeCurrentRecord(scope.row)">删除</el-button>
+            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护研修', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: removeCurrentRecord }]" />
           </template>
         </el-table-column>
       </el-table>
@@ -478,8 +531,13 @@ onMounted(() => {
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? sectionConfig.createLabel : `维护${sectionConfig.title}`" width="760px">
       <el-form v-if="activeSection === 'plans'" label-width="110px" class="dialog-grid">
-        <el-form-item label="学号"><el-input v-model="planForm.student_no" /></el-form-item>
-        <el-form-item label="学生"><el-input v-model="planForm.student_name" /></el-form-item>
+        <el-form-item label="学生">
+          <el-select v-model="planForm.student_no" filterable placeholder="请选择学生">
+            <el-option v-for="item in trainingOptions.student_options" :key="item.student_no" :label="item.label" :value="item.student_no" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="学号"><el-input v-model="planForm.student_no" disabled /></el-form-item>
+        <el-form-item label="学生姓名"><el-input v-model="planForm.student_name" disabled /></el-form-item>
         <el-form-item label="导师">
           <el-select v-model="planForm.advisor_name" filterable allow-create default-first-option>
             <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -501,8 +559,13 @@ onMounted(() => {
       </el-form>
 
       <el-form v-else-if="activeSection === 'reports'" label-width="110px" class="dialog-grid">
-        <el-form-item label="学号"><el-input v-model="reportForm.student_no" /></el-form-item>
-        <el-form-item label="学生"><el-input v-model="reportForm.student_name" /></el-form-item>
+        <el-form-item label="学生">
+          <el-select v-model="reportForm.student_no" filterable placeholder="请选择学生">
+            <el-option v-for="item in trainingOptions.student_options" :key="item.student_no" :label="item.label" :value="item.student_no" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="学号"><el-input v-model="reportForm.student_no" disabled /></el-form-item>
+        <el-form-item label="学生姓名"><el-input v-model="reportForm.student_name" disabled /></el-form-item>
         <el-form-item label="报告周期"><el-input v-model="reportForm.period_label" /></el-form-item>
         <el-form-item label="状态">
           <el-select v-model="reportForm.report_status">
@@ -519,8 +582,13 @@ onMounted(() => {
       </el-form>
 
       <el-form v-else label-width="110px" class="dialog-grid">
-        <el-form-item label="学号"><el-input v-model="outboundForm.student_no" /></el-form-item>
-        <el-form-item label="学生"><el-input v-model="outboundForm.student_name" /></el-form-item>
+        <el-form-item label="学生">
+          <el-select v-model="outboundForm.student_no" filterable placeholder="请选择学生">
+            <el-option v-for="item in trainingOptions.student_options" :key="item.student_no" :label="item.label" :value="item.student_no" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="学号"><el-input v-model="outboundForm.student_no" disabled /></el-form-item>
+        <el-form-item label="学生姓名"><el-input v-model="outboundForm.student_name" disabled /></el-form-item>
         <el-form-item label="导师">
           <el-select v-model="outboundForm.advisor_name" filterable allow-create default-first-option>
             <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />

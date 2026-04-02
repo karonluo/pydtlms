@@ -16,7 +16,7 @@ from app.services.postgres_state_store import PostgresStateStore
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Initialize PostgreSQL schema and demo data for DTLMS.")
+    parser = argparse.ArgumentParser(description="Initialize PostgreSQL schema and sync runtime data for DTLMS.")
     parser.add_argument("--summary", action="store_true", help="Print inserted dataset counts only.")
     args = parser.parse_args()
 

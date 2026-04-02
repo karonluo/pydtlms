@@ -105,6 +105,13 @@ class OutboundStudyListResponse(BaseModel):
     total: int
 
 
+class TrainingStudentOption(BaseModel):
+    student_no: str
+    student_name: str
+    advisor_name: str
+    label: str
+
+
 class TrainingOptionsResponse(BaseModel):
     plan_status_options: list[SelectOption]
     report_cycle_options: list[SelectOption]
@@ -113,6 +120,7 @@ class TrainingOptionsResponse(BaseModel):
     approval_status_options: list[SelectOption]
     advisor_options: list[SelectOption]
     reviewer_options: list[SelectOption]
+    student_options: list[TrainingStudentOption]
 
 
 class TrainingStats(BaseModel):
@@ -174,6 +182,18 @@ class ThesisReviewUpsert(BaseModel):
 class ThesisReviewListResponse(BaseModel):
     items: list[ThesisReviewRecord]
     total: int
+
+
+class DegreeOptionsResponse(BaseModel):
+    student_options: list[SelectOption]
+    advisor_options: list[SelectOption]
+    thesis_options: list[SelectOption]
+    thesis_status_options: list[SelectOption]
+    blind_review_status_options: list[SelectOption]
+    defense_status_options: list[SelectOption]
+    degree_status_options: list[SelectOption]
+    expert_options: list[SelectOption]
+    review_status_options: list[SelectOption]
 
 
 class DegreeStats(BaseModel):

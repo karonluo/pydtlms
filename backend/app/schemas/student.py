@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.schemas.system import SelectOption
 
 
 class StudentSummary(BaseModel):
@@ -49,9 +51,62 @@ class StudentManagementResponse(BaseModel):
     total: int
 
 
+class TeamAdvisorMapItem(BaseModel):
+    team_name: str
+    advisors: list[SelectOption] = Field(default_factory=list)
+
+
+class StudentOptionsResponse(BaseModel):
+    status_options: list[SelectOption]
+    degree_options: list[SelectOption]
+    advisor_options: list[SelectOption]
+    team_options: list[SelectOption]
+    team_status_options: list[SelectOption]
+    political_status_options: list[SelectOption] = Field(default_factory=list)
+    department_options: list[SelectOption] = Field(default_factory=list)
+    discipline_options: list[SelectOption] = Field(default_factory=list)
+    team_advisor_map: list[TeamAdvisorMapItem] = Field(default_factory=list)
+
+
+class TeamRecord(BaseModel):
+    id: int
+    team_code: str
+    team_name: str
+    department_name: str
+    discipline_name: str
+    lead_advisor_name: str
+    advisor_names: list[str] = Field(default_factory=list)
+    research_directions: list[str] = Field(default_factory=list)
+    status: str
+    established_on: str | None = None
+    description: str | None = None
+    member_student_count: int = 0
+    active_student_count: int = 0
+
+
+class TeamUpsert(BaseModel):
+    team_code: str
+    team_name: str
+    department_name: str
+    discipline_name: str
+    lead_advisor_name: str
+    advisor_names: list[str] = Field(default_factory=list)
+    research_directions: list[str] = Field(default_factory=list)
+    status: str
+    established_on: str | None = None
+    description: str | None = None
+
+
+class TeamListResponse(BaseModel):
+    items: list[TeamRecord]
+    total: int
+
+
 class StudentStats(BaseModel):
     total_students: int
     active_students: int
     outbound_students: int
     thesis_students: int
     advisor_count: int
+    team_total: int = 0
+    active_team_total: int = 0

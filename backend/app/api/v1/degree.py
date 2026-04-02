@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
 from app.schemas.training import (
+    DegreeOptionsResponse,
     DegreeStats,
     DegreeWorkbench,
     ThesisListResponse,
@@ -15,6 +16,7 @@ from app.schemas.training import (
 from app.services.dashboard_service import (
     create_thesis,
     create_thesis_review,
+    get_degree_options,
     get_degree_stats,
     get_degree_workbench,
     get_thesis_list,
@@ -35,6 +37,11 @@ def degree_workbench(principal: Principal = Depends(require_permissions("degree:
 @router.get("/stats", response_model=DegreeStats)
 def degree_stats(principal: Principal = Depends(require_permissions("degree:read"))) -> DegreeStats:
     return get_degree_stats()
+
+
+@router.get("/options", response_model=DegreeOptionsResponse)
+def degree_options(principal: Principal = Depends(require_permissions("degree:read"))) -> DegreeOptionsResponse:
+    return get_degree_options()
 
 
 @router.get("/theses", response_model=ThesisListResponse)
