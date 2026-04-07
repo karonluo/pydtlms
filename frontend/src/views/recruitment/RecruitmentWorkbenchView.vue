@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
   createRecruitmentApplication,
@@ -66,6 +67,7 @@ const applicationSubmitting = ref(false)
 const selectedPlanId = ref<number | undefined>()
 const editingPlanId = ref<number | null>(null)
 const editingApplicationId = ref<number | null>(null)
+const planReferenceList = ref<RecruitPlanRecord[]>([])
 const applicationStatusColors = ref<DictColorMap>({})
 const materialStatusColors = ref<DictColorMap>({})
 
@@ -75,6 +77,11 @@ const applicationFormRef = ref<FormInstance>()
 const applicationFilters = reactive({
   keyword: '',
   status: '',
+})
+const planFilters = reactive({
+  keyword: '',
+  semester: '',
+  current_stage: '',
 })
 
 const planForm = reactive<RecruitPlanUpsert>({
@@ -89,6 +96,7 @@ const planForm = reactive<RecruitPlanUpsert>({
 
 const applicationForm = reactive<RecruitApplicationUpsert>({
   plan_id: 0,
+  business_key: '',
   candidate_no: '',
   student_name: '',
   graduation_school: '',
@@ -111,7 +119,6 @@ const planRules: FormRules<RecruitPlanUpsert> = {
 
 const applicationRules: FormRules<RecruitApplicationUpsert> = {
   plan_id: [{ required: true, message: '请选择招生计划', trigger: 'change' }],
-  candidate_no: [{ required: true, message: '请输入报名号', trigger: 'blur' }],
   student_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   graduation_school: [{ required: true, message: '请输入毕业院校', trigger: 'blur' }],
   highest_degree: [{ required: true, message: '请选择最高学历', trigger: 'change' }],
@@ -129,6 +136,8 @@ const statsCards = computed(() => [
 ])
 
 const selectedPlan = computed(() => plans.value.find((item) => item.id === selectedPlanId.value))
+const planPager = useServerPagination()
+const applicationPager = useServerPagination()
 
 const currentStepIndex = computed(() => {
   const stage = selectedPlan.value?.current_stage || plans.value[0]?.current_stage || '报名配置'
@@ -165,8 +174,15 @@ async function loadOverview() {
 async function loadPlans() {
   plansLoading.value = true
   try {
-    const response = await listRecruitmentPlans()
+    const response = await listRecruitmentPlans({
+      keyword: planFilters.keyword || undefined,
+      semester: planFilters.semester || undefined,
+      current_stage: planFilters.current_stage || undefined,
+      page: planPager.pagination.currentPage,
+      page_size: planPager.pagination.pageSize,
+    })
     plans.value = response.data.items
+    planPager.sync(response.data.total)
     if (selectedPlanId.value && !plans.value.some((item) => item.id === selectedPlanId.value)) {
       selectedPlanId.value = undefined
     }
@@ -178,6 +194,11 @@ async function loadPlans() {
   }
 }
 
+async function loadPlanReferences() {
+  const response = await listRecruitmentPlans({ page: 1, page_size: 1000 })
+  planReferenceList.value = response.data.items
+}
+
 async function loadApplications() {
   applicationsLoading.value = true
   try {
@@ -185,8 +206,11 @@ async function loadApplications() {
       keyword: applicationFilters.keyword || undefined,
       status: applicationFilters.status || undefined,
       plan_id: selectedPlanId.value,
+      page: applicationPager.pagination.currentPage,
+      page_size: applicationPager.pagination.pageSize,
     })
     applications.value = response.data.items
+    applicationPager.sync(response.data.total)
   } finally {
     applicationsLoading.value = false
   }
@@ -194,7 +218,7 @@ async function loadApplications() {
 
 async function refreshAll() {
   await loadPlans()
-  await Promise.all([loadOverview(), loadApplications()])
+  await Promise.all([loadOverview(), loadApplications(), loadPlanReferences()])
 }
 
 function resetPlanForm() {
@@ -214,7 +238,8 @@ function resetPlanForm() {
 function resetApplicationForm() {
   editingApplicationId.value = null
   Object.assign(applicationForm, {
-    plan_id: selectedPlanId.value ?? plans.value[0]?.id ?? 0,
+    plan_id: selectedPlanId.value ?? planReferenceList.value[0]?.id ?? 0,
+    business_key: '',
     candidate_no: '',
     student_name: '',
     graduation_school: '',
@@ -260,6 +285,7 @@ function openEditApplicationDialog(row: RecruitApplicationRecord) {
   editingApplicationId.value = row.id
   Object.assign(applicationForm, {
     plan_id: row.plan_id,
+    business_key: row.business_key,
     candidate_no: row.candidate_no,
     student_name: row.student_name,
     graduation_school: row.graduation_school,
@@ -346,16 +372,50 @@ async function handleDeleteApplication(row: RecruitApplicationRecord) {
 
 async function handlePlanSelection(row: RecruitPlanRecord) {
   selectedPlanId.value = row.id
+  applicationPager.reset()
   await loadApplications()
 }
 
 async function handleFilterSearch() {
+  applicationPager.reset()
   await loadApplications()
 }
 
 async function handleFilterReset() {
   applicationFilters.keyword = ''
   applicationFilters.status = ''
+  applicationPager.reset()
+  await loadApplications()
+}
+
+async function handlePlanSearch() {
+  planPager.reset()
+  await loadPlans()
+}
+
+async function handlePlanReset() {
+  Object.assign(planFilters, { keyword: '', semester: '', current_stage: '' })
+  planPager.reset()
+  await loadPlans()
+}
+
+async function handlePlanPageChange(page: number) {
+  planPager.handleCurrentChange(page)
+  await loadPlans()
+}
+
+async function handlePlanPageSizeChange(size: number) {
+  planPager.handleSizeChange(size)
+  await loadPlans()
+}
+
+async function handleApplicationPageChange(page: number) {
+  applicationPager.handleCurrentChange(page)
+  await loadApplications()
+}
+
+async function handleApplicationPageSizeChange(size: number) {
+  applicationPager.handleSizeChange(size)
   await loadApplications()
 }
 
@@ -403,7 +463,26 @@ onMounted(() => {
             <h2>进行中的招生计划</h2>
           </div>
         </div>
-        <el-table :data="plans" stripe v-loading="plansLoading" @row-click="handlePlanSelection">
+        <el-form class="filter-form" :inline="true">
+          <el-form-item>
+            <el-input v-model="planFilters.keyword" placeholder="计划名称 / 学年学期 / 当前阶段" clearable @keyup.enter="handlePlanSearch" />
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="planFilters.semester" placeholder="全部学期" clearable style="width: 140px">
+              <el-option v-for="item in options.semester_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="planFilters.current_stage" placeholder="全部阶段" clearable style="width: 160px">
+              <el-option v-for="item in options.plan_stage_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handlePlanSearch">查询</el-button>
+            <el-button @click="handlePlanReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <el-table :data="plans" stripe border v-loading="plansLoading" @row-click="handlePlanSelection">
           <el-table-column prop="plan_name" label="计划名称" min-width="220" />
           <el-table-column prop="academic_term" label="学年学期" width="120" />
           <el-table-column prop="current_stage" label="当前阶段" width="120" />
@@ -415,12 +494,23 @@ onMounted(() => {
               <el-tag :type="scope.row.is_open ? 'success' : 'info'">{{ scope.row.is_open ? '开放中' : '已关闭' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="96" align="center">
+          <el-table-column label="操作" width="96" align="left">
             <template #default="scope">
               <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditPlanDialog }]" />
             </template>
           </el-table-column>
         </el-table>
+        <div class="pagination-bar">
+          <el-pagination
+            :current-page="planPager.pagination.currentPage"
+            :page-size="planPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="planPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handlePlanPageChange"
+            @size-change="handlePlanPageSizeChange"
+          />
+        </div>
       </article>
 
       <article class="section-card">
@@ -456,7 +546,7 @@ onMounted(() => {
 
       <el-form class="filter-form" :inline="true">
         <el-form-item label="关键字">
-          <el-input v-model="applicationFilters.keyword" placeholder="报名号 / 姓名 / 学校 / 方向" clearable />
+            <el-input v-model="applicationFilters.keyword" placeholder="业务编号 / 姓名 / 学校 / 方向" clearable />
         </el-form-item>
         <el-form-item label="申请状态">
           <el-select v-model="applicationFilters.status" placeholder="全部状态" clearable style="width: 180px">
@@ -469,8 +559,8 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-table :data="applications" stripe v-loading="applicationsLoading">
-        <el-table-column prop="candidate_no" label="报名号" width="132" />
+      <el-table :data="applications" stripe border v-loading="applicationsLoading">
+        <el-table-column prop="business_key" label="业务编号" width="190" />
         <el-table-column prop="student_name" label="姓名" width="110" />
         <el-table-column prop="graduation_school" label="毕业院校" min-width="180" />
         <el-table-column prop="highest_degree" label="最高学历" width="100" />
@@ -487,12 +577,23 @@ onMounted(() => {
         </el-table-column>
         <el-table-column prop="reviewer_name" label="审核人" width="110" />
         <el-table-column prop="final_score" label="得分" width="90" />
-        <el-table-column label="操作" width="118" align="center">
+        <el-table-column label="操作" width="118" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditApplicationDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteApplication }]" />
           </template>
         </el-table-column>
       </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          :current-page="applicationPager.pagination.currentPage"
+          :page-size="applicationPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="applicationPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleApplicationPageChange"
+          @size-change="handleApplicationPageSizeChange"
+        />
+      </div>
     </article>
 
     <el-dialog v-model="planDialogVisible" :title="planMode === 'create' ? '新增招生计划' : '编辑招生计划'" width="680px" destroy-on-close>
@@ -536,11 +637,11 @@ onMounted(() => {
         <div class="dialog-grid">
           <el-form-item label="招生计划" prop="plan_id">
             <el-select v-model="applicationForm.plan_id" placeholder="请选择计划">
-              <el-option v-for="item in plans" :key="item.id" :label="item.plan_name" :value="item.id" />
+              <el-option v-for="item in planReferenceList" :key="item.id" :label="item.plan_name" :value="item.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="报名号" prop="candidate_no">
-            <el-input v-model="applicationForm.candidate_no" placeholder="请输入报名号" />
+          <el-form-item label="业务编号">
+            <el-input :model-value="applicationForm.business_key || '保存后自动生成'" disabled />
           </el-form-item>
           <el-form-item label="姓名" prop="student_name">
             <el-input v-model="applicationForm.student_name" placeholder="请输入姓名" />

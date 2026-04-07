@@ -63,9 +63,11 @@ def training_plans(
     plan_status: str | None = Query(default=None),
     advisor_name: str | None = Query(default=None),
     report_cycle: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("training:read")),
 ) -> TrainingPlanListResponse:
-    return get_training_plan_list(keyword=keyword, plan_status=plan_status, advisor_name=advisor_name, report_cycle=report_cycle)
+    return get_training_plan_list(keyword=keyword, plan_status=plan_status, advisor_name=advisor_name, report_cycle=report_cycle, page=page, page_size=page_size)
 
 
 @router.post("/plans", response_model=TrainingPlanRecord, status_code=status.HTTP_201_CREATED)
@@ -102,14 +104,16 @@ def scientific_reports(
     keyword: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     reviewer_name: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("training:read")),
 ) -> ScientificReportListResponse:
-    return get_scientific_report_list(keyword=keyword, status=status_filter, reviewer_name=reviewer_name)
+    return get_scientific_report_list(keyword=keyword, status=status_filter, reviewer_name=reviewer_name, page=page, page_size=page_size)
 
 
 @router.post("/reports", response_model=ScientificReportRecord, status_code=status.HTTP_201_CREATED)
 def create_scientific_report_record(payload: ScientificReportUpsert, principal: Principal = Depends(require_permissions("training:write"))) -> ScientificReportRecord:
-    return create_scientific_report(payload)
+    return create_scientific_report(payload, principal=principal)
 
 
 @router.post("/reports/batch-delete", response_model=BulkActionResponse)
@@ -126,6 +130,8 @@ def update_scientific_report_record(report_id: int, payload: ScientificReportUps
         return update_scientific_report(report_id, payload)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scientific report not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.delete("/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -142,14 +148,16 @@ def outbound_studies(
     status_filter: str | None = Query(default=None, alias="status"),
     study_type: str | None = Query(default=None),
     advisor_name: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("training:read")),
 ) -> OutboundStudyListResponse:
-    return get_outbound_study_list(keyword=keyword, status=status_filter, study_type=study_type, advisor_name=advisor_name)
+    return get_outbound_study_list(keyword=keyword, status=status_filter, study_type=study_type, advisor_name=advisor_name, page=page, page_size=page_size)
 
 
 @router.post("/outbound-studies", response_model=OutboundStudyRecord, status_code=status.HTTP_201_CREATED)
 def create_outbound_study_record(payload: OutboundStudyUpsert, principal: Principal = Depends(require_permissions("training:write"))) -> OutboundStudyRecord:
-    return create_outbound_study(payload)
+    return create_outbound_study(payload, principal=principal)
 
 
 @router.post("/outbound-studies/batch-delete", response_model=BulkActionResponse)
@@ -166,6 +174,8 @@ def update_outbound_study_record(study_id: int, payload: OutboundStudyUpsert, pr
         return update_outbound_study(study_id, payload)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outbound study not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.delete("/outbound-studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -194,7 +194,7 @@ DATABASE_DESIGN_NOTES = [
     '关系主表与运行态镜像表共存，但业务系统运行期间只允许 PostgreSQL 作为唯一事实来源，不再依赖 JSON 演示文件。',
     '字典设计采用“字典类型 + 字典数据”两层结构，既管理 label/value，也管理 color_type、css_class 等展示语义。',
     '学生、导师、团队、招生、培养、学位均通过外键或历史表保持可追溯关系，避免页面层自由拼装对象关系。',
-    '运行态镜像表承载 DemoManagementStore 的统一持久化结果，确保内存状态、接口返回和数据库对象持续同步。',
+    '运行态镜像表承载 RuntimeManagementStore 的统一持久化结果，确保内存状态、接口返回和数据库对象持续同步。',
     '所有表采用 created_at、updated_at 与 is_deleted 的统一治理字段，支撑审计、回放与逻辑删除策略。',
 ]
 

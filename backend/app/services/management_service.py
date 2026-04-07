@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
+import hashlib
 from threading import Lock
-from typing import Any
+from typing import Any, TypeVar
 
 from passlib.context import CryptContext
 
+from app.core.cache import build_cache_key, get_cache_client
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.dashboard import DashboardAlert, DashboardOverview, MetricCard
 from app.schemas.recruitment import (
@@ -93,14 +95,300 @@ from app.schemas.training import (
 )
 from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
 from app.services.postgres_state_store import PostgresStateStore
+from app.services.runtime_seed_data import build_runtime_seed_state
 
 
 PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+ListItemT = TypeVar("ListItemT")
+FINAL_WORKFLOW_STATUSES = {"已通过", "已驳回"}
+ROLE_DISPLAY_NAMES = {
+    "platform_admin": "学合管理员",
+    "advisor": "导师",
+    "secretary": "学位秘书",
+}
+WORKFLOW_NAME_INITIALS_MAP = {
+    "招生录取审批": "ZSLQSP",
+    "科研报告审阅": "KYBGSY",
+    "外出研修审批": "WCYXSP",
+    "学位申请审批": "SWSQSP",
+    "导师变更审批": "DSBGSP",
+}
+MANAGED_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "recruitment_application": {
+        "workflow_name": "招生录取审批",
+        "business_module": "招生管理",
+        "business_dataset": "recruitment_applications",
+        "business_entity": "报名申请",
+        "business_key_prefix": "REC",
+        "managed_fields": ("application_status",),
+        "initial_field_values": {"application_status": "报名已提交"},
+        "nodes": {
+            "qualification_review": {
+                "label": "资格审核",
+                "handler_roles": ["platform_admin"],
+                "due_days": 1,
+                "actions": {
+                    "approve": {
+                        "label": "资格通过",
+                        "next_node": "qualification_passed",
+                        "task_status": "处理中",
+                        "field_updates": {"application_status": "资格审核通过"},
+                    },
+                    "reject": {
+                        "label": "审核不通过",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"application_status": "不录取"},
+                    },
+                },
+            },
+            "qualification_passed": {
+                "label": "评分准备",
+                "handler_roles": ["platform_admin"],
+                "due_days": 1,
+                "actions": {
+                    "start_scoring": {
+                        "label": "启动评分",
+                        "next_node": "interview_arrangement",
+                        "task_status": "处理中",
+                        "field_updates": {"application_status": "材料评分中"},
+                    },
+                    "reject": {
+                        "label": "取消申请",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"application_status": "不录取"},
+                    },
+                },
+            },
+            "interview_arrangement": {
+                "label": "面试安排",
+                "handler_roles": ["platform_admin"],
+                "due_days": 2,
+                "actions": {
+                    "schedule_interview": {
+                        "label": "完成面试安排",
+                        "next_node": "admission_decision",
+                        "task_status": "处理中",
+                        "field_updates": {"application_status": "面试待安排"},
+                    },
+                    "reject": {
+                        "label": "终止流程",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"application_status": "不录取"},
+                    },
+                },
+            },
+            "admission_decision": {
+                "label": "录取决策",
+                "handler_roles": ["platform_admin"],
+                "due_days": 2,
+                "actions": {
+                    "record_interview": {
+                        "label": "录入面试结果",
+                        "next_node": "admission_confirmation",
+                        "task_status": "处理中",
+                        "field_updates": {"application_status": "面试完成"},
+                    },
+                    "reject": {
+                        "label": "不录取",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"application_status": "不录取"},
+                    },
+                },
+            },
+            "admission_confirmation": {
+                "label": "录取确认",
+                "handler_roles": ["platform_admin"],
+                "due_days": 2,
+                "actions": {
+                    "pre_admit": {
+                        "label": "预录取",
+                        "next_node": None,
+                        "task_status": "已通过",
+                        "field_updates": {"application_status": "预录取"},
+                    },
+                    "admit": {
+                        "label": "同意录取",
+                        "next_node": None,
+                        "task_status": "已通过",
+                        "field_updates": {"application_status": "同意录取"},
+                    },
+                    "reject": {
+                        "label": "不录取",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"application_status": "不录取"},
+                    },
+                },
+            },
+        },
+    },
+    "scientific_report": {
+        "workflow_name": "科研报告审阅",
+        "business_module": "培养管理",
+        "business_dataset": "scientific_reports",
+        "business_entity": "科研报告",
+        "business_key_prefix": "REP",
+        "managed_fields": ("report_status",),
+        "initial_field_values": {"report_status": "待导师审阅"},
+        "nodes": {
+            "advisor_review": {
+                "label": "导师审阅",
+                "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {
+                    "approve": {
+                        "label": "审阅通过",
+                        "next_node": None,
+                        "task_status": "已通过",
+                        "field_updates": {"report_status": "已通过"},
+                    },
+                    "request_revision": {
+                        "label": "退回修改",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"report_status": "退回修改"},
+                    },
+                },
+            },
+        },
+    },
+    "outbound_study": {
+        "workflow_name": "外出研修审批",
+        "business_module": "培养管理",
+        "business_dataset": "outbound_studies",
+        "business_entity": "外出研修",
+        "business_key_prefix": "OUT",
+        "managed_fields": ("approval_status",),
+        "initial_field_values": {"approval_status": "审批中"},
+        "nodes": {
+            "advisor_review": {
+                "label": "导师审核",
+                "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {
+                    "approve": {
+                        "label": "导师同意",
+                        "next_node": "office_review",
+                        "task_status": "处理中",
+                        "field_updates": {"approval_status": "审批中"},
+                    },
+                    "reject": {
+                        "label": "导师驳回",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"approval_status": "已驳回"},
+                    },
+                },
+            },
+            "office_review": {
+                "label": "学合审核",
+                "handler_roles": ["platform_admin"],
+                "due_days": 2,
+                "actions": {
+                    "approve": {
+                        "label": "审批通过",
+                        "next_node": None,
+                        "task_status": "已通过",
+                        "field_updates": {"approval_status": "已批准"},
+                    },
+                    "reject": {
+                        "label": "审批驳回",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"approval_status": "已驳回"},
+                    },
+                },
+            },
+        },
+    },
+    "thesis": {
+        "workflow_name": "学位申请审批",
+        "business_module": "学位管理",
+        "business_dataset": "theses",
+        "business_entity": "论文主档",
+        "business_key_prefix": "DEG",
+        "managed_fields": ("thesis_status", "blind_review_status", "degree_status"),
+        "initial_field_values": {
+            "thesis_status": "待查重",
+            "blind_review_status": "未送审",
+            "degree_status": "待申请",
+        },
+        "nodes": {
+            "advisor_precheck": {
+                "label": "导师预审",
+                "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {
+                    "submit_review": {
+                        "label": "提交送审",
+                        "next_node": "secretary_review",
+                        "task_status": "处理中",
+                        "field_updates": {
+                            "thesis_status": "查重通过",
+                            "blind_review_status": "进行中",
+                            "degree_status": "授位审批中",
+                        },
+                    },
+                    "request_revision": {
+                        "label": "退回修改",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {
+                            "thesis_status": "退回修改",
+                            "blind_review_status": "未通过",
+                            "degree_status": "未授位",
+                        },
+                    },
+                },
+            },
+            "secretary_review": {
+                "label": "材料复核",
+                "handler_roles": ["secretary"],
+                "due_days": 2,
+                "actions": {
+                    "approve": {
+                        "label": "复核通过",
+                        "next_node": None,
+                        "task_status": "已通过",
+                        "field_updates": {
+                            "thesis_status": "盲审通过",
+                            "blind_review_status": "已通过",
+                            "degree_status": "待正式答辩",
+                        },
+                    },
+                    "reject": {
+                        "label": "复核驳回",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {
+                            "thesis_status": "退回修改",
+                            "blind_review_status": "未通过",
+                            "degree_status": "未授位",
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+WORKFLOW_DATASET_TO_FLOW = {
+    definition["business_dataset"]: flow_code for flow_code, definition in MANAGED_WORKFLOW_DEFINITIONS.items()
+}
 DEFAULT_USER_PASSWORD = "ChangeMe@123"
 DEFAULT_PASSWORD_BY_USERNAME = {
     "admin": "Admin@123456",
-    "mentor.demo": "Mentor@123456",
-    "secretary.demo": "Secretary@123456",
+    "liu.ya": "LiuYa@2026",
+    "yuan.ye": "YuanYe@2026",
+    "xu.sutian": "XuSutian@2026",
+    "zhou.qing": "ZhouQing@2026",
+    "he.lin": "HeLin@2026",
+    "cao.bo": "CaoBo@2026",
+    "yang.qin": "YangQin@2026",
+    "sun.wei": "SunWei@2026",
 }
 PERMISSION_CATALOG: list[dict[str, str]] = [
     {"code": "dashboard:read", "name": "查看驾驶舱", "module_name": "驾驶舱", "description": "查看系统总览、预警和统计看板。"},
@@ -121,7 +409,7 @@ PERMISSION_CATALOG: list[dict[str, str]] = [
 ]
 
 
-class DemoManagementStore:
+class RuntimeManagementStore:
     def __init__(self) -> None:
         self._lock = Lock()
         self._postgres_store = PostgresStateStore()
@@ -134,7 +422,7 @@ class DemoManagementStore:
         postgres_state = self._postgres_store.load_state()
         if postgres_state:
             return postgres_state
-        raise RuntimeError("PostgreSQL runtime state is required. Initialize and sync PostgreSQL before starting the application.")
+        return build_runtime_seed_state()
 
     def _write_state(self, state: dict[str, Any] | None = None) -> None:
         payload = state or self.state
@@ -210,6 +498,12 @@ class DemoManagementStore:
                 )
                 changed = True
 
+        if self._normalize_legacy_workflow_tasks():
+            changed = True
+
+        if self._migrate_workflow_runtime():
+            changed = True
+
         return changed
 
     def _next_id(self, key: str) -> int:
@@ -252,6 +546,12 @@ class DemoManagementStore:
     def _normalize_name_list(self, values: list[str] | tuple[str, ...] | set[str] | None, *extra_values: str | None) -> list[str]:
         merged = [*(values or []), *extra_values]
         return list(dict.fromkeys(str(item).strip() for item in merged if str(item or "").strip()))
+
+    def _paginate_items(self, items: list[ListItemT], page: int, page_size: int) -> tuple[list[ListItemT], int]:
+        total = len(items)
+        start_index = max(page - 1, 0) * page_size
+        end_index = start_index + page_size
+        return items[start_index:end_index], total
 
     def _bootstrap_teams_from_students(self) -> list[dict[str, Any]]:
         grouped: dict[str, dict[str, Any]] = {}
@@ -414,6 +714,544 @@ class DemoManagementStore:
 
     def _dict_option_values(self, dict_type: str) -> list[str]:
         return [item.value for item in self._dict_options(dict_type)]
+
+    def _workflow_definition(self, flow_code: str) -> dict[str, Any]:
+        definition = MANAGED_WORKFLOW_DEFINITIONS.get(flow_code)
+        if not definition:
+            raise ValueError(f"Unsupported workflow flow: {flow_code}")
+        return definition
+
+    def _workflow_name_code(self, workflow_name: str) -> str:
+        normalized = str(workflow_name or "").strip()
+        if normalized in WORKFLOW_NAME_INITIALS_MAP:
+            return WORKFLOW_NAME_INITIALS_MAP[normalized]
+        ascii_code = "".join(char for char in normalized.upper() if "A" <= char <= "Z")
+        if ascii_code:
+            return ascii_code
+        return "YWLC"
+
+    @staticmethod
+    def _workflow_id_slug(value: str | None, max_length: int) -> str:
+        normalized = "".join(character.lower() for character in str(value or "") if character.isalnum())
+        if not normalized:
+            normalized = "x"
+        return normalized[:max_length]
+
+    @staticmethod
+    def _workflow_id_hash(*parts: Any, length: int = 10) -> str:
+        raw_value = "::".join(str(part or "") for part in parts)
+        return hashlib.sha1(raw_value.encode("utf-8")).hexdigest()[:length]
+
+    def _workflow_business_key_date(self, created_at: str | None = None) -> str:
+        text = str(created_at or "").strip()
+        if len(text) >= 10:
+            date_part = text[:10].replace("-", "")
+            if len(date_part) == 8 and date_part.isdigit():
+                return date_part
+        return datetime.now().strftime("%Y%m%d")
+
+    def _next_workflow_business_sequence(self, workflow_code: str, business_date: str) -> int:
+        cache_key = build_cache_key("workflow", "business-key", workflow_code, business_date)
+        try:
+            client = get_cache_client()
+            sequence = int(client.incr(cache_key))
+            if sequence == 1:
+                client.expire(cache_key, 3 * 24 * 60 * 60)
+            return sequence
+        except Exception:
+            fallback_key = f'workflow_business_key:{workflow_code}:{business_date}'
+            self._counters[fallback_key] = int(self._counters.get(fallback_key, 0)) + 1
+            return int(self._counters[fallback_key])
+
+    def _workflow_business_key_exists(self, business_key: str) -> bool:
+        for task in self._list("workflow_tasks"):
+            if str(task.get("business_key") or "") == business_key:
+                return True
+        for definition in MANAGED_WORKFLOW_DEFINITIONS.values():
+            for item in self._list(definition["business_dataset"]):
+                if str(item.get("business_key") or item.get("candidate_no") or "") == business_key:
+                    return True
+        return False
+
+    def _generate_workflow_business_key(self, workflow_name: str, created_at: str | None = None) -> str:
+        workflow_code = self._workflow_name_code(workflow_name)
+        business_date = self._workflow_business_key_date(created_at)
+        while True:
+            sequence = self._next_workflow_business_sequence(workflow_code, business_date)
+            business_key = f"{workflow_code}{business_date}{sequence:04d}"
+            if not self._workflow_business_key_exists(business_key):
+                return business_key
+
+    def _workflow_business_key(self, flow_code: str, entity_id: int, existing_key: str | None = None, created_at: str | None = None) -> str:
+        if existing_key:
+            return str(existing_key)
+        del entity_id
+        definition = self._workflow_definition(flow_code)
+        return self._generate_workflow_business_key(definition["workflow_name"], created_at=created_at)
+
+    def _workflow_process_definition_key(self, flow_code: str | None, workflow_name: str | None) -> str:
+        normalized_flow_code = str(flow_code or "").strip()
+        if normalized_flow_code:
+            return normalized_flow_code.lower()
+        return self._workflow_name_code(str(workflow_name or "未命名流程")).lower()
+
+    @staticmethod
+    def _workflow_deployment_id(process_definition_key: str) -> str:
+        return (
+            f"dep-{RuntimeManagementStore._workflow_id_slug(process_definition_key, 24)}-"
+            f"{RuntimeManagementStore._workflow_id_hash(process_definition_key, 'deployment', length=8)}"
+        )
+
+    @staticmethod
+    def _workflow_process_definition_id(process_definition_key: str) -> str:
+        return (
+            f"procdef-{RuntimeManagementStore._workflow_id_slug(process_definition_key, 20)}-v1-"
+            f"{RuntimeManagementStore._workflow_id_hash(process_definition_key, 'process-definition', length=8)}"
+        )
+
+    @staticmethod
+    def _workflow_process_instance_id(process_definition_key: str, business_key: str) -> str:
+        return (
+            f"procinst-{RuntimeManagementStore._workflow_id_slug(process_definition_key, 16)}-"
+            f"{RuntimeManagementStore._workflow_id_slug(business_key, 18)}-"
+            f"{RuntimeManagementStore._workflow_id_hash(process_definition_key, business_key, 'process-instance', length=10)}"
+        )
+
+    @staticmethod
+    def _workflow_task_definition_key(node_key: str | None, current_node: str | None) -> str:
+        normalized_node_key = str(node_key or "").strip()
+        if normalized_node_key:
+            return normalized_node_key
+        normalized_node = str(current_node or "").strip()
+        return normalized_node or "manual_task"
+
+    @staticmethod
+    def _workflow_execution_id(process_instance_id: str, task_definition_key: str) -> str:
+        return (
+            f"exec-{RuntimeManagementStore._workflow_id_slug(task_definition_key, 18)}-"
+            f"{RuntimeManagementStore._workflow_id_hash(process_instance_id, task_definition_key, 'execution', length=10)}"
+        )
+
+    def _workflow_candidate_groups(self, flow_code: str | None, node_key: str | None) -> list[str]:
+        normalized_flow_code = str(flow_code or "").strip()
+        normalized_node_key = str(node_key or "").strip()
+        if not normalized_flow_code or not normalized_node_key:
+            return []
+        node = self._workflow_definition(normalized_flow_code)["nodes"].get(normalized_node_key)
+        if not node:
+            return []
+        return [str(role) for role in node.get("handler_roles", []) if str(role).strip()]
+
+    def _ensure_workflow_engine_metadata(self, task: dict[str, Any]) -> bool:
+        process_definition_key = self._workflow_process_definition_key(task.get("flow_code"), task.get("workflow_name"))
+        task_definition_key = self._workflow_task_definition_key(task.get("node_key"), task.get("current_node"))
+        business_key = str(task.get("business_key") or "")
+        process_instance_id = self._workflow_process_instance_id(process_definition_key, business_key or f'TASK-{task.get("id") or "0"}')
+        execution_id = self._workflow_execution_id(process_instance_id, task_definition_key)
+        metadata_updates = {
+            "deployment_id": task.get("deployment_id") or self._workflow_deployment_id(process_definition_key),
+            "process_definition_key": process_definition_key,
+            "process_definition_id": task.get("process_definition_id") or self._workflow_process_definition_id(process_definition_key),
+            "process_definition_version": int(task.get("process_definition_version") or 1),
+            "process_instance_id": process_instance_id,
+            "execution_id": execution_id,
+            "task_definition_key": task_definition_key,
+            "candidate_groups": self._workflow_candidate_groups(task.get("flow_code"), task.get("node_key")),
+        }
+        changed = False
+        for key, value in metadata_updates.items():
+            if task.get(key) != value:
+                task[key] = value
+                changed = True
+        return changed
+
+    def _workflow_task_index_by_entity(self, flow_code: str, entity_id: int) -> tuple[int, dict[str, Any]] | None:
+        for index, item in enumerate(self._list("workflow_tasks")):
+            if item.get("flow_code") == flow_code and int(item.get("entity_id") or 0) == entity_id:
+                return index, item
+        return None
+
+    def _ensure_managed_business_key(self, flow_code: str, item: dict[str, Any], existing_key: str | None = None, created_at: str | None = None) -> tuple[str, bool]:
+        candidate_key = existing_key or item.get("business_key")
+        if not candidate_key and flow_code == "recruitment_application":
+            candidate_key = item.get("candidate_no")
+        business_key = self._workflow_business_key(
+            flow_code,
+            int(item.get("id") or 0),
+            existing_key=str(candidate_key) if candidate_key else None,
+            created_at=created_at,
+        )
+        changed = False
+        if item.get("business_key") != business_key:
+            item["business_key"] = business_key
+            changed = True
+        if flow_code == "recruitment_application" and item.get("candidate_no") != business_key:
+            item["candidate_no"] = business_key
+            changed = True
+        return business_key, changed
+
+    def _workflow_initial_node_key(self, flow_code: str) -> str:
+        return next(iter(self._workflow_definition(flow_code)["nodes"]))
+
+    def _workflow_due_at(self, flow_code: str, node_key: str) -> str:
+        definition = self._workflow_definition(flow_code)
+        due_days = int(definition["nodes"][node_key].get("due_days", 2))
+        return (datetime.now() + timedelta(days=due_days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    def _workflow_handler_display(self, flow_code: str, node_key: str, item: dict[str, Any]) -> str:
+        roles = self._workflow_definition(flow_code)["nodes"][node_key]["handler_roles"]
+        if roles == ["advisor"] and item.get("advisor_name"):
+            return str(item["advisor_name"])
+        return " / ".join(ROLE_DISPLAY_NAMES.get(role, role) for role in roles)
+
+    def _workflow_title(self, flow_code: str, item: dict[str, Any]) -> str:
+        if flow_code == "recruitment_application":
+            return f'{item["student_name"]}报名审核'
+        if flow_code == "scientific_report":
+            return f'{item["student_name"]}科研报告审阅'
+        if flow_code == "outbound_study":
+            return f'{item["student_name"]}外出研修申请'
+        if flow_code == "thesis":
+            return f'{item["student_name"]}授位审批'
+        return str(item.get("student_name") or item.get("title") or "流程任务")
+
+    def _workflow_form_summary(self, flow_code: str, item: dict[str, Any]) -> str:
+        if flow_code == "recruitment_application":
+            return f'业务编号：{item.get("business_key") or item.get("candidate_no") or "-"}；研究方向：{item["intended_field"]}；材料状态：{item["material_status"]}'
+        if flow_code == "scientific_report":
+            reviewer_name = item.get("reviewer_name") or "待分配"
+            return f'周期：{item["period_label"]}；审阅人：{reviewer_name}'
+        if flow_code == "outbound_study":
+            return f'研修地点：{item["destination"]}；起止：{item["start_date"]} 至 {item["end_date"]}'
+        if flow_code == "thesis":
+            return f'论文题目：{item["title"]}；盲审状态：{item["blind_review_status"]}'
+        return str(item.get("title") or item.get("student_name") or "")
+
+    def _workflow_applicant_name(self, flow_code: str, item: dict[str, Any]) -> str:
+        del flow_code
+        return str(item.get("student_name") or item.get("full_name") or item.get("business_key") or item.get("candidate_no") or "未知申请人")
+
+    def _principal_summary(self, principal: Any) -> dict[str, Any]:
+        if hasattr(principal, "model_dump"):
+            payload = principal.model_dump()
+        elif isinstance(principal, dict):
+            payload = principal
+        else:
+            payload = {
+                "username": getattr(principal, "username", "system"),
+                "full_name": getattr(principal, "full_name", getattr(principal, "username", "system")),
+                "roles": list(getattr(principal, "roles", [])),
+            }
+        return {
+            "username": payload.get("username", "system"),
+            "full_name": payload.get("full_name", payload.get("username", "system")),
+            "roles": list(payload.get("roles", [])),
+        }
+
+    def _workflow_action_options(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> list[dict[str, str]]:
+        flow_code = task.get("flow_code")
+        node_key = task.get("node_key")
+        if not flow_code or not node_key:
+            return []
+        node = self._workflow_definition(flow_code)["nodes"].get(node_key)
+        if not node:
+            return []
+        if principal_roles and not set(node["handler_roles"]).intersection(principal_roles):
+            return []
+        return [{"action": action_code, "label": action_config["label"]} for action_code, action_config in node["actions"].items()]
+
+    def _fallback_workflow_due_at(self, task: dict[str, Any]) -> str:
+        due_at = task.get("due_at")
+        if due_at:
+            return str(due_at)
+        created_at = str(task.get("created_at") or "").strip()
+        if created_at:
+            return created_at
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _build_workflow_task_record(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> WorkflowTaskRecord:
+        return WorkflowTaskRecord(
+            id=int(task["id"]),
+            workflow_name=str(task.get("workflow_name") or "未命名流程"),
+            business_module=str(task.get("business_module") or "流程中心"),
+            business_key=str(task.get("business_key") or f'TASK-{task["id"]}'),
+            title=str(task.get("title") or "未命名任务"),
+            applicant_name=str(task.get("applicant_name") or "未知申请人"),
+            current_handler=str(task.get("current_handler") or "待分派"),
+            current_node=str(task.get("current_node") or "待处理"),
+            priority=str(task.get("priority") or "中"),
+            status=str(task.get("status") or "待处理"),
+            created_at=str(task.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            due_at=self._fallback_workflow_due_at(task),
+            form_summary=str(task.get("form_summary") or ""),
+            latest_comment=task.get("latest_comment"),
+            available_actions=self._workflow_action_options(task, principal_roles=principal_roles),
+            process_definition_key=task.get("process_definition_key"),
+            process_definition_id=task.get("process_definition_id"),
+            process_instance_id=task.get("process_instance_id"),
+            execution_id=task.get("execution_id"),
+            task_definition_key=task.get("task_definition_key"),
+        )
+
+    def _build_workflow_history_record(self, entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "operated_at": entry["operated_at"],
+            "operator_username": entry["operator_username"],
+            "operator_full_name": entry["operator_full_name"],
+            "action": entry["action"],
+            "action_label": entry["action_label"],
+            "from_node": entry["from_node"],
+            "to_node": entry.get("to_node"),
+            "result_status": entry["result_status"],
+            "comment": entry.get("comment"),
+        }
+
+    def _workflow_task_index_by_business_key(self, business_key: str) -> tuple[int, dict[str, Any]] | None:
+        for index, item in enumerate(self._list("workflow_tasks")):
+            if item.get("business_key") == business_key:
+                return index, item
+        return None
+
+    def _normalize_legacy_workflow_tasks(self) -> bool:
+        changed = False
+        for index, task in enumerate(self._list("workflow_tasks")):
+            updated = dict(task)
+            row_changed = False
+            defaults = {
+                "workflow_name": updated.get("workflow_name") or "未命名流程",
+                "business_module": updated.get("business_module") or "流程中心",
+                "business_key": updated.get("business_key") or self._generate_workflow_business_key(
+                    str(updated.get("workflow_name") or "未命名流程"),
+                    created_at=str(updated.get("created_at") or ""),
+                ),
+                "title": updated.get("title") or "未命名任务",
+                "applicant_name": updated.get("applicant_name") or "未知申请人",
+                "current_handler": updated.get("current_handler") or "待分派",
+                "current_node": updated.get("current_node") or "待处理",
+                "priority": updated.get("priority") or "中",
+                "status": updated.get("status") or "待处理",
+                "created_at": updated.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "due_at": self._fallback_workflow_due_at(updated),
+                "form_summary": updated.get("form_summary") or "",
+                "history": updated.get("history") or [],
+            }
+            for key, value in defaults.items():
+                if updated.get(key) != value:
+                    updated[key] = value
+                    row_changed = True
+            if self._ensure_workflow_engine_metadata(updated):
+                row_changed = True
+            if row_changed:
+                self._list("workflow_tasks")[index] = updated
+                changed = True
+        return changed
+
+    def _workflow_initial_item(self, flow_code: str, item: dict[str, Any]) -> dict[str, Any]:
+        definition = self._workflow_definition(flow_code)
+        initial_item = {**item, **definition.get("initial_field_values", {})}
+        self._ensure_managed_business_key(flow_code, initial_item)
+        return initial_item
+
+    def _ensure_managed_status_fields_unchanged(self, dataset: str, current: dict[str, Any], incoming: dict[str, Any]) -> None:
+        flow_code = WORKFLOW_DATASET_TO_FLOW.get(dataset)
+        if not flow_code:
+            return
+        definition = self._workflow_definition(flow_code)
+        changed_fields = [field for field in definition["managed_fields"] if current.get(field) != incoming.get(field)]
+        if changed_fields:
+            raise ValueError(f'字段 {", ".join(changed_fields)} 为流程托管状态，请通过审批流程活动变更')
+
+    def _infer_workflow_runtime(self, flow_code: str, item: dict[str, Any]) -> dict[str, Any]:
+        if flow_code == "recruitment_application":
+            mapping = {
+                "报名已提交": ("qualification_review", "待处理"),
+                "资格审核通过": ("qualification_passed", "处理中"),
+                "材料评分中": ("interview_arrangement", "处理中"),
+                "面试待安排": ("admission_decision", "处理中"),
+                "面试完成": ("admission_confirmation", "处理中"),
+                "预录取": (None, "已通过"),
+                "同意录取": (None, "已通过"),
+                "不录取": (None, "已驳回"),
+            }
+            node_key, task_status = mapping.get(item.get("application_status"), ("qualification_review", "待处理"))
+            return {"node_key": node_key, "task_status": task_status}
+        if flow_code == "scientific_report":
+            if item.get("report_status") == "已通过":
+                return {"node_key": None, "task_status": "已通过"}
+            if item.get("report_status") == "退回修改":
+                return {"node_key": None, "task_status": "已驳回"}
+            return {"node_key": "advisor_review", "task_status": "待处理"}
+        if flow_code == "outbound_study":
+            if item.get("approval_status") in {"已批准", "研修中", "已结束"}:
+                return {"node_key": None, "task_status": "已通过"}
+            if item.get("approval_status") == "已驳回":
+                return {"node_key": None, "task_status": "已驳回"}
+            return {"node_key": "advisor_review", "task_status": "待处理"}
+        if flow_code == "thesis":
+            if item.get("degree_status") == "待正式答辩" or item.get("blind_review_status") == "已通过":
+                return {"node_key": None, "task_status": "已通过"}
+            if item.get("degree_status") == "未授位" or item.get("blind_review_status") == "未通过" or item.get("thesis_status") == "退回修改":
+                return {"node_key": None, "task_status": "已驳回"}
+            if item.get("degree_status") == "授位审批中" or item.get("blind_review_status") == "进行中":
+                return {"node_key": "secretary_review", "task_status": "处理中"}
+            return {"node_key": "advisor_precheck", "task_status": "待处理"}
+        raise ValueError(f"Unsupported workflow flow: {flow_code}")
+
+    def _sync_managed_workflow_task(self, flow_code: str, item: dict[str, Any], existing_task: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
+        definition = self._workflow_definition(flow_code)
+        runtime = self._infer_workflow_runtime(flow_code, item)
+        node_key = runtime["node_key"]
+        task_status = runtime["task_status"]
+        task = dict(existing_task or {})
+        changed = False
+        if not existing_task:
+            task["id"] = self._next_id("workflow_tasks")
+            task["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            task["history"] = []
+            changed = True
+        if "history" not in task:
+            task["history"] = []
+            changed = True
+        item_business_key, item_key_changed = self._ensure_managed_business_key(
+            flow_code,
+            item,
+            existing_key=task.get("business_key"),
+            created_at=str(task.get("created_at") or ""),
+        )
+        if item_key_changed:
+            changed = True
+        task_updates = {
+            "workflow_name": definition["workflow_name"],
+            "business_module": definition["business_module"],
+            "business_key": item_business_key,
+            "title": self._workflow_title(flow_code, item),
+            "applicant_name": self._workflow_applicant_name(flow_code, item),
+            "priority": task.get("priority") or "中",
+            "status": task_status,
+            "current_node": definition["nodes"][node_key]["label"] if node_key else "流程结束",
+            "current_handler": self._workflow_handler_display(flow_code, node_key, item) if node_key else "流程结束",
+            "due_at": task.get("due_at") if not node_key else task.get("due_at") or self._workflow_due_at(flow_code, node_key),
+            "form_summary": self._workflow_form_summary(flow_code, item),
+            "latest_comment": task.get("latest_comment"),
+            "flow_code": flow_code,
+            "business_dataset": definition["business_dataset"],
+            "entity_id": int(item["id"]),
+            "node_key": node_key,
+        }
+        for key, value in task_updates.items():
+            if task.get(key) != value:
+                task[key] = value
+                changed = True
+        if self._ensure_workflow_engine_metadata(task):
+            changed = True
+        return task, changed
+
+    def _migrate_workflow_runtime(self) -> bool:
+        changed = False
+        for flow_code, definition in MANAGED_WORKFLOW_DEFINITIONS.items():
+            for item in self._list(definition["business_dataset"]):
+                existing_business_key = str(item.get("business_key") or item.get("candidate_no") or "").strip() or None
+                if existing_business_key:
+                    _, item_changed = self._ensure_managed_business_key(flow_code, item, existing_key=existing_business_key)
+                    if item_changed:
+                        changed = True
+                located = None
+                if item.get("business_key"):
+                    located = self._workflow_task_index_by_business_key(str(item["business_key"]))
+                if located is None:
+                    located = self._workflow_task_index_by_entity(flow_code, int(item["id"]))
+                existing_task = located[1] if located else None
+                task, task_changed = self._sync_managed_workflow_task(flow_code, item, existing_task=existing_task)
+                if located is None:
+                    self._list("workflow_tasks").insert(0, task)
+                    changed = True
+                elif task_changed:
+                    self._list("workflow_tasks")[located[0]] = task
+                    changed = True
+        return changed
+
+    def _start_managed_workflow(self, flow_code: str, item: dict[str, Any], operator_username: str) -> None:
+        task, _ = self._sync_managed_workflow_task(flow_code, item)
+        task["latest_comment"] = "流程已发起，等待节点处理。"
+        task["history"] = [
+            {
+                "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "operator_username": operator_username,
+                "operator_full_name": operator_username,
+                "action": "start",
+                "action_label": "发起流程",
+                "from_node": "开始",
+                "to_node": task["current_node"],
+                "result_status": task["status"],
+                "comment": task["latest_comment"],
+            }
+        ]
+        self._list("workflow_tasks").insert(0, task)
+
+    def get_workflow_task_detail(self, task_id: int, principal: Any) -> dict[str, Any]:
+        principal_summary = self._principal_summary(principal)
+        _, task = self._find_required("workflow_tasks", task_id)
+        return {
+            "task": self._build_workflow_task_record(task, principal_roles=principal_summary["roles"]),
+            "history": [self._build_workflow_history_record(item) for item in task.get("history", [])],
+        }
+
+    def execute_workflow_action(self, task_id: int, action: str, comment: str | None, principal: Any) -> dict[str, Any]:
+        principal_summary = self._principal_summary(principal)
+        with self._lock:
+            index, task = self._find_required("workflow_tasks", task_id)
+            flow_code = task.get("flow_code")
+            node_key = task.get("node_key")
+            if not flow_code or not node_key:
+                raise ValueError("当前任务不是流程驱动任务，不能执行流程动作")
+            definition = self._workflow_definition(flow_code)
+            node = definition["nodes"][node_key]
+            if not set(node["handler_roles"]).intersection(principal_summary["roles"]):
+                raise PermissionError("当前角色无权执行该流程活动")
+            action_definition = node["actions"].get(action)
+            if not action_definition:
+                raise ValueError("当前节点不支持该流程动作")
+            entity_index, entity = self._find_required(definition["business_dataset"], int(task["entity_id"]))
+            updated_entity = {**entity, **action_definition.get("field_updates", {})}
+            self._list(definition["business_dataset"])[entity_index] = updated_entity
+
+            next_node = action_definition.get("next_node")
+            updated_task = dict(task)
+            updated_task["status"] = action_definition["task_status"]
+            updated_task["latest_comment"] = comment or action_definition["label"]
+            updated_task["form_summary"] = self._workflow_form_summary(flow_code, updated_entity)
+            updated_task["node_key"] = next_node
+            updated_task["current_node"] = definition["nodes"][next_node]["label"] if next_node else "流程结束"
+            updated_task["current_handler"] = self._workflow_handler_display(flow_code, next_node, updated_entity) if next_node else "流程结束"
+            updated_task["due_at"] = self._workflow_due_at(flow_code, next_node) if next_node else updated_task["due_at"]
+            updated_task.setdefault("history", []).append(
+                {
+                    "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "operator_username": principal_summary["username"],
+                    "operator_full_name": principal_summary["full_name"],
+                    "action": action,
+                    "action_label": action_definition["label"],
+                    "from_node": node["label"],
+                    "to_node": definition["nodes"][next_node]["label"] if next_node else "流程结束",
+                    "result_status": updated_task["status"],
+                    "comment": updated_task["latest_comment"],
+                }
+            )
+            self._ensure_workflow_engine_metadata(updated_task)
+            self._list("workflow_tasks")[index] = updated_task
+            self._record_operation(
+                "流程中心",
+                definition["business_entity"],
+                task["business_key"],
+                action_definition["label"],
+                f'{principal_summary["full_name"]} 执行 {definition["workflow_name"]} - {action_definition["label"]}',
+                operator_username=principal_summary["username"],
+            )
+            self._save()
+            return {
+                "task": self._build_workflow_task_record(updated_task, principal_roles=principal_summary["roles"]),
+                "history": [self._build_workflow_history_record(item) for item in updated_task.get("history", [])],
+            }
 
     def get_system_options(self) -> SystemOptionsResponse:
         return SystemOptionsResponse(
@@ -650,9 +1488,23 @@ class DemoManagementStore:
             ],
         )
 
-    def get_recruitment_plans(self) -> RecruitPlanListResponse:
+    def get_recruitment_plans(
+        self,
+        keyword: str | None = None,
+        semester: str | None = None,
+        current_stage: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> RecruitPlanListResponse:
         items = [self._build_recruit_plan_record(item) for item in self._list("recruitment_plans")]
-        return RecruitPlanListResponse(items=items, total=len(items))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item.plan_name, item.academic_term, item.current_stage, keyword=keyword)]
+        if semester:
+            items = [item for item in items if item.semester == semester]
+        if current_stage:
+            items = [item for item in items if item.current_stage == current_stage]
+        paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
+        return RecruitPlanListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_recruitment_plan(self, payload: RecruitPlanUpsert) -> RecruitPlanRecord:
         with self._lock:
@@ -672,7 +1524,14 @@ class DemoManagementStore:
             self._save()
             return self._build_recruit_plan_record(updated)
 
-    def get_recruitment_applications(self, keyword: str | None = None, plan_id: int | None = None, status: str | None = None) -> RecruitApplicationListResponse:
+    def get_recruitment_applications(
+        self,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> RecruitApplicationListResponse:
         items = list(self._list("recruitment_applications"))
         if plan_id is not None:
             items = [item for item in items if item["plan_id"] == plan_id]
@@ -680,22 +1539,36 @@ class DemoManagementStore:
             items = [item for item in items if item["application_status"] == status]
         if keyword:
             term = keyword.lower()
-            items = [item for item in items if term in item["candidate_no"].lower() or term in item["student_name"].lower() or term in item["graduation_school"].lower() or term in item["intended_field"].lower()]
-        return RecruitApplicationListResponse(items=[RecruitApplicationRecord(**item) for item in items], total=len(items))
+            items = [
+                item
+                for item in items
+                if term in str(item.get("business_key") or "").lower()
+                or term in str(item.get("candidate_no") or "").lower()
+                or term in item["student_name"].lower()
+                or term in item["graduation_school"].lower()
+                or term in item["intended_field"].lower()
+            ]
+        records = [RecruitApplicationRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return RecruitApplicationListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
-    def create_recruitment_application(self, payload: RecruitApplicationUpsert) -> RecruitApplicationRecord:
+    def create_recruitment_application(self, payload: RecruitApplicationUpsert, principal: Any | None = None) -> RecruitApplicationRecord:
         with self._lock:
-            item = payload.model_dump()
+            operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
+            item = self._workflow_initial_item("recruitment_application", payload.model_dump())
             item["id"] = self._next_id("recruitment_applications")
             self._list("recruitment_applications").insert(0, item)
-            self._record_operation("招生管理", "报名申请", str(item["id"]), "新增", f'新增报名申请 {item["student_name"]}')
+            self._start_managed_workflow("recruitment_application", item, operator_username=operator["username"])
+            self._record_operation("招生管理", "报名申请", str(item["id"]), "新增", f'新增报名申请 {item["student_name"]}', operator_username=operator["username"])
             self._save()
             return RecruitApplicationRecord(**item)
 
     def update_recruitment_application(self, application_id: int, payload: RecruitApplicationUpsert) -> RecruitApplicationRecord:
         with self._lock:
             index, item = self._find_required("recruitment_applications", application_id)
-            updated = {**item, **payload.model_dump(), "id": application_id}
+            incoming = {**item, **payload.model_dump(), "id": application_id}
+            self._ensure_managed_status_fields_unchanged("recruitment_applications", item, incoming)
+            updated = incoming
             self._list("recruitment_applications")[index] = updated
             self._record_operation("招生管理", "报名申请", str(application_id), "编辑", f'更新报名申请 {updated["student_name"]}')
             self._save()
@@ -732,6 +1605,8 @@ class DemoManagementStore:
         status: str | None = None,
         advisor_name: str | None = None,
         team_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
     ) -> StudentManagementResponse:
         items = list(self._list("students"))
         if keyword:
@@ -743,7 +1618,9 @@ class DemoManagementStore:
             items = [item for item in items if item["advisor_name"] == advisor_name]
         if team_name:
             items = [item for item in items if item["team_name"] == team_name]
-        return StudentManagementResponse(items=[StudentRecord(**item) for item in items], total=len(items))
+        records = [StudentRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return StudentManagementResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def get_teams(
         self,
@@ -751,6 +1628,8 @@ class DemoManagementStore:
         status: str | None = None,
         department_name: str | None = None,
         lead_advisor_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
     ) -> TeamListResponse:
         items = list(self._list("teams"))
         if keyword:
@@ -773,7 +1652,8 @@ class DemoManagementStore:
         if lead_advisor_name:
             items = [item for item in items if item["lead_advisor_name"] == lead_advisor_name]
         records = [self._build_team_record(item) for item in items]
-        return TeamListResponse(items=records, total=len(records))
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return TeamListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def get_student_stats(self) -> StudentStats:
         distribution = Counter(item["status"] for item in self._list("students"))
@@ -881,6 +1761,8 @@ class DemoManagementStore:
         plan_status: str | None = None,
         advisor_name: str | None = None,
         report_cycle: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
     ) -> TrainingPlanListResponse:
         items = list(self._list("training_plans"))
         if keyword:
@@ -895,8 +1777,9 @@ class DemoManagementStore:
             items = [item for item in items if item["advisor_name"] == advisor_name]
         if report_cycle:
             items = [item for item in items if item["report_cycle"] == report_cycle]
-        items = [TrainingPlanRecord(**item) for item in items]
-        return TrainingPlanListResponse(items=items, total=len(items))
+        records = [TrainingPlanRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return TrainingPlanListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_training_plan(self, payload: TrainingPlanUpsert) -> TrainingPlanRecord:
         with self._lock:
@@ -935,6 +1818,8 @@ class DemoManagementStore:
         keyword: str | None = None,
         status: str | None = None,
         reviewer_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
     ) -> ScientificReportListResponse:
         items = list(self._list("scientific_reports"))
         if status:
@@ -943,25 +1828,31 @@ class DemoManagementStore:
             items = [
                 item
                 for item in items
-                if self._matches_keyword(item["student_no"], item["student_name"], item["period_label"], item["summary"], keyword=keyword)
+                if self._matches_keyword(item.get("business_key"), item["student_no"], item["student_name"], item["period_label"], item["summary"], keyword=keyword)
             ]
         if reviewer_name:
             items = [item for item in items if item.get("reviewer_name") == reviewer_name]
-        return ScientificReportListResponse(items=[ScientificReportRecord(**item) for item in items], total=len(items))
+        records = [ScientificReportRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return ScientificReportListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
-    def create_scientific_report(self, payload: ScientificReportUpsert) -> ScientificReportRecord:
+    def create_scientific_report(self, payload: ScientificReportUpsert, principal: Any | None = None) -> ScientificReportRecord:
         with self._lock:
-            item = payload.model_dump()
+            operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
+            item = self._workflow_initial_item("scientific_report", payload.model_dump())
             item["id"] = self._next_id("scientific_reports")
             self._list("scientific_reports").insert(0, item)
-            self._record_operation("培养管理", "科研报告", str(item["id"]), "登记报告", f'登记科研报告 {item["student_name"]}')
+            self._start_managed_workflow("scientific_report", item, operator_username=operator["username"])
+            self._record_operation("培养管理", "科研报告", str(item["id"]), "登记报告", f'登记科研报告 {item["student_name"]}', operator_username=operator["username"])
             self._save()
             return ScientificReportRecord(**item)
 
     def update_scientific_report(self, report_id: int, payload: ScientificReportUpsert) -> ScientificReportRecord:
         with self._lock:
             index, item = self._find_required("scientific_reports", report_id)
-            updated = {**item, **payload.model_dump(), "id": report_id}
+            incoming = {**item, **payload.model_dump(), "id": report_id}
+            self._ensure_managed_status_fields_unchanged("scientific_reports", item, incoming)
+            updated = incoming
             self._list("scientific_reports")[index] = updated
             self._record_operation("培养管理", "科研报告", str(report_id), "维护报告", f'维护科研报告 {updated["student_name"]}')
             self._save()
@@ -987,6 +1878,8 @@ class DemoManagementStore:
         status: str | None = None,
         study_type: str | None = None,
         advisor_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
     ) -> OutboundStudyListResponse:
         items = list(self._list("outbound_studies"))
         if status:
@@ -995,27 +1888,33 @@ class DemoManagementStore:
             items = [
                 item
                 for item in items
-                if self._matches_keyword(item["student_no"], item["student_name"], item["destination"], item.get("expected_outcome"), keyword=keyword)
+                if self._matches_keyword(item.get("business_key"), item["student_no"], item["student_name"], item["destination"], item.get("expected_outcome"), keyword=keyword)
             ]
         if study_type:
             items = [item for item in items if item["study_type"] == study_type]
         if advisor_name:
             items = [item for item in items if item["advisor_name"] == advisor_name]
-        return OutboundStudyListResponse(items=[OutboundStudyRecord(**item) for item in items], total=len(items))
+        records = [OutboundStudyRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return OutboundStudyListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
-    def create_outbound_study(self, payload: OutboundStudyUpsert) -> OutboundStudyRecord:
+    def create_outbound_study(self, payload: OutboundStudyUpsert, principal: Any | None = None) -> OutboundStudyRecord:
         with self._lock:
-            item = payload.model_dump()
+            operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
+            item = self._workflow_initial_item("outbound_study", payload.model_dump())
             item["id"] = self._next_id("outbound_studies")
             self._list("outbound_studies").insert(0, item)
-            self._record_operation("培养管理", "外出研修", str(item["id"]), "发起研修", f'发起外出研修 {item["student_name"]}')
+            self._start_managed_workflow("outbound_study", item, operator_username=operator["username"])
+            self._record_operation("培养管理", "外出研修", str(item["id"]), "发起研修", f'发起外出研修 {item["student_name"]}', operator_username=operator["username"])
             self._save()
             return OutboundStudyRecord(**item)
 
     def update_outbound_study(self, study_id: int, payload: OutboundStudyUpsert) -> OutboundStudyRecord:
         with self._lock:
             index, item = self._find_required("outbound_studies", study_id)
-            updated = {**item, **payload.model_dump(), "id": study_id}
+            incoming = {**item, **payload.model_dump(), "id": study_id}
+            self._ensure_managed_status_fields_unchanged("outbound_studies", item, incoming)
+            updated = incoming
             self._list("outbound_studies")[index] = updated
             self._record_operation("培养管理", "外出研修", str(study_id), "维护研修", f'维护外出研修 {updated["student_name"]}')
             self._save()
@@ -1060,38 +1959,79 @@ class DemoManagementStore:
             ],
         )
 
-    def get_theses(self, keyword: str | None = None, degree_status: str | None = None) -> ThesisListResponse:
+    def get_theses(
+        self,
+        keyword: str | None = None,
+        degree_status: str | None = None,
+        advisor_name: str | None = None,
+        thesis_status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> ThesisListResponse:
         items = list(self._list("theses"))
         if degree_status:
             items = [item for item in items if item["degree_status"] == degree_status]
+        if advisor_name:
+            items = [item for item in items if item["advisor_name"] == advisor_name]
+        if thesis_status:
+            items = [item for item in items if item["thesis_status"] == thesis_status]
         if keyword:
             term = keyword.lower()
-            items = [item for item in items if term in item["student_no"].lower() or term in item["student_name"].lower() or term in item["title"].lower()]
-        return ThesisListResponse(items=[ThesisRecord(**item) for item in items], total=len(items))
+            items = [
+                item
+                for item in items
+                if term in str(item.get("business_key") or "").lower()
+                or term in item["student_no"].lower()
+                or term in item["student_name"].lower()
+                or term in item["title"].lower()
+            ]
+        records = [ThesisRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return ThesisListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
-    def create_thesis(self, payload: ThesisUpsert) -> ThesisRecord:
+    def create_thesis(self, payload: ThesisUpsert, principal: Any | None = None) -> ThesisRecord:
         with self._lock:
-            item = payload.model_dump()
+            operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
+            item = self._workflow_initial_item("thesis", payload.model_dump())
             item["id"] = self._next_id("theses")
             self._list("theses").insert(0, item)
-            self._record_operation("学位管理", "论文主档", str(item["id"]), "新增", f'新增论文 {item["student_name"]}')
+            self._start_managed_workflow("thesis", item, operator_username=operator["username"])
+            self._record_operation("学位管理", "论文主档", str(item["id"]), "新增", f'新增论文 {item["student_name"]}', operator_username=operator["username"])
             self._save()
             return ThesisRecord(**item)
 
     def update_thesis(self, thesis_id: int, payload: ThesisUpsert) -> ThesisRecord:
         with self._lock:
             index, item = self._find_required("theses", thesis_id)
-            updated = {**item, **payload.model_dump(), "id": thesis_id}
+            incoming = {**item, **payload.model_dump(), "id": thesis_id}
+            self._ensure_managed_status_fields_unchanged("theses", item, incoming)
+            updated = incoming
             self._list("theses")[index] = updated
             self._record_operation("学位管理", "论文主档", str(thesis_id), "编辑", f'更新论文 {updated["student_name"]}')
             self._save()
             return ThesisRecord(**updated)
 
-    def get_thesis_reviews(self, thesis_id: int | None = None) -> ThesisReviewListResponse:
+    def get_thesis_reviews(
+        self,
+        thesis_id: int | None = None,
+        keyword: str | None = None,
+        expert_name: str | None = None,
+        review_status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> ThesisReviewListResponse:
         items = list(self._list("thesis_reviews"))
         if thesis_id is not None:
             items = [item for item in items if item["thesis_id"] == thesis_id]
-        return ThesisReviewListResponse(items=[ThesisReviewRecord(**item) for item in items], total=len(items))
+        if expert_name:
+            items = [item for item in items if item["expert_name"] == expert_name]
+        if review_status:
+            items = [item for item in items if item["review_status"] == review_status]
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["thesis_title"], item["expert_name"], item.get("review_comment"), keyword=keyword)]
+        records = [ThesisReviewRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return ThesisReviewListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_thesis_review(self, payload: ThesisReviewUpsert) -> ThesisReviewRecord:
         with self._lock:
@@ -1140,9 +2080,11 @@ class DemoManagementStore:
             status_options=self._dict_options("workflow_status"),
         )
 
-    def get_dict_types(self, keyword: str | None = None, status: str | None = None) -> DictTypeListResponse:
+    def get_dict_types(self, keyword: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> DictTypeListResponse:
         records = self._postgres_store.list_dict_types(keyword=keyword, status=status)
-        return DictTypeListResponse(items=[DictTypeRecord(**item) for item in records], total=len(records))
+        items = [DictTypeRecord(**item) for item in records]
+        paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
+        return DictTypeListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_dict_type(self, payload: DictTypeUpsert) -> DictTypeRecord:
         record = self._postgres_store.create_dict_type(payload.model_dump())
@@ -1155,9 +2097,18 @@ class DemoManagementStore:
     def delete_dict_type(self, dict_type_id: int) -> None:
         self._postgres_store.delete_dict_type(dict_type_id)
 
-    def get_dict_data(self, keyword: str | None = None, dict_type: str | None = None, status: str | None = None) -> DictDataListResponse:
+    def get_dict_data(
+        self,
+        keyword: str | None = None,
+        dict_type: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> DictDataListResponse:
         records = self._postgres_store.list_dict_data(keyword=keyword, dict_type=dict_type, status=status)
-        return DictDataListResponse(items=[DictDataRecord(**item) for item in records], total=len(records))
+        items = [DictDataRecord(**item) for item in records]
+        paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
+        return DictDataListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_dict_data(self, payload: DictDataUpsert) -> DictDataRecord:
         record = self._postgres_store.create_dict_data(payload.model_dump())
@@ -1170,7 +2121,14 @@ class DemoManagementStore:
     def delete_dict_data(self, dict_data_id: int) -> None:
         self._postgres_store.delete_dict_data(dict_data_id)
 
-    def get_roles(self, keyword: str | None = None, scope_name: str | None = None, permission: str | None = None) -> RoleListResponse:
+    def get_roles(
+        self,
+        keyword: str | None = None,
+        scope_name: str | None = None,
+        permission: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> RoleListResponse:
         items = list(self._list("roles"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["role_code"], item["role_name"], item["scope_name"], keyword=keyword)]
@@ -1178,8 +2136,9 @@ class DemoManagementStore:
             items = [item for item in items if item["scope_name"] == scope_name]
         if permission:
             items = [item for item in items if permission in item.get("permissions", [])]
-        items = [self._build_role_record(item) for item in items]
-        return RoleListResponse(items=items, total=len(items))
+        records = [self._build_role_record(item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return RoleListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_role(self, payload: RoleUpsert) -> RoleRecord:
         with self._lock:
@@ -1236,6 +2195,8 @@ class DemoManagementStore:
         role_code: str | None = None,
         account_status: str | None = None,
         department_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
     ) -> SystemUserListResponse:
         items = list(self._list("system_users"))
         if keyword:
@@ -1246,8 +2207,9 @@ class DemoManagementStore:
             items = [item for item in items if item["account_status"] == account_status]
         if department_name:
             items = [item for item in items if department_name in item["department_name"]]
-        items = [self._build_system_user_record(item) for item in items]
-        return SystemUserListResponse(items=items, total=len(items))
+        records = [self._build_system_user_record(item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return SystemUserListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_system_user(self, payload: SystemUserUpsert) -> SystemUserRecord:
         with self._lock:
@@ -1320,14 +2282,15 @@ class DemoManagementStore:
             success_count += 1
         return BulkActionResponse(success_count=success_count)
 
-    def get_audit_policy_records(self, keyword: str | None = None, status: str | None = None) -> AuditPolicyListResponse:
+    def get_audit_policy_records(self, keyword: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> AuditPolicyListResponse:
         items = list(self._list("audit_policies"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["item"], item["policy"], keyword=keyword)]
         if status:
             items = [item for item in items if item["status"] == status]
-        items = [AuditPolicyRecord(**item) for item in items]
-        return AuditPolicyListResponse(items=items, total=len(items))
+        records = [AuditPolicyRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return AuditPolicyListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_audit_policy(self, payload: AuditPolicyUpsert) -> AuditPolicyRecord:
         with self._lock:
@@ -1361,7 +2324,14 @@ class DemoManagementStore:
             success_count += 1
         return BulkActionResponse(success_count=success_count)
 
-    def get_integrations(self, keyword: str | None = None, status: str | None = None, direction: str | None = None) -> IntegrationListResponse:
+    def get_integrations(
+        self,
+        keyword: str | None = None,
+        status: str | None = None,
+        direction: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> IntegrationListResponse:
         items = list(self._list("integrations"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["name"], item["owner"], item["direction"], keyword=keyword)]
@@ -1369,8 +2339,9 @@ class DemoManagementStore:
             items = [item for item in items if item["status"] == status]
         if direction:
             items = [item for item in items if item["direction"] == direction]
-        items = [IntegrationRecord(**item) for item in items]
-        return IntegrationListResponse(items=items, total=len(items))
+        records = [IntegrationRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return IntegrationListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_integration(self, payload: IntegrationUpsert) -> IntegrationRecord:
         with self._lock:
@@ -1404,7 +2375,14 @@ class DemoManagementStore:
             success_count += 1
         return BulkActionResponse(success_count=success_count)
 
-    def get_operation_logs(self, keyword: str | None = None, module_name: str | None = None, result: str | None = None) -> OperationLogListResponse:
+    def get_operation_logs(
+        self,
+        keyword: str | None = None,
+        module_name: str | None = None,
+        result: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> OperationLogListResponse:
         items = list(self._list("operation_logs"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["operator_username"], item["entity_name"], item["summary"], keyword=keyword)]
@@ -1412,10 +2390,18 @@ class DemoManagementStore:
             items = [item for item in items if item["module_name"] == module_name]
         if result:
             items = [item for item in items if item["result"] == result]
-        items = [OperationLogRecord(**item) for item in items]
-        return OperationLogListResponse(items=items, total=len(items))
+        records = [OperationLogRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return OperationLogListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
-    def get_sync_logs(self, keyword: str | None = None, sync_status: str | None = None, source_system: str | None = None) -> SyncLogListResponse:
+    def get_sync_logs(
+        self,
+        keyword: str | None = None,
+        sync_status: str | None = None,
+        source_system: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> SyncLogListResponse:
         items = list(self._list("sync_logs"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["source_system"], item["target_system"], item.get("failure_reason"), keyword=keyword)]
@@ -1423,8 +2409,9 @@ class DemoManagementStore:
             items = [item for item in items if item["sync_status"] == sync_status]
         if source_system:
             items = [item for item in items if item["source_system"] == source_system]
-        items = [SyncLogRecord(**item) for item in items]
-        return SyncLogListResponse(items=items, total=len(items))
+        records = [SyncLogRecord(**item) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return SyncLogListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def get_system_architecture(self) -> SystemArchitecture:
         return SystemArchitecture(
@@ -1445,18 +2432,34 @@ class DemoManagementStore:
             role_total=len(self._list("roles")),
         )
 
-    def get_workflow_tasks(self, status: str | None = None, module: str | None = None) -> WorkflowTaskListResponse:
+    def get_workflow_tasks(
+        self,
+        status: str | None = None,
+        module: str | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+        principal: Any | None = None,
+    ) -> WorkflowTaskListResponse:
+        principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": []})
         items = list(self._list("workflow_tasks"))
         if status:
             items = [item for item in items if item["status"] == status]
         if module:
             items = [item for item in items if item["business_module"] == module]
-        return WorkflowTaskListResponse(items=[WorkflowTaskRecord(**item) for item in items], total=len(items))
+        if keyword:
+            items = [item for item in items if self._matches_keyword(item["workflow_name"], item["business_key"], item["title"], item["applicant_name"], item["current_handler"], keyword=keyword)]
+        records = [self._build_workflow_task_record(item, principal_roles=principal_summary["roles"]) for item in items]
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return WorkflowTaskListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_workflow_task(self, payload: WorkflowTaskUpsert) -> WorkflowTaskRecord:
         with self._lock:
             item = payload.model_dump()
             item["id"] = self._next_id("workflow_tasks")
+            item["created_at"] = item.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            item["business_key"] = self._generate_workflow_business_key(item.get("workflow_name") or "未命名流程", created_at=item["created_at"])
+            self._ensure_workflow_engine_metadata(item)
             self._list("workflow_tasks").insert(0, item)
             self._record_operation("审批中心", "审批任务", str(item["id"]), "新增", f'新增审批任务 {item["title"]}')
             self._save()
@@ -1465,7 +2468,10 @@ class DemoManagementStore:
     def update_workflow_task(self, task_id: int, payload: WorkflowTaskUpsert) -> WorkflowTaskRecord:
         with self._lock:
             index, item = self._find_required("workflow_tasks", task_id)
-            updated = {**item, **payload.model_dump(), "id": task_id}
+            if item.get("flow_code"):
+                raise ValueError("流程驱动任务不允许手工编辑，请通过流程动作推进")
+            updated = {**item, **payload.model_dump(), "id": task_id, "business_key": item.get("business_key")}
+            self._ensure_workflow_engine_metadata(updated)
             self._list("workflow_tasks")[index] = updated
             self._record_operation("审批中心", "审批任务", str(task_id), "编辑", f'更新审批任务 {updated["title"]}')
             self._save()
@@ -1474,6 +2480,8 @@ class DemoManagementStore:
     def delete_workflow_task(self, task_id: int) -> None:
         with self._lock:
             index, item = self._find_required("workflow_tasks", task_id)
+            if item.get("flow_code"):
+                raise ValueError("流程驱动任务不允许手工删除")
             self._list("workflow_tasks").pop(index)
             self._record_operation("审批中心", "审批任务", str(task_id), "删除", f'删除审批任务 {item["title"]}')
             self._save()
@@ -1524,4 +2532,4 @@ class DemoManagementStore:
             return UserProfile(**updated)
 
 
-store = DemoManagementStore()
+store = RuntimeManagementStore()

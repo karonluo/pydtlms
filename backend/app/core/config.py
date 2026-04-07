@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     redis_key_prefix: str = "CTDTLMS_"
 
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
-    demo_admin_username: str = "admin"
-    demo_admin_password: str = "Admin@123456"
+    default_admin_username: str = "admin"
+    default_admin_password: str = "Admin@123456"
 
     model_config = SettingsConfigDict(
         env_file=(BACKEND_DIR / ".env", BACKEND_DIR / ".env.local"),

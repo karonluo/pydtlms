@@ -44,9 +44,11 @@ def student_management_list(
     status_filter: str | None = Query(default=None, alias="status"),
     advisor_name: str | None = Query(default=None),
     team_name: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("students:read")),
 ) -> StudentManagementResponse:
-    return get_student_management_list(keyword=keyword, status=status_filter, advisor_name=advisor_name, team_name=team_name)
+    return get_student_management_list(keyword=keyword, status=status_filter, advisor_name=advisor_name, team_name=team_name, page=page, page_size=page_size)
 
 
 @router.get("/options", response_model=StudentOptionsResponse)
@@ -86,6 +88,8 @@ def team_list(
     status_filter: str | None = Query(default=None, alias="status"),
     department_name: str | None = Query(default=None),
     lead_advisor_name: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("students:read")),
 ) -> TeamListResponse:
     return get_team_list(
@@ -93,6 +97,8 @@ def team_list(
         status=status_filter,
         department_name=department_name,
         lead_advisor_name=lead_advisor_name,
+        page=page,
+        page_size=page_size,
     )
 
 

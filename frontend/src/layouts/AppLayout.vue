@@ -95,10 +95,17 @@ const menuGroups: MenuGroup[] = [
         icon: Setting,
         items: [
           { path: '/system/roles', label: '角色管理', icon: Setting, requiredPermission: 'system:read' },
-          { path: '/system/dict-types', label: '字典类型', icon: Setting, requiredPermission: 'system:read' },
-          { path: '/system/dict-data', label: '字典数据', icon: Setting, requiredPermission: 'system:read' },
           { path: '/system/audit', label: '审计策略', icon: Setting, requiredPermission: 'audit:read' },
           { path: '/system/integrations', label: '接口管理', icon: Setting, requiredPermission: 'system:read' },
+        ],
+      },
+      {
+        key: 'dictionary',
+        label: '字典管理',
+        icon: Setting,
+        items: [
+          { path: '/system/dict-types', label: '字典类型', icon: Setting, requiredPermission: 'system:read' },
+          { path: '/system/dict-data', label: '字典数据', icon: Setting, requiredPermission: 'system:read' },
         ],
       },
       {
@@ -424,11 +431,16 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
 .layout-main {
   padding: 4px 18px 18px;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .layout-view-host {
-  height: 100%;
+  min-height: 100%;
+}
+
+.layout-shell > .el-container {
+  min-width: 0;
   min-height: 0;
 }
 

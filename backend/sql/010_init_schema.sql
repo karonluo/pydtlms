@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS dtlms_training_plan_versions (
 
 CREATE TABLE IF NOT EXISTS dtlms_scientific_reports (
     id BIGSERIAL PRIMARY KEY,
+    business_key VARCHAR(64) NOT NULL UNIQUE,
     student_id BIGINT NOT NULL REFERENCES dtlms_students(id),
     training_plan_id BIGINT NOT NULL REFERENCES dtlms_training_plans(id),
     period_label VARCHAR(32) NOT NULL,
@@ -192,6 +193,7 @@ CREATE TABLE IF NOT EXISTS dtlms_scientific_reports (
 
 CREATE TABLE IF NOT EXISTS dtlms_outbound_studies (
     id BIGSERIAL PRIMARY KEY,
+    business_key VARCHAR(64) NOT NULL UNIQUE,
     student_id BIGINT NOT NULL REFERENCES dtlms_students(id),
     advisor_id BIGINT NOT NULL REFERENCES dtlms_advisors(id),
     study_type VARCHAR(64) NOT NULL,
@@ -221,6 +223,7 @@ CREATE TABLE IF NOT EXISTS dtlms_achievements (
 
 CREATE TABLE IF NOT EXISTS dtlms_theses (
     id BIGSERIAL PRIMARY KEY,
+    business_key VARCHAR(64) NOT NULL UNIQUE,
     student_id BIGINT NOT NULL REFERENCES dtlms_students(id),
     advisor_id BIGINT NOT NULL REFERENCES dtlms_advisors(id),
     title VARCHAR(255) NOT NULL,
@@ -275,6 +278,7 @@ CREATE TABLE IF NOT EXISTS dtlms_research_fields (
 CREATE TABLE IF NOT EXISTS dtlms_recruitment_applications (
     id BIGSERIAL PRIMARY KEY,
     plan_id BIGINT NOT NULL REFERENCES dtlms_recruitment_plans(id),
+    business_key VARCHAR(64) NOT NULL UNIQUE,
     student_name VARCHAR(128) NOT NULL,
     candidate_no VARCHAR(64) NOT NULL UNIQUE,
     gender VARCHAR(16) NOT NULL,

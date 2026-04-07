@@ -1,12 +1,5 @@
+import type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
 import http from './http'
-
-
-export type SelectOption = {
-  label: string
-  value: string
-  color_type?: string | null
-  css_class?: string | null
-}
 
 
 export type TrainingStudentOption = {
@@ -35,6 +28,7 @@ export type TrainingPlanUpsert = Omit<TrainingPlanRecord, 'id'>
 
 export type ScientificReportRecord = {
   id: number
+  business_key: string
   student_no: string
   student_name: string
   period_label: string
@@ -45,11 +39,14 @@ export type ScientificReportRecord = {
 }
 
 
-export type ScientificReportUpsert = Omit<ScientificReportRecord, 'id'>
+export type ScientificReportUpsert = Omit<ScientificReportRecord, 'id' | 'business_key'> & {
+  business_key?: string | null
+}
 
 
 export type OutboundStudyRecord = {
   id: number
+  business_key: string
   student_no: string
   student_name: string
   advisor_name: string
@@ -62,7 +59,9 @@ export type OutboundStudyRecord = {
 }
 
 
-export type OutboundStudyUpsert = Omit<OutboundStudyRecord, 'id'>
+export type OutboundStudyUpsert = Omit<OutboundStudyRecord, 'id' | 'business_key'> & {
+  business_key?: string | null
+}
 
 
 export type TrainingOptions = {
@@ -95,9 +94,7 @@ export function getTrainingOptions() {
 }
 
 
-export function listTrainingPlans(params?: { keyword?: string; plan_status?: string; advisor_name?: string; report_cycle?: string }) {
-  return http.get<{ items: TrainingPlanRecord[]; total: number }>('/training/plans', { params })
-}
+export type TrainingPlanListResponse = PagedResponse<TrainingPlanRecord>
 
 
 export function createTrainingPlan(payload: TrainingPlanUpsert) {
@@ -116,12 +113,18 @@ export function deleteTrainingPlan(id: number) {
 
 
 export function batchDeleteTrainingPlans(ids: number[]) {
-  return http.post<{ success_count: number }>('/training/plans/batch-delete', { ids })
+  return http.post<BulkActionResponse>('/training/plans/batch-delete', { ids })
 }
 
 
-export function listScientificReports(params?: { keyword?: string; status?: string; reviewer_name?: string }) {
-  return http.get<{ items: ScientificReportRecord[]; total: number }>('/training/reports', { params })
+export function listTrainingPlans(params?: PaginationParams & { keyword?: string; plan_status?: string; advisor_name?: string; report_cycle?: string }) {
+  return http.get<TrainingPlanListResponse>('/training/plans', { params })
+}
+
+export type ScientificReportListResponse = PagedResponse<ScientificReportRecord>
+
+export function listScientificReports(params?: PaginationParams & { keyword?: string; status?: string; reviewer_name?: string }) {
+  return http.get<ScientificReportListResponse>('/training/reports', { params })
 }
 
 
@@ -141,12 +144,14 @@ export function deleteScientificReport(id: number) {
 
 
 export function batchDeleteScientificReports(ids: number[]) {
-  return http.post<{ success_count: number }>('/training/reports/batch-delete', { ids })
+  return http.post<BulkActionResponse>('/training/reports/batch-delete', { ids })
 }
 
 
-export function listOutboundStudies(params?: { keyword?: string; status?: string; study_type?: string; advisor_name?: string }) {
-  return http.get<{ items: OutboundStudyRecord[]; total: number }>('/training/outbound-studies', { params })
+export type OutboundStudyListResponse = PagedResponse<OutboundStudyRecord>
+
+export function listOutboundStudies(params?: PaginationParams & { keyword?: string; status?: string; study_type?: string; advisor_name?: string }) {
+  return http.get<OutboundStudyListResponse>('/training/outbound-studies', { params })
 }
 
 
@@ -166,5 +171,5 @@ export function deleteOutboundStudy(id: number) {
 
 
 export function batchDeleteOutboundStudies(ids: number[]) {
-  return http.post<{ success_count: number }>('/training/outbound-studies/batch-delete', { ids })
+  return http.post<BulkActionResponse>('/training/outbound-studies/batch-delete', { ids })
 }

@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from app.schemas.system import SelectOption
+from app.schemas.common import PaginationResponseBase, SelectOption
 
 
 class TrainingTask(BaseModel):
@@ -44,13 +44,13 @@ class TrainingPlanUpsert(BaseModel):
     assessment_rule: str
 
 
-class TrainingPlanListResponse(BaseModel):
+class TrainingPlanListResponse(PaginationResponseBase):
     items: list[TrainingPlanRecord]
-    total: int
 
 
 class ScientificReportRecord(BaseModel):
     id: int
+    business_key: str
     student_no: str
     student_name: str
     period_label: str
@@ -61,6 +61,7 @@ class ScientificReportRecord(BaseModel):
 
 
 class ScientificReportUpsert(BaseModel):
+    business_key: str | None = None
     student_no: str
     student_name: str
     period_label: str
@@ -70,13 +71,13 @@ class ScientificReportUpsert(BaseModel):
     summary: str
 
 
-class ScientificReportListResponse(BaseModel):
+class ScientificReportListResponse(PaginationResponseBase):
     items: list[ScientificReportRecord]
-    total: int
 
 
 class OutboundStudyRecord(BaseModel):
     id: int
+    business_key: str
     student_no: str
     student_name: str
     advisor_name: str
@@ -89,6 +90,7 @@ class OutboundStudyRecord(BaseModel):
 
 
 class OutboundStudyUpsert(BaseModel):
+    business_key: str | None = None
     student_no: str
     student_name: str
     advisor_name: str
@@ -100,9 +102,8 @@ class OutboundStudyUpsert(BaseModel):
     expected_outcome: str | None = None
 
 
-class OutboundStudyListResponse(BaseModel):
+class OutboundStudyListResponse(PaginationResponseBase):
     items: list[OutboundStudyRecord]
-    total: int
 
 
 class TrainingStudentOption(BaseModel):
@@ -132,6 +133,7 @@ class TrainingStats(BaseModel):
 
 class ThesisRecord(BaseModel):
     id: int
+    business_key: str
     student_no: str
     student_name: str
     advisor_name: str
@@ -144,6 +146,7 @@ class ThesisRecord(BaseModel):
 
 
 class ThesisUpsert(BaseModel):
+    business_key: str | None = None
     student_no: str
     student_name: str
     advisor_name: str
@@ -155,9 +158,8 @@ class ThesisUpsert(BaseModel):
     degree_status: str
 
 
-class ThesisListResponse(BaseModel):
+class ThesisListResponse(PaginationResponseBase):
     items: list[ThesisRecord]
-    total: int
 
 
 class ThesisReviewRecord(BaseModel):
@@ -179,9 +181,8 @@ class ThesisReviewUpsert(BaseModel):
     review_comment: str | None = None
 
 
-class ThesisReviewListResponse(BaseModel):
+class ThesisReviewListResponse(PaginationResponseBase):
     items: list[ThesisReviewRecord]
-    total: int
 
 
 class DegreeOptionsResponse(BaseModel):

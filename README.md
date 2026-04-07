@@ -93,9 +93,26 @@ REDIS_KEY_PREFIX=CTDTLMS_
 脚本内部会依次执行以下 SQL 文件：
 
 1. `backend/sql/010_init_schema.sql`
-2. `backend/sql/020_views.sql`
-3. `backend/sql/030_seed_rbac.sql`
-4. `backend/sql/040_runtime_store.sql`
+2. `backend/sql/015_team_schema_migration.sql`
+3. `backend/sql/016_business_key_migration.sql`
+4. `backend/sql/017_workflow_flowable_schema.sql`
+5. `backend/sql/020_views.sql`
+6. `backend/sql/030_seed_rbac.sql`
+7. `backend/sql/040_runtime_store.sql`
+8. `backend/sql/050_dict_schema.sql`
+
+## 流程引擎演进约定
+
+当前审批流程仍由后端内置流程定义驱动，但底层存储已开始向 Flowable 风格靠拢，新增了流程模型、流程定义、运行时执行、运行时任务、运行时变量、身份关联和历史实例等表。
+
+这一层的目标不是马上替换成完整 BPM 引擎，而是先把以下边界稳定下来：
+
+- 流程定义、流程实例、执行实例、任务实例分层存储。
+- 业务对象统一通过 `business_key` 与流程实例关联。
+- 历史轨迹和运行态分离，便于未来接入 BPMN 设计器与流程审计。
+- 后续可以在不推翻现有业务接口的前提下，引入 BPMN.js 做流程建模与发布。
+
+现阶段可将其理解为“Flowable 风格的存储兼容层”，后续如果继续演进，优先顺序建议是：流程模型管理、流程定义发布、节点条件表达式、可视化设计器接入。
 
 ### 4. 启动后端
 

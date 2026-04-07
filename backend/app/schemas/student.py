@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.schemas.system import SelectOption
+from app.schemas.common import PaginationResponseBase, SelectOption
 
 
 class StudentSummary(BaseModel):
@@ -46,9 +46,8 @@ class StudentUpsert(BaseModel):
     political_status: str | None = None
 
 
-class StudentManagementResponse(BaseModel):
+class StudentManagementResponse(PaginationResponseBase):
     items: list[StudentRecord]
-    total: int
 
 
 class TeamAdvisorMapItem(BaseModel):
@@ -97,9 +96,8 @@ class TeamUpsert(BaseModel):
     description: str | None = None
 
 
-class TeamListResponse(BaseModel):
+class TeamListResponse(PaginationResponseBase):
     items: list[TeamRecord]
-    total: int
 
 
 class StudentStats(BaseModel):

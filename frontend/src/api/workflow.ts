@@ -1,5 +1,11 @@
+import type { PagedResponse, PaginationParams, SelectOption } from './common'
 import http from './http'
-import type { SelectOption } from './students'
+
+
+export type WorkflowActionOption = {
+  action: string
+  label: string
+}
 
 
 export type WorkflowTaskRecord = {
@@ -17,10 +23,19 @@ export type WorkflowTaskRecord = {
   due_at: string
   form_summary: string
   latest_comment?: string | null
+  available_actions: WorkflowActionOption[]
+  process_definition_key?: string | null
+  process_definition_id?: string | null
+  process_instance_id?: string | null
+  execution_id?: string | null
+  task_definition_key?: string | null
 }
 
 
-export type WorkflowTaskUpsert = Omit<WorkflowTaskRecord, 'id'>
+export type WorkflowTaskUpsert = Omit<
+  WorkflowTaskRecord,
+  'id' | 'available_actions' | 'process_definition_key' | 'process_definition_id' | 'process_instance_id' | 'execution_id' | 'task_definition_key'
+>
 
 
 export type WorkflowStats = {
@@ -43,6 +58,31 @@ export type WorkflowOptions = {
 }
 
 
+export type WorkflowTaskActionLog = {
+  operated_at: string
+  operator_username: string
+  operator_full_name: string
+  action: string
+  action_label: string
+  from_node: string
+  to_node?: string | null
+  result_status: string
+  comment?: string | null
+}
+
+
+export type WorkflowTaskDetailResponse = {
+  task: WorkflowTaskRecord
+  history: WorkflowTaskActionLog[]
+}
+
+
+export type WorkflowTaskActionRequest = {
+  action: string
+  comment?: string | null
+}
+
+
 export function getWorkflowStats() {
   return http.get<WorkflowStats>('/workflow/stats')
 }
@@ -53,8 +93,13 @@ export function getWorkflowOptions() {
 }
 
 
-export function listWorkflowTasks(params?: { status?: string; module?: string }) {
-  return http.get<{ items: WorkflowTaskRecord[]; total: number }>('/workflow/tasks', { params })
+export function listWorkflowTasks(params?: PaginationParams & { keyword?: string; status?: string; module?: string }) {
+  return http.get<PagedResponse<WorkflowTaskRecord>>('/workflow/tasks', { params })
+}
+
+
+export function getWorkflowTaskDetail(id: number) {
+  return http.get<WorkflowTaskDetailResponse>(`/workflow/tasks/${id}`)
 }
 
 
@@ -70,4 +115,9 @@ export function updateWorkflowTask(id: number, payload: WorkflowTaskUpsert) {
 
 export function deleteWorkflowTask(id: number) {
   return http.delete(`/workflow/tasks/${id}`)
+}
+
+
+export function executeWorkflowTaskAction(id: number, payload: WorkflowTaskActionRequest) {
+  return http.post<WorkflowTaskDetailResponse>(`/workflow/tasks/${id}/actions`, payload)
 }

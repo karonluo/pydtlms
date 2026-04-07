@@ -36,6 +36,7 @@ class RecruitmentApplication(Base, TimestampMixin, SoftDeleteMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("dtlms_recruitment_plans.id"), nullable=False)
+    business_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     student_name: Mapped[str] = mapped_column(String(128), nullable=False)
     candidate_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     gender: Mapped[str] = mapped_column(String(16), nullable=False)

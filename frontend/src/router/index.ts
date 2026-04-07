@@ -15,6 +15,8 @@ const WorkflowCenterView = () => import('../views/workflow/WorkflowCenterView.vu
 const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
 
+const APP_TITLE = '博士生生命周期管理系统'
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -24,8 +26,8 @@ const router = createRouter({
       component: AppLayout,
       children: [
         { path: '', redirect: '/dashboard' },
-        { path: 'dashboard', component: DashboardView, meta: { title: '驾驶舱' } },
-        { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生管理' } },
+        { path: 'dashboard', component: DashboardView, meta: { title: '经营总览' } },
+        { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划' } },
         { path: 'students', redirect: '/students/records' },
         { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records' } },
         { path: 'students/teams', component: StudentsView, meta: { title: '团队管理', section: 'teams' } },
@@ -86,6 +88,11 @@ router.beforeEach(async (to) => {
   }
 
   return true
+})
+
+router.afterEach((to) => {
+  const moduleTitle = String(to.meta.title || '首页')
+  document.title = `${APP_TITLE}-${moduleTitle}`
 })
 
 export default router

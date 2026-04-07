@@ -1,12 +1,8 @@
+import type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
 import http from './http'
 
 
-export type SelectOption = {
-  label: string
-  value: string
-  color_type?: string | null
-  css_class?: string | null
-}
+export type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
 
 
 export type StudentRecord = {
@@ -26,10 +22,7 @@ export type StudentRecord = {
 export type StudentUpsert = Omit<StudentRecord, 'id'>
 
 
-export type StudentManagementResponse = {
-  items: StudentRecord[]
-  total: number
-}
+export type StudentManagementResponse = PagedResponse<StudentRecord>
 
 
 export type TeamRecord = {
@@ -52,10 +45,7 @@ export type TeamRecord = {
 export type TeamUpsert = Omit<TeamRecord, 'id' | 'member_student_count' | 'active_student_count'>
 
 
-export type TeamListResponse = {
-  items: TeamRecord[]
-  total: number
-}
+export type TeamListResponse = PagedResponse<TeamRecord>
 
 
 export type TeamAdvisorMapItem = {
@@ -77,11 +67,6 @@ export type StudentOptions = {
 }
 
 
-export type BulkActionResponse = {
-  success_count: number
-}
-
-
 export type StudentStats = {
   total_students: number
   active_students: number
@@ -93,7 +78,7 @@ export type StudentStats = {
 }
 
 
-export function listStudents(params?: { keyword?: string; status?: string; advisor_name?: string; team_name?: string }) {
+export function listStudents(params?: PaginationParams & { keyword?: string; status?: string; advisor_name?: string; team_name?: string }) {
   return http.get<StudentManagementResponse>('/students/management', { params })
 }
 
@@ -123,7 +108,7 @@ export function deleteStudent(id: number) {
 }
 
 
-export function listTeams(params?: {
+export function listTeams(params?: PaginationParams & {
   keyword?: string
   status?: string
   department_name?: string

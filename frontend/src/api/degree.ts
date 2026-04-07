@@ -1,9 +1,10 @@
+import type { PagedResponse, PaginationParams, SelectOption } from './common'
 import http from './http'
-import type { SelectOption } from './students'
 
 
 export type ThesisRecord = {
   id: number
+  business_key: string
   student_no: string
   student_name: string
   advisor_name: string
@@ -16,7 +17,9 @@ export type ThesisRecord = {
 }
 
 
-export type ThesisUpsert = Omit<ThesisRecord, 'id'>
+export type ThesisUpsert = Omit<ThesisRecord, 'id' | 'business_key'> & {
+  business_key?: string | null
+}
 
 
 export type ThesisReviewRecord = {
@@ -65,11 +68,6 @@ export function getDegreeOptions() {
 }
 
 
-export function listTheses(params?: { keyword?: string; degree_status?: string }) {
-  return http.get<{ items: ThesisRecord[]; total: number }>('/degree/theses', { params })
-}
-
-
 export function createThesis(payload: ThesisUpsert) {
   return http.post<ThesisRecord>('/degree/theses', payload)
 }
@@ -80,8 +78,12 @@ export function updateThesis(id: number, payload: ThesisUpsert) {
 }
 
 
-export function listThesisReviews(params?: { thesis_id?: number }) {
-  return http.get<{ items: ThesisReviewRecord[]; total: number }>('/degree/reviews', { params })
+export function listTheses(params?: PaginationParams & { keyword?: string; degree_status?: string; advisor_name?: string; thesis_status?: string }) {
+  return http.get<PagedResponse<ThesisRecord>>('/degree/theses', { params })
+}
+
+export function listThesisReviews(params?: PaginationParams & { thesis_id?: number; keyword?: string; expert_name?: string; review_status?: string }) {
+  return http.get<PagedResponse<ThesisReviewRecord>>('/degree/reviews', { params })
 }
 
 

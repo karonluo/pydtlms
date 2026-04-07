@@ -1,6 +1,11 @@
 from pydantic import BaseModel
 
-from app.schemas.system import SelectOption
+from app.schemas.common import PaginationResponseBase, SelectOption
+
+
+class WorkflowActionOption(BaseModel):
+    action: str
+    label: str
 
 
 class WorkflowTaskRecord(BaseModel):
@@ -18,6 +23,12 @@ class WorkflowTaskRecord(BaseModel):
     due_at: str
     form_summary: str
     latest_comment: str | None = None
+    available_actions: list[WorkflowActionOption] = []
+    process_definition_key: str | None = None
+    process_definition_id: str | None = None
+    process_instance_id: str | None = None
+    execution_id: str | None = None
+    task_definition_key: str | None = None
 
 
 class WorkflowTaskUpsert(BaseModel):
@@ -34,11 +45,37 @@ class WorkflowTaskUpsert(BaseModel):
     due_at: str
     form_summary: str
     latest_comment: str | None = None
+    process_definition_key: str | None = None
+    process_definition_id: str | None = None
+    process_instance_id: str | None = None
+    execution_id: str | None = None
+    task_definition_key: str | None = None
 
 
-class WorkflowTaskListResponse(BaseModel):
+class WorkflowTaskListResponse(PaginationResponseBase):
     items: list[WorkflowTaskRecord]
-    total: int
+
+
+class WorkflowTaskActionRequest(BaseModel):
+    action: str
+    comment: str | None = None
+
+
+class WorkflowTaskActionLog(BaseModel):
+    operated_at: str
+    operator_username: str
+    operator_full_name: str
+    action: str
+    action_label: str
+    from_node: str
+    to_node: str | None = None
+    result_status: str
+    comment: str | None = None
+
+
+class WorkflowTaskDetailResponse(BaseModel):
+    task: WorkflowTaskRecord
+    history: list[WorkflowTaskActionLog]
 
 
 class WorkflowStats(BaseModel):

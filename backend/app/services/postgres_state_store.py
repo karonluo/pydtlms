@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -38,6 +40,8 @@ class PostgresStateStore:
         "000_create_database.sql",
         "010_init_schema.sql",
         "015_team_schema_migration.sql",
+        "016_business_key_migration.sql",
+        "017_workflow_flowable_schema.sql",
         "020_views.sql",
         "030_seed_rbac.sql",
         "040_runtime_store.sql",
@@ -163,6 +167,7 @@ class PostgresStateStore:
         self._seed_training_plan_versions(cur, state, training_plan_map)
         self._seed_admission_decisions(cur, state, plan_map)
         self._seed_thesis_reviews(cur, state, thesis_map)
+        self._seed_workflow_engine(cur, state)
 
     def _seed_users_and_roles(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
         from app.core.security import get_password_hash
@@ -374,13 +379,14 @@ class PostgresStateStore:
             cur.execute(
                 """
                 INSERT INTO dtlms_recruitment_applications (
-                    id, plan_id, student_name, candidate_no, gender, graduation_school, highest_degree,
+                    id, plan_id, business_key, student_name, candidate_no, gender, graduation_school, highest_degree,
                     intended_field_id, application_status, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
                     int(item["id"]),
                     plan_map[int(item["plan_id"])],
+                    item.get("business_key") or item["candidate_no"],
                     item["student_name"],
                     item["candidate_no"],
                     "未知",
@@ -472,12 +478,13 @@ class PostgresStateStore:
             cur.execute(
                 """
                 INSERT INTO dtlms_scientific_reports (
-                    id, student_id, training_plan_id, period_label, report_status, summary,
+                    id, business_key, student_id, training_plan_id, period_label, report_status, summary,
                     attachment_url, reviewer_advisor_id, review_score, review_comment, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
                     int(item["id"]),
+                    item["business_key"],
                     student_map[item["student_no"]],
                     training_plan_by_student[item["student_no"]],
                     item["period_label"],
@@ -494,12 +501,13 @@ class PostgresStateStore:
             cur.execute(
                 """
                 INSERT INTO dtlms_outbound_studies (
-                    id, student_id, advisor_id, study_type, destination, start_date, end_date,
+                    id, business_key, student_id, advisor_id, study_type, destination, start_date, end_date,
                     approval_status, expected_outcome, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
                     int(item["id"]),
+                    item["business_key"],
                     student_map[item["student_no"]],
                     advisor_map[item["advisor_name"]],
                     item["study_type"],
@@ -519,12 +527,13 @@ class PostgresStateStore:
             cur.execute(
                 """
                 INSERT INTO dtlms_theses (
-                    id, student_id, advisor_id, title, plagiarism_rate, thesis_status,
+                    id, business_key, student_id, advisor_id, title, plagiarism_rate, thesis_status,
                     blind_review_status, defense_date, degree_granted, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
                     int(item["id"]),
+                    item["business_key"],
                     student_map[item["student_no"]],
                     advisor_map[item["advisor_name"]],
                     item["title"],
@@ -635,6 +644,385 @@ class PostgresStateStore:
                     "外部集成概览",
                 ),
             )
+
+    def _seed_workflow_engine(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
+        cur.execute(
+            "TRUNCATE TABLE "
+            "dtlms_wf_ru_identitylink, dtlms_wf_ru_variable, dtlms_wf_ru_task, dtlms_wf_ru_execution, "
+            "dtlms_wf_hi_varinst, dtlms_wf_hi_actinst, dtlms_wf_hi_taskinst, dtlms_wf_hi_procinst, "
+            "dtlms_wf_re_procdef, dtlms_wf_re_deployment, dtlms_wf_de_model"
+        )
+        tasks = list(state.get("workflow_tasks", []))
+        inserted_models: set[str] = set()
+        inserted_deployments: set[str] = set()
+        inserted_procdefs: set[str] = set()
+        inserted_procinsts: set[str] = set()
+        inserted_variables: set[str] = set()
+
+        for task in tasks:
+            process_definition_key = str(task.get("process_definition_key") or task.get("flow_code") or "adhoc_workflow")
+            task_definition_key = str(task.get("task_definition_key") or task.get("node_key") or "manual_task")
+            business_key = str(task.get("business_key") or task.get("id") or "0")
+            process_definition_id = str(task.get("process_definition_id") or self._workflow_process_definition_id(process_definition_key))
+            deployment_id = str(task.get("deployment_id") or self._workflow_deployment_id(process_definition_key))
+            process_instance_id = str(task.get("process_instance_id") or self._workflow_process_instance_id(process_definition_key, business_key))
+            execution_id = str(task.get("execution_id") or self._workflow_execution_id(process_instance_id, task_definition_key))
+            workflow_name = str(task.get("workflow_name") or "未命名流程")
+            resource_name = f"{process_definition_key}.bpmn20.xml"
+            terminal = self._is_workflow_terminal(task)
+            start_time = str(task.get("created_at") or "")
+            end_time = self._workflow_end_time(task) if terminal else None
+            duration_ms = self._workflow_duration_millis(start_time, end_time)
+            candidate_groups = self._normalize_name_list(task.get("candidate_groups"))
+
+            if process_definition_key not in inserted_models:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_wf_de_model (
+                        id_, name_, key_, category_, version_, model_type_, description_, meta_info_,
+                        created_, last_updated_, deployment_id_, resource_name_, editor_source_extra_value_
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        f"MODEL-{process_definition_key}",
+                        workflow_name,
+                        process_definition_key,
+                        task.get("business_module") or "流程中心",
+                        int(task.get("process_definition_version") or 1),
+                        0,
+                        f"{workflow_name} 流程模型",
+                        self._json_payload({"source": "runtime_seed", "workflow_name": workflow_name}),
+                        start_time,
+                        end_time or start_time,
+                        deployment_id,
+                        resource_name,
+                        self._json_payload({"business_module": task.get("business_module"), "flow_code": task.get("flow_code")}),
+                    ),
+                )
+                inserted_models.add(process_definition_key)
+
+            if deployment_id not in inserted_deployments:
+                cur.execute(
+                    "INSERT INTO dtlms_wf_re_deployment (id_, name_, category_, key_, deploy_time_) VALUES (%s, %s, %s, %s, %s)",
+                    (deployment_id, workflow_name, task.get("business_module") or "流程中心", process_definition_key, start_time),
+                )
+                inserted_deployments.add(deployment_id)
+
+            if process_definition_id not in inserted_procdefs:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_wf_re_procdef (
+                        id_, key_, version_, deployment_id_, resource_name_, diagram_resource_name_, name_, category_, description_, suspension_state_
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        process_definition_id,
+                        process_definition_key,
+                        int(task.get("process_definition_version") or 1),
+                        deployment_id,
+                        resource_name,
+                        f"{process_definition_key}.png",
+                        workflow_name,
+                        task.get("business_module") or "流程中心",
+                        f"{workflow_name} 定义",
+                        1,
+                    ),
+                )
+                inserted_procdefs.add(process_definition_id)
+
+            if process_instance_id not in inserted_procinsts:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_wf_hi_procinst (
+                        id_, proc_inst_id_, business_key_, proc_def_id_, start_time_, end_time_, duration_ms_,
+                        start_user_id_, end_act_id_, delete_reason_, start_act_id_, state_
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        process_instance_id,
+                        process_instance_id,
+                        business_key,
+                        process_definition_id,
+                        start_time,
+                        end_time,
+                        duration_ms,
+                        None,
+                        None if not terminal else task_definition_key,
+                        "rejected" if str(task.get("status") or "") == "已驳回" else None,
+                        "startEvent",
+                        "COMPLETED" if terminal else "ACTIVE",
+                    ),
+                )
+                inserted_procinsts.add(process_instance_id)
+
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_hi_taskinst (
+                    id_, task_def_key_, proc_def_id_, proc_inst_id_, exec_id_, name_, business_key_, assignee_, owner_,
+                    start_time_, claim_time_, end_time_, duration_ms_, due_date_, delete_reason_, priority_, category_
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    f"TASK-{int(task['id'])}",
+                    task_definition_key,
+                    process_definition_id,
+                    process_instance_id,
+                    execution_id,
+                    task.get("title") or workflow_name,
+                    business_key,
+                    None,
+                    None,
+                    start_time,
+                    None,
+                    end_time,
+                    duration_ms,
+                    task.get("due_at"),
+                    "rejected" if str(task.get("status") or "") == "已驳回" else None,
+                    int(self._workflow_priority_value(task.get("priority"))),
+                    task.get("business_module") or "流程中心",
+                ),
+            )
+
+            self._insert_workflow_history_activities(
+                cur,
+                task=task,
+                process_definition_id=process_definition_id,
+                process_instance_id=process_instance_id,
+                execution_id=execution_id,
+                task_definition_key=task_definition_key,
+            )
+
+            self._insert_workflow_history_variables(
+                cur,
+                task=task,
+                process_instance_id=process_instance_id,
+                execution_id=execution_id,
+                inserted_variables=inserted_variables,
+            )
+
+            if terminal:
+                continue
+
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_ru_execution (
+                    id_, proc_inst_id_, proc_def_id_, business_key_, parent_id_, act_id_, is_active_, is_concurrent_, is_scope_, start_time_, start_user_id_
+                ) VALUES (%s, %s, %s, %s, NULL, %s, TRUE, FALSE, TRUE, %s, %s)
+                """,
+                (execution_id, process_instance_id, process_definition_id, business_key, task_definition_key, start_time, None),
+            )
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_ru_task (
+                    id_, exec_id_, proc_inst_id_, proc_def_id_, task_def_key_, name_, business_key_, assignee_, owner_,
+                    create_time_, due_date_, claim_time_, priority_, suspension_state_, form_key_, description_
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s, %s)
+                """,
+                (
+                    f"TASK-{int(task['id'])}",
+                    execution_id,
+                    process_instance_id,
+                    process_definition_id,
+                    task_definition_key,
+                    task.get("title") or workflow_name,
+                    business_key,
+                    None,
+                    None,
+                    start_time,
+                    task.get("due_at"),
+                    int(self._workflow_priority_value(task.get("priority"))),
+                    1,
+                    business_key,
+                    task.get("form_summary"),
+                ),
+            )
+            for group_id in candidate_groups:
+                cur.execute(
+                    "INSERT INTO dtlms_wf_ru_identitylink (task_id_, proc_inst_id_, user_id_, group_id_, link_type_) VALUES (%s, %s, NULL, %s, %s)",
+                    (f"TASK-{int(task['id'])}", process_instance_id, group_id, "candidate"),
+                )
+            self._insert_workflow_runtime_variables(cur, task=task, process_instance_id=process_instance_id, execution_id=execution_id)
+
+    def _insert_workflow_history_activities(
+        self,
+        cur: psycopg.Cursor[Any],
+        task: dict[str, Any],
+        process_definition_id: str,
+        process_instance_id: str,
+        execution_id: str,
+        task_definition_key: str,
+    ) -> None:
+        history = list(task.get("history") or [])
+        if not history:
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_hi_actinst (
+                    id_, proc_def_id_, proc_inst_id_, exec_id_, act_id_, act_name_, act_type_, assignee_, start_time_, end_time_, duration_ms_, business_key_
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    f"ACT-{int(task['id'])}-0",
+                    process_definition_id,
+                    process_instance_id,
+                    execution_id,
+                    task_definition_key,
+                    task.get("current_node") or task.get("title") or "流程节点",
+                    "userTask",
+                    None,
+                    task.get("created_at"),
+                    None if not self._is_workflow_terminal(task) else self._workflow_end_time(task),
+                    self._workflow_duration_millis(task.get("created_at"), self._workflow_end_time(task) if self._is_workflow_terminal(task) else None),
+                    task.get("business_key"),
+                ),
+            )
+            return
+        for index, entry in enumerate(history, start=1):
+            operated_at = entry.get("operated_at")
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_hi_actinst (
+                    id_, proc_def_id_, proc_inst_id_, exec_id_, act_id_, act_name_, act_type_, assignee_, start_time_, end_time_, duration_ms_, business_key_
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    f"ACT-{int(task['id'])}-{index}",
+                    process_definition_id,
+                    process_instance_id,
+                    execution_id,
+                    entry.get("action") or task_definition_key,
+                    entry.get("action_label") or entry.get("to_node") or entry.get("from_node") or task.get("current_node") or "流程节点",
+                    "userTask",
+                    entry.get("operator_username"),
+                    operated_at,
+                    operated_at,
+                    0,
+                    task.get("business_key"),
+                ),
+            )
+
+    def _insert_workflow_history_variables(
+        self,
+        cur: psycopg.Cursor[Any],
+        task: dict[str, Any],
+        process_instance_id: str,
+        execution_id: str,
+        inserted_variables: set[str],
+    ) -> None:
+        for name, value in self._workflow_variable_rows(task).items():
+            variable_id = f"HVAR-{process_instance_id}-{name}"
+            if variable_id in inserted_variables:
+                continue
+            inserted_variables.add(variable_id)
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_hi_varinst (
+                    id_, proc_inst_id_, exec_id_, task_id_, name_, var_type_, text_value_, number_value_, json_value_, create_time_, last_updated_time_
+                ) VALUES (%s, %s, %s, NULL, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                """,
+                (
+                    variable_id,
+                    process_instance_id,
+                    execution_id,
+                    name,
+                    "json" if isinstance(value, (dict, list)) else ("number" if isinstance(value, int) else "string"),
+                    None if isinstance(value, (dict, list, int)) else str(value),
+                    value if isinstance(value, int) else None,
+                    self._json_payload(value) if isinstance(value, (dict, list)) else self._json_payload({"value": value}),
+                    task.get("created_at"),
+                    self._workflow_end_time(task) or task.get("created_at"),
+                ),
+            )
+
+    def _insert_workflow_runtime_variables(self, cur: psycopg.Cursor[Any], task: dict[str, Any], process_instance_id: str, execution_id: str) -> None:
+        for name, value in self._workflow_variable_rows(task).items():
+            cur.execute(
+                """
+                INSERT INTO dtlms_wf_ru_variable (
+                    id_, exec_id_, proc_inst_id_, task_id_, name_, var_type_, text_value_, number_value_, json_value_, create_time_
+                ) VALUES (%s, %s, %s, NULL, %s, %s, %s, %s, %s::jsonb, %s)
+                """,
+                (
+                    f"RVAR-{process_instance_id}-{name}",
+                    execution_id,
+                    process_instance_id,
+                    name,
+                    "json" if isinstance(value, (dict, list)) else ("number" if isinstance(value, int) else "string"),
+                    None if isinstance(value, (dict, list, int)) else str(value),
+                    value if isinstance(value, int) else None,
+                    self._json_payload(value) if isinstance(value, (dict, list)) else self._json_payload({"value": value}),
+                    task.get("created_at"),
+                ),
+            )
+
+    @staticmethod
+    def _workflow_priority_value(priority: Any) -> int:
+        mapping = {"低": 25, "中": 50, "高": 75, "紧急": 100}
+        return mapping.get(str(priority or "中"), 50)
+
+    @staticmethod
+    def _is_workflow_terminal(task: dict[str, Any]) -> bool:
+        return str(task.get("status") or "") in {"已通过", "已驳回"} or str(task.get("current_node") or "") == "流程结束"
+
+    @staticmethod
+    def _workflow_end_time(task: dict[str, Any]) -> str | None:
+        history = list(task.get("history") or [])
+        if history:
+            return str(history[-1].get("operated_at") or "") or None
+        return None
+
+    def _workflow_duration_millis(self, start_time: Any, end_time: Any) -> int | None:
+        if not start_time or not end_time:
+            return None
+        try:
+            started_at = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S")
+            ended_at = datetime.strptime(str(end_time), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+        return max(int((ended_at - started_at).total_seconds() * 1000), 0)
+
+    @staticmethod
+    def _workflow_variable_rows(task: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "businessKey": str(task.get("business_key") or ""),
+            "businessModule": str(task.get("business_module") or "流程中心"),
+            "flowCode": str(task.get("flow_code") or ""),
+            "entityId": int(task.get("entity_id") or 0),
+            "currentNode": str(task.get("current_node") or ""),
+            "taskStatus": str(task.get("status") or ""),
+            "candidateGroups": [str(item) for item in task.get("candidate_groups") or []],
+        }
+
+    @staticmethod
+    def _workflow_id_slug(value: str | None, max_length: int) -> str:
+        normalized = "".join(character.lower() for character in str(value or "") if character.isalnum())
+        if not normalized:
+            normalized = "x"
+        return normalized[:max_length]
+
+    @staticmethod
+    def _workflow_id_hash(*parts: Any, length: int = 10) -> str:
+        raw_value = "::".join(str(part or "") for part in parts)
+        return hashlib.sha1(raw_value.encode("utf-8")).hexdigest()[:length]
+
+    @classmethod
+    def _workflow_deployment_id(cls, process_definition_key: str) -> str:
+        return f"dep-{cls._workflow_id_slug(process_definition_key, 24)}-{cls._workflow_id_hash(process_definition_key, 'deployment', length=8)}"
+
+    @classmethod
+    def _workflow_process_definition_id(cls, process_definition_key: str) -> str:
+        return f"procdef-{cls._workflow_id_slug(process_definition_key, 20)}-v1-{cls._workflow_id_hash(process_definition_key, 'process-definition', length=8)}"
+
+    @classmethod
+    def _workflow_process_instance_id(cls, process_definition_key: str, business_key: str) -> str:
+        return (
+            f"procinst-{cls._workflow_id_slug(process_definition_key, 16)}-"
+            f"{cls._workflow_id_slug(business_key, 18)}-"
+            f"{cls._workflow_id_hash(process_definition_key, business_key, 'process-instance', length=10)}"
+        )
+
+    @classmethod
+    def _workflow_execution_id(cls, process_instance_id: str, task_definition_key: str) -> str:
+        return f"exec-{cls._workflow_id_slug(task_definition_key, 18)}-{cls._workflow_id_hash(process_instance_id, task_definition_key, 'execution', length=10)}"
 
     def _fetch_map(self, cur: psycopg.Cursor[Any], query: str) -> dict[str, Any]:
         cur.execute(query)

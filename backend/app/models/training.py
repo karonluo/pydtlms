@@ -123,6 +123,7 @@ class ScientificReport(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "dtlms_scientific_reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     student_id: Mapped[int] = mapped_column(ForeignKey("dtlms_students.id"), nullable=False)
     training_plan_id: Mapped[int] = mapped_column(ForeignKey("dtlms_training_plans.id"), nullable=False)
     period_label: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -138,6 +139,7 @@ class OutboundStudy(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "dtlms_outbound_studies"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     student_id: Mapped[int] = mapped_column(ForeignKey("dtlms_students.id"), nullable=False)
     advisor_id: Mapped[int] = mapped_column(ForeignKey("dtlms_advisors.id"), nullable=False)
     study_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -164,6 +166,7 @@ class Thesis(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "dtlms_theses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     student_id: Mapped[int] = mapped_column(ForeignKey("dtlms_students.id"), nullable=False)
     advisor_id: Mapped[int] = mapped_column(ForeignKey("dtlms_advisors.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)

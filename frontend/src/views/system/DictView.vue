@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
+import { useServerPagination } from '../../composables/useServerPagination'
 import {
   createDictData,
   createDictType,
@@ -76,6 +77,8 @@ const sectionTitle = computed(() => (isTypeSection.value ? '字典类型管理' 
 const sectionTag = computed(() => (isTypeSection.value ? '字典模型' : '字典明细'))
 const statusOptions = computed<SelectOption[]>(() => systemOptions.value.audit_status_options)
 const dictTypeSelectOptions = computed<SelectOption[]>(() => dictTypes.value.map((item) => ({ label: `${item.dict_name}｜${item.dict_type}`, value: item.dict_type })))
+const dictTypePager = useServerPagination()
+const dictDataPager = useServerPagination()
 
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
@@ -109,7 +112,7 @@ async function loadBootstrapData() {
   try {
     const [optionResponse, typeResponse] = await Promise.all([
       getSystemOptions(),
-      listDictTypes(),
+      listDictTypes({ page: 1, page_size: 1000 }),
     ])
     systemOptions.value = optionResponse.data
     dictTypes.value = typeResponse.data.items
@@ -125,19 +128,62 @@ async function loadSectionData() {
       const response = await listDictTypes({
         keyword: dictTypeFilters.keyword || undefined,
         status: dictTypeFilters.status || undefined,
+        page: dictTypePager.pagination.currentPage,
+        page_size: dictTypePager.pagination.pageSize,
       })
       dictTypes.value = response.data.items
+      dictTypePager.sync(response.data.total)
       return
     }
     const response = await listDictData({
       keyword: dictDataFilters.keyword || undefined,
       dict_type: dictDataFilters.dict_type || undefined,
       status: dictDataFilters.status || undefined,
+      page: dictDataPager.pagination.currentPage,
+      page_size: dictDataPager.pagination.pageSize,
     })
     dictData.value = response.data.items
+    dictDataPager.sync(response.data.total)
   } finally {
     loading.value = false
   }
+}
+
+function handleSearch() {
+  if (isTypeSection.value) {
+    dictTypePager.reset()
+  } else {
+    dictDataPager.reset()
+  }
+  void loadSectionData()
+}
+
+function handleReset() {
+  Object.assign(dictTypeFilters, { keyword: '', status: '' })
+  Object.assign(dictDataFilters, { keyword: '', dict_type: '', status: '' })
+  dictTypePager.reset()
+  dictDataPager.reset()
+  void loadSectionData()
+}
+
+async function handleDictTypePageChange(page: number) {
+  dictTypePager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleDictTypePageSizeChange(size: number) {
+  dictTypePager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleDictDataPageChange(page: number) {
+  dictDataPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleDictDataPageSizeChange(size: number) {
+  dictDataPager.handleSizeChange(size)
+  await loadSectionData()
 }
 
 function openCreateDialog() {
@@ -262,7 +308,7 @@ onMounted(async () => {
       <div>
         <p class="eyebrow">{{ sectionTag }}</p>
         <h2>{{ sectionTitle }}</h2>
-        <p>对照 ruoyi-vue-pro 的字典模型，将系统下拉选项和状态项收口到数据库字典表统一治理。</p>
+        <p>将系统下拉选项和状态项统一收口到字典表，便于集中维护和统一治理。</p>
       </div>
       <el-button type="primary" @click="openCreateDialog">{{ isTypeSection ? '新建字典类型' : '新建字典数据' }}</el-button>
     </header>
@@ -278,7 +324,8 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="loadSectionData">查询</el-button>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
 
@@ -297,24 +344,37 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="loadSectionData">查询</el-button>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
 
-      <el-table v-if="isTypeSection" :data="dictTypes" stripe v-loading="loading || bootstrapping">
+      <el-table v-if="isTypeSection" :data="dictTypes" stripe border v-loading="loading || bootstrapping">
         <el-table-column prop="dict_name" label="字典名称" min-width="180" />
         <el-table-column prop="dict_type" label="字典类型" min-width="220" />
         <el-table-column prop="status" label="状态" width="100" />
         <el-table-column prop="data_count" label="数据条数" width="100" />
         <el-table-column prop="remark" label="备注" min-width="220" show-overflow-tooltip />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', onClick: () => openEditDialog(scope.row) }]" :more-actions="[{ key: 'delete', label: '删除', onClick: () => handleDelete(scope.row) }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else :data="dictData" stripe v-loading="loading || bootstrapping">
+      <div v-if="isTypeSection" class="pagination-bar">
+        <el-pagination
+          :current-page="dictTypePager.pagination.currentPage"
+          :page-size="dictTypePager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="dictTypePager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleDictTypePageChange"
+          @size-change="handleDictTypePageSizeChange"
+        />
+      </div>
+
+      <el-table v-else :data="dictData" stripe border v-loading="loading || bootstrapping">
         <el-table-column prop="dict_name" label="字典名称" min-width="160" />
         <el-table-column prop="dict_type" label="字典类型" min-width="200" />
         <el-table-column prop="label" label="标签" min-width="140" />
@@ -323,12 +383,24 @@ onMounted(async () => {
         <el-table-column prop="status" label="状态" width="100" />
         <el-table-column prop="color_type" label="颜色" width="100" />
         <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', onClick: () => openEditDialog(scope.row) }]" :more-actions="[{ key: 'delete', label: '删除', onClick: () => handleDelete(scope.row) }]" />
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-if="!isTypeSection" class="pagination-bar">
+        <el-pagination
+          :current-page="dictDataPager.pagination.currentPage"
+          :page-size="dictDataPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="dictDataPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleDictDataPageChange"
+          @size-change="handleDictDataPageSizeChange"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? (isTypeSection ? '新建字典类型' : '新建字典数据') : (isTypeSection ? '编辑字典类型' : '编辑字典数据')" width="720px">

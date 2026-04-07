@@ -68,11 +68,12 @@ function handleDropdownCommand(key: string) {
 
 <style scoped>
 .table-row-actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
   white-space: nowrap;
+  width: 100%;
 }
 
 .table-row-actions :deep(.el-button) {

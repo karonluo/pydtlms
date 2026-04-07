@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
@@ -92,9 +92,11 @@ def system_permissions(principal: Principal = Depends(require_permissions("syste
 def dict_types(
     keyword: str | None = None,
     status: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("system:read")),
 ) -> DictTypeListResponse:
-    return get_dict_type_list(keyword=keyword, status=status)
+    return get_dict_type_list(keyword=keyword, status=status, page=page, page_size=page_size)
 
 
 @router.post("/dict-types", response_model=DictTypeRecord, status_code=status.HTTP_201_CREATED)
@@ -130,9 +132,11 @@ def dict_data(
     keyword: str | None = None,
     dict_type: str | None = None,
     status: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("system:read")),
 ) -> DictDataListResponse:
-    return get_dict_data_list(keyword=keyword, dict_type=dict_type, status=status)
+    return get_dict_data_list(keyword=keyword, dict_type=dict_type, status=status, page=page, page_size=page_size)
 
 
 @router.post("/dict-data", response_model=DictDataRecord, status_code=status.HTTP_201_CREATED)
@@ -168,9 +172,11 @@ def roles(
     keyword: str | None = None,
     scope_name: str | None = None,
     permission: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("system:read")),
 ) -> RoleListResponse:
-    return get_role_list(keyword=keyword, scope_name=scope_name, permission=permission)
+    return get_role_list(keyword=keyword, scope_name=scope_name, permission=permission, page=page, page_size=page_size)
 
 
 @router.post("/roles", response_model=RoleRecord, status_code=status.HTTP_201_CREATED)
@@ -217,6 +223,8 @@ def system_users(
     role_code: str | None = None,
     account_status: str | None = None,
     department_name: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("system:read")),
 ) -> SystemUserListResponse:
     return get_system_user_list(
@@ -224,6 +232,8 @@ def system_users(
         role_code=role_code,
         account_status=account_status,
         department_name=department_name,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -269,9 +279,11 @@ def batch_delete_system_user_records(payload: BulkDeleteRequest, principal: Prin
 def audit_policies(
     keyword: str | None = None,
     status: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("audit:read")),
 ) -> AuditPolicyListResponse:
-    return get_audit_policy_list(keyword=keyword, status=status)
+    return get_audit_policy_list(keyword=keyword, status=status, page=page, page_size=page_size)
 
 
 @router.post("/audit-policies", response_model=AuditPolicyRecord, status_code=status.HTTP_201_CREATED)
@@ -308,9 +320,11 @@ def integrations(
     keyword: str | None = None,
     status: str | None = None,
     direction: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("system:read")),
 ) -> IntegrationListResponse:
-    return get_integration_list(keyword=keyword, status=status, direction=direction)
+    return get_integration_list(keyword=keyword, status=status, direction=direction, page=page, page_size=page_size)
 
 
 @router.post("/integrations", response_model=IntegrationRecord, status_code=status.HTTP_201_CREATED)
@@ -347,9 +361,11 @@ def operation_logs(
     keyword: str | None = None,
     module_name: str | None = None,
     result: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("audit:read")),
 ) -> OperationLogListResponse:
-    return get_operation_log_list(keyword=keyword, module_name=module_name, result=result)
+    return get_operation_log_list(keyword=keyword, module_name=module_name, result=result, page=page, page_size=page_size)
 
 
 @router.get("/sync-logs", response_model=SyncLogListResponse)
@@ -357,9 +373,11 @@ def sync_logs(
     keyword: str | None = None,
     sync_status: str | None = None,
     source_system: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("audit:read")),
 ) -> SyncLogListResponse:
-    return get_sync_log_list(keyword=keyword, sync_status=sync_status, source_system=source_system)
+    return get_sync_log_list(keyword=keyword, sync_status=sync_status, source_system=source_system, page=page, page_size=page_size)
 
 
 @router.get("/architecture", response_model=SystemArchitecture)

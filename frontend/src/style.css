@@ -267,6 +267,12 @@ a {
   --el-pagination-hover-color: var(--brand-strong);
 }
 
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 .el-input,
 .el-select,
 .el-textarea {

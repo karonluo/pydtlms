@@ -48,14 +48,18 @@ def degree_options(principal: Principal = Depends(require_permissions("degree:re
 def theses(
     keyword: str | None = Query(default=None),
     degree_status: str | None = Query(default=None),
+    advisor_name: str | None = Query(default=None),
+    thesis_status: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("degree:read")),
 ) -> ThesisListResponse:
-    return get_thesis_list(keyword=keyword, degree_status=degree_status)
+    return get_thesis_list(keyword=keyword, degree_status=degree_status, advisor_name=advisor_name, thesis_status=thesis_status, page=page, page_size=page_size)
 
 
 @router.post("/theses", response_model=ThesisRecord, status_code=status.HTTP_201_CREATED)
 def create_thesis_record(payload: ThesisUpsert, principal: Principal = Depends(require_permissions("degree:write"))) -> ThesisRecord:
-    return create_thesis(payload)
+    return create_thesis(payload, principal=principal)
 
 
 @router.put("/theses/{thesis_id}", response_model=ThesisRecord)
@@ -64,11 +68,21 @@ def update_thesis_record(thesis_id: int, payload: ThesisUpsert, principal: Princ
         return update_thesis(thesis_id, payload)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thesis not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/reviews", response_model=ThesisReviewListResponse)
-def thesis_reviews(thesis_id: int | None = Query(default=None), principal: Principal = Depends(require_permissions("degree:read"))) -> ThesisReviewListResponse:
-    return get_thesis_review_list(thesis_id=thesis_id)
+def thesis_reviews(
+    thesis_id: int | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    expert_name: str | None = Query(default=None),
+    review_status: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
+    principal: Principal = Depends(require_permissions("degree:read")),
+) -> ThesisReviewListResponse:
+    return get_thesis_review_list(thesis_id=thesis_id, keyword=keyword, expert_name=expert_name, review_status=review_status, page=page, page_size=page_size)
 
 
 @router.post("/reviews", response_model=ThesisReviewRecord, status_code=status.HTTP_201_CREATED)

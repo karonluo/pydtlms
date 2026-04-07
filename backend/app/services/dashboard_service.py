@@ -49,7 +49,8 @@ from app.schemas.training import (
     TrainingStats,
     TrainingWorkbench,
 )
-from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskUpsert
+from app.schemas.auth import Principal
+from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskActionRequest, WorkflowTaskDetailResponse, WorkflowTaskListResponse, WorkflowTaskUpsert
 from app.services.management_service import store
 
 
@@ -82,8 +83,10 @@ def get_student_management_list(
     status: str | None = None,
     advisor_name: str | None = None,
     team_name: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ) -> StudentManagementResponse:
-    return store.get_students(keyword=keyword, status=status, advisor_name=advisor_name, team_name=team_name)
+    return store.get_students(keyword=keyword, status=status, advisor_name=advisor_name, team_name=team_name, page=page, page_size=page_size)
 
 
 def get_student_options() -> StudentOptionsResponse:
@@ -95,12 +98,16 @@ def get_team_list(
     status: str | None = None,
     department_name: str | None = None,
     lead_advisor_name: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ) -> TeamListResponse:
     return store.get_teams(
         keyword=keyword,
         status=status,
         department_name=department_name,
         lead_advisor_name=lead_advisor_name,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -136,8 +143,14 @@ def delete_teams(team_ids: list[int]):
     return store.delete_teams(team_ids)
 
 
-def get_recruitment_plan_list() -> RecruitPlanListResponse:
-    return store.get_recruitment_plans()
+def get_recruitment_plan_list(
+    keyword: str | None = None,
+    semester: str | None = None,
+    current_stage: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> RecruitPlanListResponse:
+    return store.get_recruitment_plans(keyword=keyword, semester=semester, current_stage=current_stage, page=page, page_size=page_size)
 
 
 def create_recruitment_plan(payload):
@@ -148,12 +161,18 @@ def update_recruitment_plan(plan_id: int, payload):
     return store.update_recruitment_plan(plan_id, payload)
 
 
-def get_recruitment_application_list(keyword: str | None = None, plan_id: int | None = None, status: str | None = None) -> RecruitApplicationListResponse:
-    return store.get_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status)
+def get_recruitment_application_list(
+    keyword: str | None = None,
+    plan_id: int | None = None,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> RecruitApplicationListResponse:
+    return store.get_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status, page=page, page_size=page_size)
 
 
-def create_recruitment_application(payload):
-    return store.create_recruitment_application(payload)
+def create_recruitment_application(payload, principal: Principal | None = None):
+    return store.create_recruitment_application(payload, principal=principal)
 
 
 def update_recruitment_application(application_id: int, payload):
@@ -177,8 +196,10 @@ def get_training_plan_list(
     plan_status: str | None = None,
     advisor_name: str | None = None,
     report_cycle: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ) -> TrainingPlanListResponse:
-    return store.get_training_plans(keyword=keyword, plan_status=plan_status, advisor_name=advisor_name, report_cycle=report_cycle)
+    return store.get_training_plans(keyword=keyword, plan_status=plan_status, advisor_name=advisor_name, report_cycle=report_cycle, page=page, page_size=page_size)
 
 
 def create_training_plan(payload: TrainingPlanUpsert):
@@ -201,12 +222,14 @@ def get_scientific_report_list(
     keyword: str | None = None,
     status: str | None = None,
     reviewer_name: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ) -> ScientificReportListResponse:
-    return store.get_scientific_reports(keyword=keyword, status=status, reviewer_name=reviewer_name)
+    return store.get_scientific_reports(keyword=keyword, status=status, reviewer_name=reviewer_name, page=page, page_size=page_size)
 
 
-def create_scientific_report(payload: ScientificReportUpsert):
-    return store.create_scientific_report(payload)
+def create_scientific_report(payload: ScientificReportUpsert, principal: Principal | None = None):
+    return store.create_scientific_report(payload, principal=principal)
 
 
 def update_scientific_report(report_id: int, payload: ScientificReportUpsert):
@@ -226,12 +249,14 @@ def get_outbound_study_list(
     status: str | None = None,
     study_type: str | None = None,
     advisor_name: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ) -> OutboundStudyListResponse:
-    return store.get_outbound_studies(keyword=keyword, status=status, study_type=study_type, advisor_name=advisor_name)
+    return store.get_outbound_studies(keyword=keyword, status=status, study_type=study_type, advisor_name=advisor_name, page=page, page_size=page_size)
 
 
-def create_outbound_study(payload: OutboundStudyUpsert):
-    return store.create_outbound_study(payload)
+def create_outbound_study(payload: OutboundStudyUpsert, principal: Principal | None = None):
+    return store.create_outbound_study(payload, principal=principal)
 
 
 def update_outbound_study(study_id: int, payload: OutboundStudyUpsert):
@@ -254,20 +279,34 @@ def get_training_options() -> TrainingOptionsResponse:
     return store.get_training_options()
 
 
-def get_thesis_list(keyword: str | None = None, degree_status: str | None = None) -> ThesisListResponse:
-    return store.get_theses(keyword=keyword, degree_status=degree_status)
+def get_thesis_list(
+    keyword: str | None = None,
+    degree_status: str | None = None,
+    advisor_name: str | None = None,
+    thesis_status: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> ThesisListResponse:
+    return store.get_theses(keyword=keyword, degree_status=degree_status, advisor_name=advisor_name, thesis_status=thesis_status, page=page, page_size=page_size)
 
 
-def create_thesis(payload: ThesisUpsert):
-    return store.create_thesis(payload)
+def create_thesis(payload: ThesisUpsert, principal: Principal | None = None):
+    return store.create_thesis(payload, principal=principal)
 
 
 def update_thesis(thesis_id: int, payload: ThesisUpsert):
     return store.update_thesis(thesis_id, payload)
 
 
-def get_thesis_review_list(thesis_id: int | None = None) -> ThesisReviewListResponse:
-    return store.get_thesis_reviews(thesis_id=thesis_id)
+def get_thesis_review_list(
+    thesis_id: int | None = None,
+    keyword: str | None = None,
+    expert_name: str | None = None,
+    review_status: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> ThesisReviewListResponse:
+    return store.get_thesis_reviews(thesis_id=thesis_id, keyword=keyword, expert_name=expert_name, review_status=review_status, page=page, page_size=page_size)
 
 
 def create_thesis_review(payload: ThesisReviewUpsert):
@@ -286,8 +325,8 @@ def get_degree_options() -> DegreeOptionsResponse:
     return store.get_degree_options()
 
 
-def get_role_list(keyword: str | None = None, scope_name: str | None = None, permission: str | None = None) -> RoleListResponse:
-    return store.get_roles(keyword=keyword, scope_name=scope_name, permission=permission)
+def get_role_list(keyword: str | None = None, scope_name: str | None = None, permission: str | None = None, page: int = 1, page_size: int = 10) -> RoleListResponse:
+    return store.get_roles(keyword=keyword, scope_name=scope_name, permission=permission, page=page, page_size=page_size)
 
 
 def create_role(payload: RoleUpsert):
@@ -311,12 +350,16 @@ def get_system_user_list(
     role_code: str | None = None,
     account_status: str | None = None,
     department_name: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
 ) -> SystemUserListResponse:
     return store.get_system_users(
         keyword=keyword,
         role_code=role_code,
         account_status=account_status,
         department_name=department_name,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -336,8 +379,8 @@ def delete_system_users(user_ids: list[int], current_username: str | None = None
     return store.delete_system_users(user_ids, current_username=current_username)
 
 
-def get_audit_policy_list(keyword: str | None = None, status: str | None = None) -> AuditPolicyListResponse:
-    return store.get_audit_policy_records(keyword=keyword, status=status)
+def get_audit_policy_list(keyword: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> AuditPolicyListResponse:
+    return store.get_audit_policy_records(keyword=keyword, status=status, page=page, page_size=page_size)
 
 
 def create_audit_policy(payload: AuditPolicyUpsert):
@@ -356,8 +399,8 @@ def delete_audit_policies(policy_ids: list[int]) -> BulkActionResponse:
     return store.delete_audit_policies(policy_ids)
 
 
-def get_integration_list(keyword: str | None = None, status: str | None = None, direction: str | None = None) -> IntegrationListResponse:
-    return store.get_integrations(keyword=keyword, status=status, direction=direction)
+def get_integration_list(keyword: str | None = None, status: str | None = None, direction: str | None = None, page: int = 1, page_size: int = 10) -> IntegrationListResponse:
+    return store.get_integrations(keyword=keyword, status=status, direction=direction, page=page, page_size=page_size)
 
 
 def create_integration(payload: IntegrationUpsert):
@@ -376,20 +419,20 @@ def delete_integrations(integration_ids: list[int]) -> BulkActionResponse:
     return store.delete_integrations(integration_ids)
 
 
-def get_operation_log_list(keyword: str | None = None, module_name: str | None = None, result: str | None = None) -> OperationLogListResponse:
-    return store.get_operation_logs(keyword=keyword, module_name=module_name, result=result)
+def get_operation_log_list(keyword: str | None = None, module_name: str | None = None, result: str | None = None, page: int = 1, page_size: int = 10) -> OperationLogListResponse:
+    return store.get_operation_logs(keyword=keyword, module_name=module_name, result=result, page=page, page_size=page_size)
 
 
-def get_sync_log_list(keyword: str | None = None, sync_status: str | None = None, source_system: str | None = None) -> SyncLogListResponse:
-    return store.get_sync_logs(keyword=keyword, sync_status=sync_status, source_system=source_system)
+def get_sync_log_list(keyword: str | None = None, sync_status: str | None = None, source_system: str | None = None, page: int = 1, page_size: int = 10) -> SyncLogListResponse:
+    return store.get_sync_logs(keyword=keyword, sync_status=sync_status, source_system=source_system, page=page, page_size=page_size)
 
 
 def get_system_permission_catalog() -> PermissionCatalogResponse:
     return store.get_permission_catalog()
 
 
-def get_dict_type_list(keyword: str | None = None, status: str | None = None) -> DictTypeListResponse:
-    return store.get_dict_types(keyword=keyword, status=status)
+def get_dict_type_list(keyword: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> DictTypeListResponse:
+    return store.get_dict_types(keyword=keyword, status=status, page=page, page_size=page_size)
 
 
 def create_dict_type(payload: DictTypeUpsert):
@@ -404,8 +447,8 @@ def delete_dict_type(dict_type_id: int) -> None:
     store.delete_dict_type(dict_type_id)
 
 
-def get_dict_data_list(keyword: str | None = None, dict_type: str | None = None, status: str | None = None) -> DictDataListResponse:
-    return store.get_dict_data(keyword=keyword, dict_type=dict_type, status=status)
+def get_dict_data_list(keyword: str | None = None, dict_type: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> DictDataListResponse:
+    return store.get_dict_data(keyword=keyword, dict_type=dict_type, status=status, page=page, page_size=page_size)
 
 
 def create_dict_data(payload: DictDataUpsert):
@@ -432,8 +475,19 @@ def get_system_stats() -> SystemStats:
     return store.get_system_stats()
 
 
-def get_workflow_task_list(status: str | None = None, module: str | None = None) -> WorkflowTaskListResponse:
-    return store.get_workflow_tasks(status=status, module=module)
+def get_workflow_task_list(
+    status: str | None = None,
+    module: str | None = None,
+    keyword: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+    principal: Principal | None = None,
+) -> WorkflowTaskListResponse:
+    return store.get_workflow_tasks(status=status, module=module, keyword=keyword, page=page, page_size=page_size, principal=principal)
+
+
+def get_workflow_task_detail(task_id: int, principal: Principal) -> WorkflowTaskDetailResponse:
+    return WorkflowTaskDetailResponse(**store.get_workflow_task_detail(task_id, principal=principal))
 
 
 def create_workflow_task(payload: WorkflowTaskUpsert):
@@ -446,6 +500,10 @@ def update_workflow_task(task_id: int, payload: WorkflowTaskUpsert):
 
 def delete_workflow_task(task_id: int) -> None:
     store.delete_workflow_task(task_id)
+
+
+def execute_workflow_task_action(task_id: int, payload: WorkflowTaskActionRequest, principal: Principal) -> WorkflowTaskDetailResponse:
+    return WorkflowTaskDetailResponse(**store.execute_workflow_action(task_id, action=payload.action, comment=payload.comment, principal=principal))
 
 
 def get_workflow_stats() -> WorkflowStats:

@@ -44,7 +44,7 @@ async function submit() {
       <section class="login-hero">
         <div class="login-badge">学位成长 · 研管业务 · 一体化系统</div>
         <h1>招生、培养、学位、审批统一在一个工作台里完成</h1>
-        <p>基于 Vue3 + FastAPI + RBAC + JWT 构建，覆盖学生主档、培养方案、科研报告、论文评审、审批留痕与系统治理。</p>
+        <p>覆盖学生主档、培养方案、科研报告、论文评审、审批留痕与系统治理等核心业务场景。</p>
 
         <div class="hero-tags">
           <span v-for="item in presets" :key="item">{{ item }}</span>
@@ -83,8 +83,9 @@ async function submit() {
         </el-form>
 
         <div class="account-panel">
-          <p>默认管理员：admin / Admin@123456</p>
-          <p>默认导师：mentor.demo / Mentor@123456</p>
+          <p>系统管理员：admin / Admin@123456</p>
+          <p>导师账号：liu.ya / LiuYa@2026</p>
+          <p>学位秘书：zhou.qing / ZhouQing@2026</p>
         </div>
       </section>
     </article>

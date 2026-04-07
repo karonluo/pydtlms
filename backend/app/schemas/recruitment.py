@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from app.schemas.system import SelectOption
+from app.schemas.common import PaginationResponseBase, SelectOption
 
 
 class RecruitPlanSummary(BaseModel):
@@ -40,15 +40,15 @@ class RecruitPlanUpsert(BaseModel):
     is_open: bool
 
 
-class RecruitPlanListResponse(BaseModel):
+class RecruitPlanListResponse(PaginationResponseBase):
     items: list[RecruitPlanRecord]
-    total: int
 
 
 class RecruitApplicationRecord(BaseModel):
     id: int
     plan_id: int
-    candidate_no: str
+    business_key: str
+    candidate_no: str | None = None
     student_name: str
     graduation_school: str
     highest_degree: str
@@ -61,7 +61,8 @@ class RecruitApplicationRecord(BaseModel):
 
 class RecruitApplicationUpsert(BaseModel):
     plan_id: int
-    candidate_no: str
+    business_key: str | None = None
+    candidate_no: str | None = None
     student_name: str
     graduation_school: str
     highest_degree: str
@@ -72,9 +73,8 @@ class RecruitApplicationUpsert(BaseModel):
     final_score: float | None = None
 
 
-class RecruitApplicationListResponse(BaseModel):
+class RecruitApplicationListResponse(PaginationResponseBase):
     items: list[RecruitApplicationRecord]
-    total: int
 
 
 class RecruitmentOptionsResponse(BaseModel):

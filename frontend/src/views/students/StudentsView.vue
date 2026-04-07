@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
   batchDeleteTeams,
@@ -127,14 +128,14 @@ const sectionConfig = computed(() => {
       title: '团队管理',
       tag: '团队主数据',
       createLabel: '新增团队',
-      total: teams.value.length,
+      total: teamPager.pagination.total,
     }
   }
   return {
     title: '学生主档',
     tag: '主数据管理',
     createLabel: '新增学生',
-    total: students.value.length,
+    total: studentPager.pagination.total,
   }
 })
 const statCards = computed(() => {
@@ -169,6 +170,8 @@ const departmentOptions = computed(() => {
 })
 const disciplineOptions = computed(() => options.value.discipline_options)
 const teamResearchDirectionText = computed(() => teamForm.research_directions.join('、'))
+const studentPager = useServerPagination()
+const teamPager = useServerPagination()
 
 function splitTextValues(value: string) {
   return Array.from(new Set(value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean)))
@@ -215,8 +218,11 @@ async function loadRecords() {
     status: studentFilters.status || undefined,
     advisor_name: studentFilters.advisor_name || undefined,
     team_name: studentFilters.team_name || undefined,
+    page: studentPager.pagination.currentPage,
+    page_size: studentPager.pagination.pageSize,
   })
   students.value = response.data.items
+  studentPager.sync(response.data.total)
 }
 
 async function loadTeams() {
@@ -225,8 +231,11 @@ async function loadTeams() {
     status: teamFilters.status || undefined,
     department_name: teamFilters.department_name || undefined,
     lead_advisor_name: teamFilters.lead_advisor_name || undefined,
+    page: teamPager.pagination.currentPage,
+    page_size: teamPager.pagination.pageSize,
   })
   teams.value = response.data.items
+  teamPager.sync(response.data.total)
 }
 
 async function loadSectionData() {
@@ -420,6 +429,11 @@ async function handleBatchDeleteTeams() {
 }
 
 async function handleSearch() {
+  if (activeSection.value === 'teams') {
+    teamPager.reset()
+  } else {
+    studentPager.reset()
+  }
   await loadSectionData()
 }
 
@@ -427,6 +441,28 @@ async function handleReset() {
   Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', team_name: '' })
   Object.assign(teamFilters, { keyword: '', status: '', department_name: '', lead_advisor_name: '' })
   selectedTeamIds.value = []
+  studentPager.reset()
+  teamPager.reset()
+  await loadSectionData()
+}
+
+async function handleStudentPageChange(page: number) {
+  studentPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleStudentPageSizeChange(size: number) {
+  studentPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleTeamPageChange(page: number) {
+  teamPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleTeamPageSizeChange(size: number) {
+  teamPager.handleSizeChange(size)
   await loadSectionData()
 }
 
@@ -556,7 +592,7 @@ onMounted(() => {
       </el-form>
 
       <div class="table-host">
-        <el-table v-if="isRecordSection" :data="students" stripe v-loading="loading" table-layout="fixed">
+        <el-table v-if="isRecordSection" :data="students" stripe border v-loading="loading" table-layout="fixed">
           <el-table-column prop="student_no" label="学号" width="128" show-overflow-tooltip />
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
           <el-table-column prop="degree_type" label="学位类型" width="112" show-overflow-tooltip />
@@ -570,14 +606,14 @@ onMounted(() => {
           </el-table-column>
           <el-table-column prop="phone_number" label="联系电话" width="128" show-overflow-tooltip />
           <el-table-column prop="political_status" label="政治面貌" width="110" show-overflow-tooltip />
-          <el-table-column label="操作" width="118" align="center">
+          <el-table-column label="操作" width="118" align="left">
             <template #default="scope">
               <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openStudentEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteStudent }]" />
             </template>
           </el-table-column>
         </el-table>
 
-        <el-table v-else :data="teams" stripe v-loading="loading" table-layout="fixed" @selection-change="handleTeamSelectionChange">
+        <el-table v-else :data="teams" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleTeamSelectionChange">
           <el-table-column type="selection" width="44" />
           <el-table-column prop="team_code" label="团队编码" width="128" show-overflow-tooltip />
           <el-table-column label="团队信息" min-width="220">
@@ -609,12 +645,35 @@ onMounted(() => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="118" align="center">
+          <el-table-column label="操作" width="118" align="left">
             <template #default="scope">
               <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openTeamEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteTeam }]" />
             </template>
           </el-table-column>
         </el-table>
+
+        <div class="pagination-bar">
+          <el-pagination
+            v-if="isRecordSection"
+            :current-page="studentPager.pagination.currentPage"
+            :page-size="studentPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="studentPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleStudentPageChange"
+            @size-change="handleStudentPageSizeChange"
+          />
+          <el-pagination
+            v-else
+            :current-page="teamPager.pagination.currentPage"
+            :page-size="teamPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="teamPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleTeamPageChange"
+            @size-change="handleTeamPageSizeChange"
+          />
+        </div>
       </div>
     </article>
 

@@ -1,12 +1,8 @@
+import type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
 import http from './http'
 
 
-export type SelectOption = {
-  label: string
-  value: string
-  color_type?: string | null
-  css_class?: string | null
-}
+export type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
 
 
 export type PermissionOption = {
@@ -183,11 +179,6 @@ export type SystemOptions = {
 }
 
 
-export type BulkActionResponse = {
-  success_count: number
-}
-
-
 export function getSystemStats() {
   return http.get<SystemStats>('/system/stats')
 }
@@ -203,11 +194,11 @@ export function getPermissionCatalog() {
 }
 
 
-export function listDictTypes(params?: {
+export function listDictTypes(params?: PaginationParams & {
   keyword?: string
   status?: string
 }) {
-  return http.get<{ items: DictTypeRecord[]; total: number }>('/system/dict-types', { params })
+  return http.get<PagedResponse<DictTypeRecord>>('/system/dict-types', { params })
 }
 
 
@@ -226,12 +217,12 @@ export function deleteDictType(id: number) {
 }
 
 
-export function listDictData(params?: {
+export function listDictData(params?: PaginationParams & {
   keyword?: string
   dict_type?: string
   status?: string
 }) {
-  return http.get<{ items: DictDataRecord[]; total: number }>('/system/dict-data', { params })
+  return http.get<PagedResponse<DictDataRecord>>('/system/dict-data', { params })
 }
 
 
@@ -250,13 +241,13 @@ export function deleteDictData(id: number) {
 }
 
 
-export function listSystemUsers(params?: {
+export function listSystemUsers(params?: PaginationParams & {
   keyword?: string
   role_code?: string
   account_status?: string
   department_name?: string
 }) {
-  return http.get<{ items: SystemUserRecord[]; total: number }>('/system/users', { params })
+  return http.get<PagedResponse<SystemUserRecord>>('/system/users', { params })
 }
 
 
@@ -280,12 +271,12 @@ export function batchDeleteSystemUsers(ids: number[]) {
 }
 
 
-export function listRoles(params?: {
+export function listRoles(params?: PaginationParams & {
   keyword?: string
   scope_name?: string
   permission?: string
 }) {
-  return http.get<{ items: RoleRecord[]; total: number }>('/system/roles', { params })
+  return http.get<PagedResponse<RoleRecord>>('/system/roles', { params })
 }
 
 
@@ -309,11 +300,11 @@ export function batchDeleteRoles(ids: number[]) {
 }
 
 
-export function listAuditPolicies(params?: {
+export function listAuditPolicies(params?: PaginationParams & {
   keyword?: string
   status?: string
 }) {
-  return http.get<{ items: AuditPolicyRecord[]; total: number }>('/system/audit-policies', { params })
+  return http.get<PagedResponse<AuditPolicyRecord>>('/system/audit-policies', { params })
 }
 
 
@@ -337,12 +328,12 @@ export function batchDeleteAuditPolicies(ids: number[]) {
 }
 
 
-export function listIntegrations(params?: {
+export function listIntegrations(params?: PaginationParams & {
   keyword?: string
   status?: string
   direction?: string
 }) {
-  return http.get<{ items: IntegrationRecord[]; total: number }>('/system/integrations', { params })
+  return http.get<PagedResponse<IntegrationRecord>>('/system/integrations', { params })
 }
 
 
@@ -366,19 +357,19 @@ export function batchDeleteIntegrations(ids: number[]) {
 }
 
 
-export function listOperationLogs(params?: {
+export function listOperationLogs(params?: PaginationParams & {
   keyword?: string
   module_name?: string
   result?: string
 }) {
-  return http.get<{ items: OperationLogRecord[]; total: number }>('/system/operation-logs', { params })
+  return http.get<PagedResponse<OperationLogRecord>>('/system/operation-logs', { params })
 }
 
 
-export function listSyncLogs(params?: {
+export function listSyncLogs(params?: PaginationParams & {
   keyword?: string
   sync_status?: string
   source_system?: string
 }) {
-  return http.get<{ items: SyncLogRecord[]; total: number }>('/system/sync-logs', { params })
+  return http.get<PagedResponse<SyncLogRecord>>('/system/sync-logs', { params })
 }

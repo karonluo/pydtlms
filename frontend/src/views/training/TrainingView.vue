@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
   batchDeleteOutboundStudies,
@@ -98,6 +99,7 @@ const planForm = reactive<TrainingPlanUpsert>({
 })
 
 const reportForm = reactive<ScientificReportUpsert>({
+  business_key: '',
   student_no: '',
   student_name: '',
   period_label: '',
@@ -108,6 +110,7 @@ const reportForm = reactive<ScientificReportUpsert>({
 })
 
 const outboundForm = reactive<OutboundStudyUpsert>({
+  business_key: '',
   student_no: '',
   student_name: '',
   advisor_name: '',
@@ -132,9 +135,9 @@ const trainingStudentMap = computed(() => {
   return new Map(trainingOptions.value.student_options.map((item) => [item.student_no, item]))
 })
 const currentTotal = computed(() => {
-  if (activeSection.value === 'plans') return trainingPlans.value.length
-  if (activeSection.value === 'reports') return scientificReports.value.length
-  return outboundStudies.value.length
+  if (activeSection.value === 'plans') return trainingPlanPager.pagination.total
+  if (activeSection.value === 'reports') return scientificReportPager.pagination.total
+  return outboundStudyPager.pagination.total
 })
 const statCards = computed(() => [
   { label: '培养方案', value: stats.value.training_plan_total },
@@ -142,6 +145,9 @@ const statCards = computed(() => [
   { label: '待审报告', value: stats.value.report_pending_total },
   { label: '在途研修', value: stats.value.outbound_active_total },
 ])
+const trainingPlanPager = useServerPagination()
+const scientificReportPager = useServerPagination()
+const outboundStudyPager = useServerPagination()
 
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
@@ -171,6 +177,7 @@ function resetForms() {
     assessment_rule: '',
   })
   Object.assign(reportForm, {
+    business_key: '',
     student_no: '',
     student_name: '',
     period_label: '',
@@ -180,6 +187,7 @@ function resetForms() {
     summary: '',
   })
   Object.assign(outboundForm, {
+    business_key: '',
     student_no: '',
     student_name: '',
     advisor_name: '',
@@ -266,17 +274,32 @@ async function loadCurrentSection() {
   loading.value = true
   try {
     if (activeSection.value === 'plans') {
-      const response = await listTrainingPlans(planFilters)
+      const response = await listTrainingPlans({
+        ...planFilters,
+        page: trainingPlanPager.pagination.currentPage,
+        page_size: trainingPlanPager.pagination.pageSize,
+      })
       trainingPlans.value = response.data.items
+      trainingPlanPager.sync(response.data.total)
       return
     }
     if (activeSection.value === 'reports') {
-      const response = await listScientificReports(reportFilters)
+      const response = await listScientificReports({
+        ...reportFilters,
+        page: scientificReportPager.pagination.currentPage,
+        page_size: scientificReportPager.pagination.pageSize,
+      })
       scientificReports.value = response.data.items
+      scientificReportPager.sync(response.data.total)
       return
     }
-    const response = await listOutboundStudies(outboundFilters)
+    const response = await listOutboundStudies({
+      ...outboundFilters,
+      page: outboundStudyPager.pagination.currentPage,
+      page_size: outboundStudyPager.pagination.pageSize,
+    })
     outboundStudies.value = response.data.items
+    outboundStudyPager.sync(response.data.total)
   } finally {
     loading.value = false
   }
@@ -284,6 +307,13 @@ async function loadCurrentSection() {
 
 async function searchCurrentSection() {
   resetSelection()
+  if (activeSection.value === 'plans') {
+    trainingPlanPager.reset()
+  } else if (activeSection.value === 'reports') {
+    scientificReportPager.reset()
+  } else {
+    outboundStudyPager.reset()
+  }
   await loadCurrentSection()
 }
 
@@ -295,7 +325,40 @@ async function resetCurrentFilters() {
   } else {
     Object.assign(outboundFilters, { keyword: '', status: '', study_type: '', advisor_name: '' })
   }
+  trainingPlanPager.reset()
+  scientificReportPager.reset()
+  outboundStudyPager.reset()
   await searchCurrentSection()
+}
+
+async function handleTrainingPlanPageChange(page: number) {
+  trainingPlanPager.handleCurrentChange(page)
+  await loadCurrentSection()
+}
+
+async function handleTrainingPlanPageSizeChange(size: number) {
+  trainingPlanPager.handleSizeChange(size)
+  await loadCurrentSection()
+}
+
+async function handleScientificReportPageChange(page: number) {
+  scientificReportPager.handleCurrentChange(page)
+  await loadCurrentSection()
+}
+
+async function handleScientificReportPageSizeChange(size: number) {
+  scientificReportPager.handleSizeChange(size)
+  await loadCurrentSection()
+}
+
+async function handleOutboundStudyPageChange(page: number) {
+  outboundStudyPager.handleCurrentChange(page)
+  await loadCurrentSection()
+}
+
+async function handleOutboundStudyPageSizeChange(size: number) {
+  outboundStudyPager.handleSizeChange(size)
+  await loadCurrentSection()
 }
 
 async function submit() {
@@ -444,7 +507,7 @@ onMounted(() => {
       </div>
 
       <div v-else-if="activeSection === 'reports'" class="filter-grid">
-        <el-input v-model="reportFilters.keyword" placeholder="输入学号、学生姓名、周期或摘要" clearable @keyup.enter="searchCurrentSection" />
+        <el-input v-model="reportFilters.keyword" placeholder="输入业务编号、学号、学生姓名、周期或摘要" clearable @keyup.enter="searchCurrentSection" />
         <el-select v-model="reportFilters.status" placeholder="报告状态" clearable>
           <el-option v-for="item in trainingOptions.report_status_options" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -458,7 +521,7 @@ onMounted(() => {
       </div>
 
       <div v-else class="filter-grid">
-        <el-input v-model="outboundFilters.keyword" placeholder="输入学号、学生姓名、目的地或预期成果" clearable @keyup.enter="searchCurrentSection" />
+        <el-input v-model="outboundFilters.keyword" placeholder="输入业务编号、学号、学生姓名、目的地或预期成果" clearable @keyup.enter="searchCurrentSection" />
         <el-select v-model="outboundFilters.status" placeholder="审批状态" clearable>
           <el-option v-for="item in trainingOptions.approval_status_options" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -474,7 +537,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <el-table v-if="activeSection === 'plans'" :data="trainingPlans" stripe v-loading="loading || bootstrapping" @selection-change="handleSelectionChange">
+      <el-table v-if="activeSection === 'plans'" :data="trainingPlans" stripe border v-loading="loading || bootstrapping" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
         <el-table-column prop="student_no" label="学号" width="120" />
         <el-table-column prop="student_name" label="学生" width="100" />
@@ -485,15 +548,16 @@ onMounted(() => {
           <template #default="scope"><el-tag :type="getStatusTagType(scope.row.plan_status)">{{ scope.row.plan_status }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="scientific_goal" label="科研目标" min-width="220" />
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护方案', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: removeCurrentRecord }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else-if="activeSection === 'reports'" :data="scientificReports" stripe v-loading="loading || bootstrapping" @selection-change="handleSelectionChange">
+      <el-table v-else-if="activeSection === 'reports'" :data="scientificReports" stripe border v-loading="loading || bootstrapping" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
+        <el-table-column prop="business_key" label="业务编号" width="190" />
         <el-table-column prop="student_no" label="学号" width="120" />
         <el-table-column prop="student_name" label="学生" width="100" />
         <el-table-column prop="period_label" label="周期" width="120" />
@@ -503,15 +567,16 @@ onMounted(() => {
         <el-table-column prop="reviewer_name" label="审阅人" width="110" />
         <el-table-column prop="review_score" label="评分" width="90" />
         <el-table-column prop="summary" label="摘要" min-width="240" />
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护报告', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: removeCurrentRecord }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else :data="outboundStudies" stripe v-loading="loading || bootstrapping" @selection-change="handleSelectionChange">
+      <el-table v-else :data="outboundStudies" stripe border v-loading="loading || bootstrapping" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
+        <el-table-column prop="business_key" label="业务编号" width="190" />
         <el-table-column prop="student_no" label="学号" width="120" />
         <el-table-column prop="student_name" label="学生" width="100" />
         <el-table-column prop="advisor_name" label="导师" width="100" />
@@ -521,12 +586,45 @@ onMounted(() => {
           <template #default="scope"><el-tag :type="getStatusTagType(scope.row.approval_status)">{{ scope.row.approval_status }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="expected_outcome" label="预期成果" min-width="220" />
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护研修', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: removeCurrentRecord }]" />
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-bar">
+        <el-pagination
+          v-if="activeSection === 'plans'"
+          :current-page="trainingPlanPager.pagination.currentPage"
+          :page-size="trainingPlanPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="trainingPlanPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleTrainingPlanPageChange"
+          @size-change="handleTrainingPlanPageSizeChange"
+        />
+        <el-pagination
+          v-else-if="activeSection === 'reports'"
+          :current-page="scientificReportPager.pagination.currentPage"
+          :page-size="scientificReportPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="scientificReportPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleScientificReportPageChange"
+          @size-change="handleScientificReportPageSizeChange"
+        />
+        <el-pagination
+          v-else
+          :current-page="outboundStudyPager.pagination.currentPage"
+          :page-size="outboundStudyPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="outboundStudyPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleOutboundStudyPageChange"
+          @size-change="handleOutboundStudyPageSizeChange"
+        />
+      </div>
     </section>
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? sectionConfig.createLabel : `维护${sectionConfig.title}`" width="760px">
@@ -559,6 +657,7 @@ onMounted(() => {
       </el-form>
 
       <el-form v-else-if="activeSection === 'reports'" label-width="110px" class="dialog-grid">
+        <el-form-item label="业务编号"><el-input :model-value="reportForm.business_key || '保存后自动生成'" disabled /></el-form-item>
         <el-form-item label="学生">
           <el-select v-model="reportForm.student_no" filterable placeholder="请选择学生">
             <el-option v-for="item in trainingOptions.student_options" :key="item.student_no" :label="item.label" :value="item.student_no" />
@@ -582,6 +681,7 @@ onMounted(() => {
       </el-form>
 
       <el-form v-else label-width="110px" class="dialog-grid">
+        <el-form-item label="业务编号"><el-input :model-value="outboundForm.business_key || '保存后自动生成'" disabled /></el-form-item>
         <el-form-item label="学生">
           <el-select v-model="outboundForm.student_no" filterable placeholder="请选择学生">
             <el-option v-for="item in trainingOptions.student_options" :key="item.student_no" :label="item.label" :value="item.student_no" />

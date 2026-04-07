@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
+import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
   createThesis,
@@ -50,7 +51,21 @@ const options = ref<DegreeOptions>({
   review_status_options: [],
 })
 
+const thesisFilters = reactive({
+  keyword: '',
+  advisor_name: '',
+  thesis_status: '',
+  degree_status: '',
+})
+const reviewFilters = reactive({
+  keyword: '',
+  thesis_id: undefined as number | undefined,
+  expert_name: '',
+  review_status: '',
+})
+
 const thesisForm = reactive<ThesisUpsert>({
+  business_key: '',
   student_no: '',
   student_name: '',
   advisor_name: '',
@@ -79,10 +94,13 @@ const statCards = computed(() => [
   { label: '待盲审', value: stats.value.blind_review_pending_total },
   { label: '待答辩', value: stats.value.defense_pending_total },
 ])
+const thesisPager = useServerPagination()
+const reviewPager = useServerPagination()
 
 function resetForms() {
   currentId.value = null
   Object.assign(thesisForm, {
+    business_key: '',
     student_no: '',
     student_name: '',
     advisor_name: '',
@@ -106,16 +124,32 @@ function resetForms() {
 async function loadData() {
   loading.value = true
   try {
-    const [statsResponse, thesisResponse, reviewResponse, optionsResponse] = await Promise.all([
-      getDegreeStats(),
-      listTheses(),
-      listThesisReviews(),
-      getDegreeOptions(),
-    ])
+    const [statsResponse, optionsResponse] = await Promise.all([getDegreeStats(), getDegreeOptions()])
     stats.value = statsResponse.data
-    theses.value = thesisResponse.data.items
-    reviews.value = reviewResponse.data.items
     options.value = optionsResponse.data
+    if (activeSection.value === 'theses') {
+      const thesisResponse = await listTheses({
+        keyword: thesisFilters.keyword || undefined,
+        advisor_name: thesisFilters.advisor_name || undefined,
+        thesis_status: thesisFilters.thesis_status || undefined,
+        degree_status: thesisFilters.degree_status || undefined,
+        page: thesisPager.pagination.currentPage,
+        page_size: thesisPager.pagination.pageSize,
+      })
+      theses.value = thesisResponse.data.items
+      thesisPager.sync(thesisResponse.data.total)
+      return
+    }
+    const reviewResponse = await listThesisReviews({
+      keyword: reviewFilters.keyword || undefined,
+      thesis_id: reviewFilters.thesis_id,
+      expert_name: reviewFilters.expert_name || undefined,
+      review_status: reviewFilters.review_status || undefined,
+      page: reviewPager.pagination.currentPage,
+      page_size: reviewPager.pagination.pageSize,
+    })
+    reviews.value = reviewResponse.data.items
+    reviewPager.sync(reviewResponse.data.total)
   } finally {
     loading.value = false
   }
@@ -152,6 +186,41 @@ function openCreateDialog() {
   dialogMode.value = 'create'
   resetForms()
   dialogVisible.value = true
+}
+
+function handleSearch() {
+  if (activeSection.value === 'theses') {
+    thesisPager.reset()
+  } else {
+    reviewPager.reset()
+  }
+  void loadData()
+}
+
+function handleReset() {
+  Object.assign(thesisFilters, { keyword: '', advisor_name: '', thesis_status: '', degree_status: '' })
+  Object.assign(reviewFilters, { keyword: '', thesis_id: undefined, expert_name: '', review_status: '' })
+  thesisPager.reset()
+  reviewPager.reset()
+  void loadData()
+}
+
+function handlePageChange(page: number) {
+  if (activeSection.value === 'theses') {
+    thesisPager.handleCurrentChange(page)
+  } else {
+    reviewPager.handleCurrentChange(page)
+  }
+  void loadData()
+}
+
+function handlePageSizeChange(pageSize: number) {
+  if (activeSection.value === 'theses') {
+    thesisPager.handleSizeChange(pageSize)
+  } else {
+    reviewPager.handleSizeChange(pageSize)
+  }
+  void loadData()
 }
 
 function openEditDialog(row: ThesisRecord | ThesisReviewRecord) {
@@ -192,6 +261,10 @@ async function submit() {
 onMounted(() => {
   void loadData()
 })
+
+watch(activeSection, () => {
+  handleReset()
+})
 </script>
 
 <template>
@@ -209,10 +282,64 @@ onMounted(() => {
           <p class="section-tag">学位过程</p>
           <h2>{{ sectionTitle }}</h2>
         </div>
-        <el-button type="primary" round @click="openCreateDialog">新增记录</el-button>
+        <div class="header-actions">
+          <span class="summary-text">当前共 {{ activeSection === 'theses' ? thesisPager.pagination.total : reviewPager.pagination.total }} 条记录</span>
+          <el-button type="primary" round @click="openCreateDialog">新增记录</el-button>
+        </div>
       </div>
 
-      <el-table v-if="activeSection === 'theses'" :data="theses" stripe v-loading="loading">
+      <el-form v-if="activeSection === 'theses'" class="filter-form" :inline="true">
+        <el-form-item>
+            <el-input v-model="thesisFilters.keyword" placeholder="业务编号 / 学号 / 学生 / 导师 / 论文题目" clearable @keyup.enter="handleSearch" />
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="thesisFilters.advisor_name" placeholder="全部导师" clearable filterable style="width: 180px">
+            <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="thesisFilters.thesis_status" placeholder="论文状态" clearable style="width: 160px">
+            <el-option v-for="item in options.thesis_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="thesisFilters.degree_status" placeholder="授位状态" clearable style="width: 160px">
+            <el-option v-for="item in options.degree_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-form v-else class="filter-form" :inline="true">
+        <el-form-item>
+          <el-input v-model="reviewFilters.keyword" placeholder="论文题目 / 专家 / 评审意见" clearable @keyup.enter="handleSearch" />
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="reviewFilters.thesis_id" placeholder="全部论文" clearable filterable style="width: 220px">
+            <el-option v-for="item in options.thesis_options" :key="item.value" :label="item.label" :value="Number(item.value)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="reviewFilters.expert_name" placeholder="评审专家" clearable filterable style="width: 180px">
+            <el-option v-for="item in options.expert_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-select v-model="reviewFilters.review_status" placeholder="评审状态" clearable style="width: 160px">
+            <el-option v-for="item in options.review_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-table v-if="activeSection === 'theses'" :data="theses" stripe border v-loading="loading">
+        <el-table-column prop="business_key" label="业务编号" width="190" />
         <el-table-column prop="student_no" label="学号" width="120" />
         <el-table-column prop="student_name" label="学生" width="100" />
         <el-table-column prop="advisor_name" label="导师" width="100" />
@@ -221,26 +348,51 @@ onMounted(() => {
         <el-table-column prop="blind_review_status" label="盲审状态" width="120" />
         <el-table-column prop="defense_status" label="答辩状态" width="120" />
         <el-table-column prop="degree_status" label="授位状态" width="120" />
-        <el-table-column label="操作" width="90" align="center">
+        <el-table-column label="操作" width="90" align="left">
           <template #default="scope"><TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog }]" /></template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else :data="reviews" stripe v-loading="loading">
+      <div v-if="activeSection === 'theses'" class="pagination-bar">
+        <el-pagination
+          :current-page="thesisPager.pagination.currentPage"
+          :page-size="thesisPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="thesisPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+          @size-change="handlePageSizeChange"
+        />
+      </div>
+
+      <el-table v-else :data="reviews" stripe border v-loading="loading">
         <el-table-column prop="thesis_id" label="论文ID" width="100" />
         <el-table-column prop="thesis_title" label="论文题目" min-width="240" />
         <el-table-column prop="expert_name" label="评审专家" width="120" />
         <el-table-column prop="review_score" label="评分" width="100" />
         <el-table-column prop="review_status" label="评审状态" width="120" />
         <el-table-column prop="review_comment" label="评审意见" min-width="260" />
-        <el-table-column label="操作" width="90" align="center">
+        <el-table-column label="操作" width="90" align="left">
           <template #default="scope"><TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog }]" /></template>
         </el-table-column>
       </el-table>
+
+      <div v-if="activeSection !== 'theses'" class="pagination-bar">
+        <el-pagination
+          :current-page="reviewPager.pagination.currentPage"
+          :page-size="reviewPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="reviewPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+          @size-change="handlePageSizeChange"
+        />
+      </div>
     </section>
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? `新增${sectionTitle}` : `编辑${sectionTitle}`" width="760px">
       <el-form v-if="activeSection === 'theses'" label-width="110px" class="dialog-grid">
+        <el-form-item label="业务编号"><el-input :model-value="thesisForm.business_key || '保存后自动生成'" disabled /></el-form-item>
         <el-form-item label="学生">
           <el-select v-model="thesisForm.student_no" filterable placeholder="请选择学生">
             <el-option v-for="item in options.student_options" :key="item.value" :label="item.label" :value="item.value" />
@@ -333,6 +485,22 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.summary-text {
+  color: #7183a0;
+  font-size: 13px;
+}
+
+.filter-form {
+  margin-bottom: 12px;
+}
+
 .section-tag,
 .section-card h2,
 .pill-card p {
@@ -379,6 +547,11 @@ onMounted(() => {
   .stat-grid,
   .dialog-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-card__header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

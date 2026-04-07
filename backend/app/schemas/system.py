@@ -1,11 +1,6 @@
 from pydantic import BaseModel, Field
 
-
-class SelectOption(BaseModel):
-    label: str
-    value: str
-    color_type: str | None = None
-    css_class: str | None = None
+from app.schemas.common import PaginationResponseBase, SelectOption
 
 
 class PermissionOption(BaseModel):
@@ -31,9 +26,8 @@ class RoleUpsert(BaseModel):
     permissions: list[str] = Field(default_factory=list)
 
 
-class RoleListResponse(BaseModel):
+class RoleListResponse(PaginationResponseBase):
     items: list[RoleRecord]
-    total: int
 
 
 class SystemUserRecord(BaseModel):
@@ -58,9 +52,8 @@ class SystemUserUpsert(BaseModel):
     password: str | None = None
 
 
-class SystemUserListResponse(BaseModel):
+class SystemUserListResponse(PaginationResponseBase):
     items: list[SystemUserRecord]
-    total: int
 
 
 class AuditPolicyRecord(BaseModel):
@@ -76,9 +69,8 @@ class AuditPolicyUpsert(BaseModel):
     status: str
 
 
-class AuditPolicyListResponse(BaseModel):
+class AuditPolicyListResponse(PaginationResponseBase):
     items: list[AuditPolicyRecord]
-    total: int
 
 
 class IntegrationRecord(BaseModel):
@@ -98,9 +90,8 @@ class IntegrationUpsert(BaseModel):
     owner: str
 
 
-class IntegrationListResponse(BaseModel):
+class IntegrationListResponse(PaginationResponseBase):
     items: list[IntegrationRecord]
-    total: int
 
 
 class OperationLogRecord(BaseModel):
@@ -115,9 +106,8 @@ class OperationLogRecord(BaseModel):
     summary: str
 
 
-class OperationLogListResponse(BaseModel):
+class OperationLogListResponse(PaginationResponseBase):
     items: list[OperationLogRecord]
-    total: int
 
 
 class SyncLogRecord(BaseModel):
@@ -130,9 +120,8 @@ class SyncLogRecord(BaseModel):
     failure_reason: str | None = None
 
 
-class SyncLogListResponse(BaseModel):
+class SyncLogListResponse(PaginationResponseBase):
     items: list[SyncLogRecord]
-    total: int
 
 
 class PermissionCatalogResponse(BaseModel):
@@ -155,9 +144,8 @@ class DictTypeUpsert(BaseModel):
     remark: str | None = None
 
 
-class DictTypeListResponse(BaseModel):
+class DictTypeListResponse(PaginationResponseBase):
     items: list[DictTypeRecord]
-    total: int
 
 
 class DictDataRecord(BaseModel):
@@ -184,9 +172,8 @@ class DictDataUpsert(BaseModel):
     remark: str | None = None
 
 
-class DictDataListResponse(BaseModel):
+class DictDataListResponse(PaginationResponseBase):
     items: list[DictDataRecord]
-    total: int
 
 
 class SystemOptionsResponse(BaseModel):

@@ -1,5 +1,5 @@
+import type { PagedResponse, PaginationParams, SelectOption } from './common'
 import http from './http'
-import type { SelectOption } from './students'
 
 
 export type RecruitPlanRecord = {
@@ -22,7 +22,8 @@ export type RecruitPlanUpsert = Omit<RecruitPlanRecord, 'id' | 'academic_term' |
 export type RecruitApplicationRecord = {
   id: number
   plan_id: number
-  candidate_no: string
+  business_key: string
+  candidate_no?: string | null
   student_name: string
   graduation_school: string
   highest_degree: string
@@ -34,19 +35,15 @@ export type RecruitApplicationRecord = {
 }
 
 
-export type RecruitApplicationUpsert = Omit<RecruitApplicationRecord, 'id'>
-
-
-export type RecruitPlanListResponse = {
-  items: RecruitPlanRecord[]
-  total: number
+export type RecruitApplicationUpsert = Omit<RecruitApplicationRecord, 'id' | 'business_key'> & {
+  business_key?: string | null
 }
 
 
-export type RecruitApplicationListResponse = {
-  items: RecruitApplicationRecord[]
-  total: number
-}
+export type RecruitPlanListResponse = PagedResponse<RecruitPlanRecord>
+
+
+export type RecruitApplicationListResponse = PagedResponse<RecruitApplicationRecord>
 
 
 export type RecruitStats = {
@@ -106,8 +103,8 @@ export function getRecruitmentWorkbench() {
 }
 
 
-export function listRecruitmentPlans() {
-  return http.get<RecruitPlanListResponse>('/recruitment/plans')
+export function listRecruitmentPlans(params?: PaginationParams & { keyword?: string; semester?: string; current_stage?: string }) {
+  return http.get<RecruitPlanListResponse>('/recruitment/plans', { params })
 }
 
 
@@ -121,7 +118,7 @@ export function updateRecruitmentPlan(id: number, payload: RecruitPlanUpsert) {
 }
 
 
-export function listRecruitmentApplications(params?: { keyword?: string; status?: string; plan_id?: number }) {
+export function listRecruitmentApplications(params?: PaginationParams & { keyword?: string; status?: string; plan_id?: number }) {
   return http.get<RecruitApplicationListResponse>('/recruitment/applications', { params })
 }
 

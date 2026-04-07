@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
   batchDeleteAuditPolicies,
@@ -158,12 +159,12 @@ const activeSection = computed(() => String(route.meta.section || 'users'))
 const sectionConfig = computed(() => sectionMeta[activeSection.value] || sectionMeta.users)
 const editableSection = computed(() => ['users', 'roles', 'audit', 'integrations'].includes(activeSection.value))
 const currentTotal = computed(() => {
-  if (activeSection.value === 'users') return users.value.length
-  if (activeSection.value === 'roles') return roles.value.length
-  if (activeSection.value === 'audit') return policies.value.length
-  if (activeSection.value === 'integrations') return integrations.value.length
-  if (activeSection.value === 'operation-logs') return operationLogs.value.length
-  return syncLogs.value.length
+  if (activeSection.value === 'users') return userPager.pagination.total
+  if (activeSection.value === 'roles') return rolePager.pagination.total
+  if (activeSection.value === 'audit') return auditPager.pagination.total
+  if (activeSection.value === 'integrations') return integrationPager.pagination.total
+  if (activeSection.value === 'operation-logs') return operationLogPager.pagination.total
+  return syncLogPager.pagination.total
 })
 const statCards = computed(() => [
   { label: '系统账号', value: stats.value.user_total, tone: 'healthy' },
@@ -193,6 +194,12 @@ const syncSourceOptions = computed(() => {
   const values = Array.from(new Set(syncLogs.value.map((item) => item.source_system).filter(Boolean)))
   return values.map((item) => ({ label: item, value: item }))
 })
+const userPager = useServerPagination()
+const rolePager = useServerPagination()
+const auditPager = useServerPagination()
+const integrationPager = useServerPagination()
+const operationLogPager = useServerPagination()
+const syncLogPager = useServerPagination()
 
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
@@ -251,7 +258,7 @@ async function loadStats() {
 }
 
 async function loadRoleReferences() {
-  const response = await listRoles()
+  const response = await listRoles({ page: 1, page_size: 1000 })
   roleReferenceList.value = response.data.items
 }
 
@@ -262,7 +269,7 @@ async function loadBootstrapData() {
       getSystemStats(),
       getSystemOptions(),
       getPermissionCatalog(),
-      listRoles(),
+      listRoles({ page: 1, page_size: 1000 }),
     ])
     stats.value = statsResponse.data
     systemOptions.value = optionResponse.data
@@ -289,8 +296,11 @@ async function loadSectionData() {
         role_code: userFilters.role_code || undefined,
         account_status: userFilters.account_status || undefined,
         department_name: userFilters.department_name || undefined,
+        page: userPager.pagination.currentPage,
+        page_size: userPager.pagination.pageSize,
       })
       users.value = response.data.items
+      userPager.sync(response.data.total)
       return
     }
     if (activeSection.value === 'roles') {
@@ -298,16 +308,22 @@ async function loadSectionData() {
         keyword: roleFilters.keyword || undefined,
         scope_name: roleFilters.scope_name || undefined,
         permission: roleFilters.permission || undefined,
+        page: rolePager.pagination.currentPage,
+        page_size: rolePager.pagination.pageSize,
       })
       roles.value = response.data.items
+      rolePager.sync(response.data.total)
       return
     }
     if (activeSection.value === 'audit') {
       const response = await listAuditPolicies({
         keyword: auditFilters.keyword || undefined,
         status: auditFilters.status || undefined,
+        page: auditPager.pagination.currentPage,
+        page_size: auditPager.pagination.pageSize,
       })
       policies.value = response.data.items
+      auditPager.sync(response.data.total)
       return
     }
     if (activeSection.value === 'integrations') {
@@ -315,8 +331,11 @@ async function loadSectionData() {
         keyword: integrationFilters.keyword || undefined,
         status: integrationFilters.status || undefined,
         direction: integrationFilters.direction || undefined,
+        page: integrationPager.pagination.currentPage,
+        page_size: integrationPager.pagination.pageSize,
       })
       integrations.value = response.data.items
+      integrationPager.sync(response.data.total)
       return
     }
     if (activeSection.value === 'operation-logs') {
@@ -324,16 +343,22 @@ async function loadSectionData() {
         keyword: operationLogFilters.keyword || undefined,
         module_name: operationLogFilters.module_name || undefined,
         result: operationLogFilters.result || undefined,
+        page: operationLogPager.pagination.currentPage,
+        page_size: operationLogPager.pagination.pageSize,
       })
       operationLogs.value = response.data.items
+      operationLogPager.sync(response.data.total)
       return
     }
     const response = await listSyncLogs({
       keyword: syncLogFilters.keyword || undefined,
       sync_status: syncLogFilters.sync_status || undefined,
       source_system: syncLogFilters.source_system || undefined,
+      page: syncLogPager.pagination.currentPage,
+      page_size: syncLogPager.pagination.pageSize,
     })
     syncLogs.value = response.data.items
+    syncLogPager.sync(response.data.total)
   } finally {
     loading.value = false
   }
@@ -574,6 +599,12 @@ async function handleBatchDelete() {
 
 async function handleSearch() {
   try {
+    if (activeSection.value === 'users') userPager.reset()
+    else if (activeSection.value === 'roles') rolePager.reset()
+    else if (activeSection.value === 'audit') auditPager.reset()
+    else if (activeSection.value === 'integrations') integrationPager.reset()
+    else if (activeSection.value === 'operation-logs') operationLogPager.reset()
+    else syncLogPager.reset()
     await loadSectionData()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
@@ -582,7 +613,73 @@ async function handleSearch() {
 
 async function handleReset() {
   resetFilters()
+  userPager.reset()
+  rolePager.reset()
+  auditPager.reset()
+  integrationPager.reset()
+  operationLogPager.reset()
+  syncLogPager.reset()
   await handleSearch()
+}
+
+async function handleUserPageChange(page: number) {
+  userPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleUserPageSizeChange(size: number) {
+  userPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleRolePageChange(page: number) {
+  rolePager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleRolePageSizeChange(size: number) {
+  rolePager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleAuditPageChange(page: number) {
+  auditPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleAuditPageSizeChange(size: number) {
+  auditPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleIntegrationPageChange(page: number) {
+  integrationPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleIntegrationPageSizeChange(size: number) {
+  integrationPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleOperationLogPageChange(page: number) {
+  operationLogPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleOperationLogPageSizeChange(size: number) {
+  operationLogPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleSyncLogPageChange(page: number) {
+  syncLogPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleSyncLogPageSizeChange(size: number) {
+  syncLogPager.handleSizeChange(size)
+  await loadSectionData()
 }
 
 function handleSelectionChange(rows: Array<{ id: number }>) {
@@ -763,7 +860,7 @@ onMounted(async () => {
         </el-form-item>
       </el-form>
 
-      <el-table v-if="activeSection === 'users'" :data="users" stripe v-loading="loading" @selection-change="handleSelectionChange">
+      <el-table v-if="activeSection === 'users'" :data="users" stripe border v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
         <el-table-column prop="username" label="账号" width="130" />
         <el-table-column prop="full_name" label="姓名" width="120" />
@@ -776,14 +873,14 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="phone_number" label="电话" min-width="160" />
         <el-table-column prop="last_login_at" label="最近登录" width="180" />
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护账号', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else-if="activeSection === 'roles'" :data="roles" stripe v-loading="loading" @selection-change="handleSelectionChange">
+      <el-table v-else-if="activeSection === 'roles'" :data="roles" stripe border v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
         <el-table-column prop="role_name" label="角色名称" width="140" />
         <el-table-column prop="role_code" label="角色编码" width="140" />
@@ -796,14 +893,14 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '分配权限', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else-if="activeSection === 'audit'" :data="policies" stripe v-loading="loading" @selection-change="handleSelectionChange">
+      <el-table v-else-if="activeSection === 'audit'" :data="policies" stripe border v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
         <el-table-column prop="item" label="审计项" width="220" />
         <el-table-column label="策略状态" width="110">
@@ -812,14 +909,14 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="policy" label="审计策略" min-width="420" />
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护策略', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else-if="activeSection === 'integrations'" :data="integrations" stripe v-loading="loading" @selection-change="handleSelectionChange">
+      <el-table v-else-if="activeSection === 'integrations'" :data="integrations" stripe border v-loading="loading" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="52" />
         <el-table-column prop="name" label="系统名称" width="180" />
         <el-table-column prop="direction" label="同步方向" width="140" />
@@ -830,14 +927,14 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="owner" label="责任人" width="120" />
-        <el-table-column label="操作" width="128" align="center">
+        <el-table-column label="操作" width="128" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '维护链路', type: 'primary', onClick: openEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDelete }]" />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-table v-else-if="activeSection === 'operation-logs'" :data="operationLogs" stripe v-loading="loading">
+      <el-table v-else-if="activeSection === 'operation-logs'" :data="operationLogs" stripe border v-loading="loading">
         <el-table-column prop="operated_at" label="发生时间" width="180" />
         <el-table-column prop="operator_username" label="操作账号" width="120" />
         <el-table-column prop="module_name" label="模块" width="120" />
@@ -851,7 +948,7 @@ onMounted(async () => {
         <el-table-column prop="summary" label="摘要" min-width="240" />
       </el-table>
 
-      <el-table v-else :data="syncLogs" stripe v-loading="loading">
+      <el-table v-else :data="syncLogs" stripe border v-loading="loading">
         <el-table-column prop="source_system" label="源系统" width="160" />
         <el-table-column prop="target_system" label="目标系统" width="160" />
         <el-table-column label="同步状态" width="120">
@@ -866,6 +963,69 @@ onMounted(async () => {
 
       <div v-if="editableSection && selectedIds.length > 0" class="selection-summary">
         已选择 {{ selectedIds.length }} 条记录，可执行批量删除。
+      </div>
+
+      <div class="pagination-bar">
+        <el-pagination
+          v-if="activeSection === 'users'"
+          :current-page="userPager.pagination.currentPage"
+          :page-size="userPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="userPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleUserPageChange"
+          @size-change="handleUserPageSizeChange"
+        />
+        <el-pagination
+          v-else-if="activeSection === 'roles'"
+          :current-page="rolePager.pagination.currentPage"
+          :page-size="rolePager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="rolePager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleRolePageChange"
+          @size-change="handleRolePageSizeChange"
+        />
+        <el-pagination
+          v-else-if="activeSection === 'audit'"
+          :current-page="auditPager.pagination.currentPage"
+          :page-size="auditPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="auditPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleAuditPageChange"
+          @size-change="handleAuditPageSizeChange"
+        />
+        <el-pagination
+          v-else-if="activeSection === 'integrations'"
+          :current-page="integrationPager.pagination.currentPage"
+          :page-size="integrationPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="integrationPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleIntegrationPageChange"
+          @size-change="handleIntegrationPageSizeChange"
+        />
+        <el-pagination
+          v-else-if="activeSection === 'operation-logs'"
+          :current-page="operationLogPager.pagination.currentPage"
+          :page-size="operationLogPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="operationLogPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleOperationLogPageChange"
+          @size-change="handleOperationLogPageSizeChange"
+        />
+        <el-pagination
+          v-else
+          :current-page="syncLogPager.pagination.currentPage"
+          :page-size="syncLogPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="syncLogPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleSyncLogPageChange"
+          @size-change="handleSyncLogPageSizeChange"
+        />
       </div>
     </article>
 

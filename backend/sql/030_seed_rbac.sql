@@ -3,6 +3,7 @@ VALUES
     ('platform_admin', '平台管理员', '系统级配置与全链路治理'),
     ('student', '博士生', '个人学习、培养与学位办理'),
     ('advisor', '导师', '培养方案制定、报告审阅、答辩指导'),
+    ('secretary', '学位秘书', '学位流程复核、送审与归档管理'),
     ('recruit_reviewer', '评分人', '招生材料评审与推荐'),
     ('interview_officer', '面试官', '面试分组、评分与校算'),
     ('hrbp', '中心HRBP', '实习状态确认与过程监督'),
@@ -21,7 +22,12 @@ VALUES
     ('training:write', '维护培养过程', 'training'),
     ('degree:read', '查看学位过程', 'degree'),
     ('degree:write', '维护学位过程', 'degree'),
-    ('audit:read', '查看审计日志与同步策略', 'system')
+    ('audit:read', '查看审计日志与同步策略', 'system'),
+    ('audit:write', '维护审计日志与同步策略', 'system'),
+    ('system:read', '查看系统治理', 'system'),
+    ('system:write', '维护系统治理', 'system'),
+    ('workflow:read', '查看流程中心', 'workflow'),
+    ('workflow:write', '处理流程任务', 'workflow')
 ON CONFLICT (permission_code) DO NOTHING;
 
 INSERT INTO dtlms_role_permissions (role_id, permission_id)
@@ -30,9 +36,10 @@ FROM dtlms_roles r
 JOIN dtlms_permissions p ON (
     (r.role_code = 'platform_admin') OR
     (r.role_code = 'student' AND p.permission_code IN ('dashboard:read')) OR
-    (r.role_code = 'advisor' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read', 'degree:read')) OR
-    (r.role_code = 'recruit_reviewer' AND p.permission_code IN ('dashboard:read', 'recruitment:read')) OR
-    (r.role_code = 'interview_officer' AND p.permission_code IN ('dashboard:read', 'recruitment:read')) OR
+    (r.role_code = 'advisor' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read', 'training:write', 'degree:read', 'workflow:read', 'workflow:write')) OR
+    (r.role_code = 'secretary' AND p.permission_code IN ('dashboard:read', 'degree:read', 'degree:write', 'workflow:read', 'workflow:write', 'system:read')) OR
+    (r.role_code = 'recruit_reviewer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'workflow:read')) OR
+    (r.role_code = 'interview_officer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'workflow:read')) OR
     (r.role_code = 'hrbp' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read')) OR
     (r.role_code = 'party_affairs' AND p.permission_code IN ('dashboard:read', 'students:read', 'audit:read'))
 )

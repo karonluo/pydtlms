@@ -46,8 +46,15 @@ def recruitment_options(principal: Principal = Depends(require_permissions("recr
 
 
 @router.get("/plans", response_model=RecruitPlanListResponse)
-def recruitment_plans(principal: Principal = Depends(require_permissions("recruitment:read"))) -> RecruitPlanListResponse:
-    return get_recruitment_plan_list()
+def recruitment_plans(
+    keyword: str | None = Query(default=None),
+    semester: str | None = Query(default=None),
+    current_stage: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
+    principal: Principal = Depends(require_permissions("recruitment:read")),
+) -> RecruitPlanListResponse:
+    return get_recruitment_plan_list(keyword=keyword, semester=semester, current_stage=current_stage, page=page, page_size=page_size)
 
 
 @router.post("/plans", response_model=RecruitPlanRecord, status_code=status.HTTP_201_CREATED)
@@ -68,14 +75,16 @@ def recruitment_applications(
     keyword: str | None = Query(default=None),
     plan_id: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("recruitment:read")),
 ) -> RecruitApplicationListResponse:
-    return get_recruitment_application_list(keyword=keyword, plan_id=plan_id, status=status_filter)
+    return get_recruitment_application_list(keyword=keyword, plan_id=plan_id, status=status_filter, page=page, page_size=page_size)
 
 
 @router.post("/applications", response_model=RecruitApplicationRecord, status_code=status.HTTP_201_CREATED)
 def create_recruitment_application_record(payload: RecruitApplicationUpsert, principal: Principal = Depends(require_permissions("recruitment:write"))) -> RecruitApplicationRecord:
-    return create_recruitment_application(payload)
+    return create_recruitment_application(payload, principal=principal)
 
 
 @router.put("/applications/{application_id}", response_model=RecruitApplicationRecord)
@@ -84,6 +93,8 @@ def update_recruitment_application_record(application_id: int, payload: RecruitA
         return update_recruitment_application(application_id, payload)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment application not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.delete("/applications/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
