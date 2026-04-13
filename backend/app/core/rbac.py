@@ -21,6 +21,8 @@ def get_current_principal(token: str = Depends(oauth2_scheme)) -> Principal:
 def require_permissions(*permissions: str) -> Callable:
     def dependency(principal: Principal = Depends(get_current_principal)) -> Principal:
         granted = set(principal.permissions)
+        if "*" in granted:
+            return principal
         missing = [permission for permission in permissions if permission not in granted]
         if missing:
             raise HTTPException(

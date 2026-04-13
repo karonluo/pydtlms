@@ -1,0 +1,12 @@
+<svg width="1200" height="720" viewBox="0 0 1200 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="720" rx="40" fill="#16332A"/>
+  <circle cx="1010" cy="128" r="140" fill="#D9A761" fill-opacity="0.28"/>
+  <circle cx="224" cy="624" r="182" fill="#89B39B" fill-opacity="0.18"/>
+  <rect x="72" y="72" width="1056" height="576" rx="28" fill="#F5EEDC" fill-opacity="0.08" stroke="#F8EBD0" stroke-opacity="0.28"/>
+  <text x="96" y="170" fill="#F8F1E1" font-size="34" font-family="Microsoft YaHei">2026 秋季博士招生</text>
+  <text x="96" y="250" fill="#FFFFFF" font-size="86" font-weight="700" font-family="Microsoft YaHei">智能制造与控制科学</text>
+  <text x="96" y="340" fill="#E3D7C0" font-size="30" font-family="Microsoft YaHei">学术博士 · 导师团队联合培养 · 多学科交叉课题</text>
+  <text x="96" y="454" fill="#F5EEDC" font-size="28" font-family="Microsoft YaHei">开放方向</text>
+  <text x="96" y="498" fill="#FFFFFF" font-size="38" font-weight="700" font-family="Microsoft YaHei">控制理论 / 工业 AI / 机器人系统</text>
+  <text x="96" y="584" fill="#D7C9AF" font-size="24" font-family="Microsoft YaHei">招生门户展示图 · 可在管理端直接替换图片地址</text>
+</svg>

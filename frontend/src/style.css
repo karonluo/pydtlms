@@ -270,7 +270,17 @@ a {
 .pagination-bar {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 14px;
+  min-width: 0;
+}
+
+.pagination-bar .el-pagination {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 8px;
+  min-width: 0;
 }
 
 .el-input,

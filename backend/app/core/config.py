@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     postgres_host: str = "47.117.107.23"
     postgres_port: int = 15431
-    postgres_user: str = "postgre"
+    postgres_user: str = "postgres"
     postgres_password: str = "Pass@@word123!"
     postgres_db: str = "db_dtlms"
     postgres_schema: str = "public"
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_minutes: int = 60 * 24 * 7
 
-    redis_host_list: str = "192.168.200.223:41104,192.168.200.223:41105,192.168.200.223:41106"
+    redis_host_list: str = "47.117.107.23:41104,47.117.107.23:41105,47.117.107.23:41106"
     redis_password: str = "Pass@@word123!"
     redis_sentinel_name: str = "mymaster"
     redis_key_prefix: str = "CTDTLMS_"

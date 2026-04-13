@@ -1,0 +1,13 @@
+<svg width="1200" height="720" viewBox="0 0 1200 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="720" rx="40" fill="#2F261E"/>
+  <rect x="56" y="56" width="1088" height="608" rx="34" fill="#FFF6EA" fill-opacity="0.05" stroke="#F9D9A3" stroke-opacity="0.28"/>
+  <path d="M142 518L314 350L496 450L686 236L924 376" stroke="#F4B45A" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="314" cy="350" r="16" fill="#FFE7BD"/>
+  <circle cx="496" cy="450" r="16" fill="#FFE7BD"/>
+  <circle cx="686" cy="236" r="16" fill="#FFE7BD"/>
+  <circle cx="924" cy="376" r="16" fill="#FFE7BD"/>
+  <text x="96" y="170" fill="#F4D7AA" font-size="34" font-family="Microsoft YaHei">智能制造方向博士生计划</text>
+  <text x="96" y="270" fill="#FFFFFF" font-size="84" font-weight="700" font-family="Microsoft YaHei">从实验室到工厂现场的研究课题</text>
+  <text x="96" y="350" fill="#F2E7D2" font-size="30" font-family="Microsoft YaHei">聚焦设备状态感知、预测维护、产线协同优化与工业智能体</text>
+  <text x="96" y="592" fill="#DFC8A1" font-size="24" font-family="Microsoft YaHei">视觉文件为 SVG，可继续替换为正式设计稿</text>
+</svg>

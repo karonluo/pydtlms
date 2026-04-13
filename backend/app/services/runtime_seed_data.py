@@ -95,10 +95,10 @@ def build_runtime_seed_state() -> dict[str, Any]:
     ]
 
     recruitment_plans = [
-        {"id": 1, "plan_name": "2026 秋季博士招生", "academic_year": "2026", "semester": "秋", "current_stage": "资格审核", "target_quota": 36, "interview_group_count": 4, "is_open": True},
-        {"id": 2, "plan_name": "2026 工程博士专项", "academic_year": "2026", "semester": "秋", "current_stage": "评分推荐", "target_quota": 28, "interview_group_count": 3, "is_open": True},
-        {"id": 3, "plan_name": "2026 智能制造联合培养", "academic_year": "2026", "semester": "秋", "current_stage": "面试执行", "target_quota": 18, "interview_group_count": 2, "is_open": True},
-        {"id": 4, "plan_name": "2025 春季补录", "academic_year": "2025", "semester": "春", "current_stage": "预录取", "target_quota": 8, "interview_group_count": 1, "is_open": False},
+        {"id": 1, "plan_name": "2026 秋季博士招生", "academic_year": "2026", "semester": "秋", "current_stage": "资格审核", "target_quota": 36, "interview_group_count": 4, "is_open": True, "brochure_image_url": "/portal-brochures/doctoral-fall.svg"},
+        {"id": 2, "plan_name": "2026 工程博士专项", "academic_year": "2026", "semester": "秋", "current_stage": "评分推荐", "target_quota": 28, "interview_group_count": 3, "is_open": True, "brochure_image_url": "/portal-brochures/engineering-track.svg"},
+        {"id": 3, "plan_name": "2026 智能制造联合培养", "academic_year": "2026", "semester": "秋", "current_stage": "面试执行", "target_quota": 18, "interview_group_count": 2, "is_open": True, "brochure_image_url": "/portal-brochures/intelligent-manufacturing.svg"},
+        {"id": 4, "plan_name": "2025 春季补录", "academic_year": "2025", "semester": "春", "current_stage": "预录取", "target_quota": 8, "interview_group_count": 1, "is_open": False, "brochure_image_url": "/portal-brochures/spring-supplement.svg"},
     ]
 
     application_rows = [
@@ -119,6 +119,69 @@ def build_runtime_seed_state() -> dict[str, Any]:
         {"id": row[0], "plan_id": row[1], "business_key": row[2], "candidate_no": row[2], "student_name": row[3], "graduation_school": row[4], "highest_degree": row[5], "intended_field": row[6], "material_status": row[7], "application_status": row[8], "reviewer_name": row[9], "final_score": row[10]}
         for row in application_rows
     ]
+    second_choice_values = [
+        "机器学习",
+        "工业互联网",
+        "知识图谱",
+        "数据智能",
+        "数字孪生",
+        "软件工程",
+        "工业数据治理",
+        "机器人控制",
+        "视觉检测",
+        "模型驱动开发",
+        "智能制造",
+        "大模型应用",
+    ]
+    political_values = ["中共党员", "共青团员", "群众", "中共预备党员"]
+    for index, item in enumerate(recruitment_applications, start=1):
+        item.update(
+            {
+                "review_round": "2026 秋季第一轮" if item["plan_id"] in {1, 2} else "2026 秋季第二轮",
+                "first_choice": item["intended_field"],
+                "second_choice": second_choice_values[(index - 1) % len(second_choice_values)],
+                "gender": "男" if index % 2 else "女",
+                "political_status": political_values[(index - 1) % len(political_values)],
+                "marital_status": "未婚",
+                "religious_belief": "无",
+                "native_place": ["江苏南京", "上海浦东", "湖北武汉", "浙江杭州"][index % 4],
+                "phone_number": f"1390002{index:04d}",
+                "email": f"candidate{index:02d}@mail.example.com",
+                "mailing_address": f"上海市浦东新区临港大道 {100 + index} 号",
+                "id_type": "居民身份证",
+                "id_number": f"31010119950{index:02d}1234",
+                "undergraduate_school": item["graduation_school"],
+                "accept_adjustment": "是" if index % 3 else "否",
+                "undergraduate_average_score": f"{85 + index % 8}",
+                "undergraduate_gpa": f"{3.2 + (index % 5) * 0.1:.1f}",
+                "undergraduate_rank": f"{index}/{40 + index}",
+                "undergraduate_major": item["intended_field"],
+                "graduate_average_score": f"{86 + index % 7}",
+                "graduate_gpa": f"{3.3 + (index % 4) * 0.1:.1f}",
+                "graduate_rank": f"{index}/{24 + index}",
+                "graduate_major": item["intended_field"],
+                "intended_advisor_name": ["刘亚", "袁野", "徐素天"][index % 3],
+                "discovery_channel": "实验室官网 / 学术宣讲会",
+                "graduate_school": ["上海交通大学", "同济大学", "浙江大学", "南京大学"][index % 4],
+                "overseas_university_name": None,
+                "overseas_master_university_name": None,
+                "self_evaluation": "具备较强的科研热情、工程实现能力和跨团队协作意识。",
+                "applied_at": _fmt_datetime(now - timedelta(days=index, hours=2)),
+                "research_problem": "希望围绕通用人工智能在垂直领域中的可靠落地问题开展研究。",
+                "research_status_analysis": "当前研究已在通用能力上取得突破，但在可解释性、数据效率和行业适配方面仍有明显局限。",
+                "research_impact": "若问题得到解决，将显著提升 AI 技术普及效率并降低行业智能化成本。",
+                "ai_society_impact": "AI 将优先在知识密集型决策支持、教育科研和工业协同场景中持续改变社会运行方式。",
+                "dissenting_view": "不同意“更大参数规模一定带来更强行业效果”的绝对化判断。",
+                "family_info": "家庭成员支持继续深造，具备稳定异地学习条件。",
+                "education_experience": "本科与硕士阶段均围绕人工智能、自动化或软件工程方向系统学习。",
+                "practice_experience": "参与过科研项目、企业实习和算法系统原型开发。",
+                "personal_statement_text": "希望在博士阶段系统推进基础研究与场景化应用结合。",
+                "student_activity_experience": "担任过学生干部并组织学术交流活动。",
+                "personal_statement_attachment": f"/attachments/recruitment/{item['candidate_no']}/personal-statement.pdf",
+                "material_list_attachment": f"/attachments/recruitment/{item['candidate_no']}/materials.zip",
+                "supplementary_profile": "具备持续学习与自我驱动能力。",
+            }
+        )
 
     training_plans = []
     for student in students:
@@ -222,6 +285,7 @@ def build_runtime_seed_state() -> dict[str, Any]:
         "sync_logs": len(sync_logs),
         "workflow_tasks": 0,
         "teams": len(teams),
+        "portal_students": 0,
     }
 
     return {
@@ -243,4 +307,5 @@ def build_runtime_seed_state() -> dict[str, Any]:
         "operation_logs": operation_logs,
         "sync_logs": sync_logs,
         "workflow_tasks": [],
+        "portal_students": [],
     }

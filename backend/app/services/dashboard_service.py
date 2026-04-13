@@ -1,6 +1,21 @@
+from typing import Any
+
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.dashboard import DashboardOverview
+from app.schemas.portal import (
+    PortalApplicationSubmissionResponse,
+    PortalApplicationUpsert,
+    PortalLoginRequest,
+    PortalPlanListResponse,
+    PortalPasswordResetRequest,
+    PortalRegistrationResponse,
+    PortalSessionResponse,
+    PortalStudentRecord,
+    PortalRegistrationRequest,
+    PortalTeamListResponse,
+)
 from app.schemas.recruitment import RecruitApplicationListResponse, RecruitPlanListResponse, RecruitmentOptionsResponse, RecruitStats, RecruitWorkbench
+from app.schemas.recruitment import RecruitApplicationImportResult
 from app.schemas.student import (
     StudentLifecycleBoard,
     StudentManagementResponse,
@@ -181,6 +196,46 @@ def update_recruitment_application(application_id: int, payload):
 
 def delete_recruitment_application(application_id: int) -> None:
     store.delete_recruitment_application(application_id)
+
+
+def import_recruitment_applications(plan_id: int, rows: list[dict[str, Any]], principal: Principal | None = None) -> RecruitApplicationImportResult:
+    return store.import_recruitment_applications(plan_id=plan_id, rows=rows, principal=principal)
+
+
+def export_recruitment_applications(keyword: str | None = None, plan_id: int | None = None, status: str | None = None) -> bytes:
+    return store.export_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status)
+
+
+def export_recruitment_application_blank_template() -> bytes:
+    return store.export_recruitment_application_blank_template()
+
+
+def register_portal_student(payload: PortalRegistrationRequest) -> PortalRegistrationResponse:
+    return store.register_portal_student(payload)
+
+
+def login_portal_student(payload: PortalLoginRequest) -> PortalStudentRecord:
+    return store.login_portal_student(payload)
+
+
+def reset_portal_student_password(payload: PortalPasswordResetRequest) -> None:
+    store.reset_portal_student_password(payload)
+
+
+def get_portal_student(student_id: int) -> PortalStudentRecord:
+    return store.get_portal_student(student_id)
+
+
+def get_public_recruitment_plans() -> PortalPlanListResponse:
+    return store.get_public_recruitment_plans()
+
+
+def get_public_teams() -> PortalTeamListResponse:
+    return store.get_public_teams()
+
+
+def submit_portal_application(student_id: int, payload: PortalApplicationUpsert) -> PortalApplicationSubmissionResponse:
+    return store.submit_portal_application(student_id, payload)
 
 
 def get_recruitment_stats() -> RecruitStats:

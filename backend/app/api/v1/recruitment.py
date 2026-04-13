@@ -1,9 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import quote
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
 from app.schemas.recruitment import (
     RecruitApplicationListResponse,
+    RecruitApplicationImportResult,
     RecruitApplicationRecord,
     RecruitApplicationUpsert,
     RecruitPlanListResponse,
@@ -17,17 +24,23 @@ from app.services.dashboard_service import (
     create_recruitment_application,
     create_recruitment_plan,
     delete_recruitment_application,
+    export_recruitment_application_blank_template,
+    export_recruitment_applications,
     get_recruitment_application_list,
     get_recruitment_options,
     get_recruitment_plan_list,
     get_recruitment_stats,
     get_recruitment_workbench,
+    import_recruitment_applications,
     update_recruitment_application,
     update_recruitment_plan,
 )
+from app.services.recruitment_excel_service import parse_recruitment_template
 
 
 router = APIRouter(prefix="/recruitment", tags=["recruitment"])
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+BROCHURE_UPLOAD_DIR = PROJECT_ROOT / "frontend" / "public" / "portal-brochures" / "uploads"
 
 
 @router.get("/workbench", response_model=RecruitWorkbench)
@@ -70,6 +83,26 @@ def update_recruitment_plan_record(plan_id: int, payload: RecruitPlanUpsert, pri
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment plan not found") from exc
 
 
+@router.post("/plans/brochure-upload")
+async def upload_recruitment_brochure_image(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("recruitment:write")),
+) -> dict[str, str]:
+    content_type = str(file.content_type or "")
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持上传图片文件")
+
+    suffix = Path(file.filename or "brochure.png").suffix.lower() or ".png"
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片格式不受支持")
+
+    BROCHURE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"brochure-{uuid4().hex}{suffix}"
+    target = BROCHURE_UPLOAD_DIR / filename
+    target.write_bytes(await file.read())
+    return {"url": f"/portal-brochures/uploads/{filename}"}
+
+
 @router.get("/applications", response_model=RecruitApplicationListResponse)
 def recruitment_applications(
     keyword: str | None = Query(default=None),
@@ -103,3 +136,47 @@ def delete_recruitment_application_record(application_id: int, principal: Princi
         delete_recruitment_application(application_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment application not found") from exc
+
+
+@router.post("/applications/import", response_model=RecruitApplicationImportResult)
+async def import_recruitment_application_records(
+    plan_id: int = Form(...),
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("recruitment:write")),
+) -> RecruitApplicationImportResult:
+    try:
+        rows = parse_recruitment_template(await file.read())
+        return import_recruitment_applications(plan_id=plan_id, rows=rows, principal=principal)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/applications/export")
+def export_recruitment_application_records(
+    keyword: str | None = Query(default=None),
+    plan_id: int | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    principal: Principal = Depends(require_permissions("recruitment:read")),
+) -> StreamingResponse:
+    content = export_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status_filter)
+    filename = f"资料审核名单_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+@router.get("/applications/template")
+def download_recruitment_application_template(
+    principal: Principal = Depends(require_permissions("recruitment:read")),
+) -> StreamingResponse:
+    content = export_recruitment_application_blank_template()
+    filename = "资料审核名单模板.xlsx"
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )

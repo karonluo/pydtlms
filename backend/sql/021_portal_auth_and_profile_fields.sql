@@ -1,0 +1,18 @@
+ALTER TABLE IF EXISTS dtlms_portal_students
+    ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS gender VARCHAR(16),
+    ADD COLUMN IF NOT EXISTS birth_date VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS ethnic_group VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS native_place VARCHAR(128),
+    ADD COLUMN IF NOT EXISTS marital_status VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS religious_belief VARCHAR(128),
+    ADD COLUMN IF NOT EXISTS id_type VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS mailing_address TEXT,
+    ADD COLUMN IF NOT EXISTS english_level VARCHAR(128),
+    ADD COLUMN IF NOT EXISTS family_info TEXT,
+    ADD COLUMN IF NOT EXISTS education_experience TEXT,
+    ADD COLUMN IF NOT EXISTS practice_experience TEXT,
+    ADD COLUMN IF NOT EXISTS personal_profile TEXT,
+    ADD COLUMN IF NOT EXISTS recommendation_notes TEXT,
+    ADD COLUMN IF NOT EXISTS personal_statement_text TEXT,
+    ADD COLUMN IF NOT EXISTS signed_agreement BOOLEAN NOT NULL DEFAULT FALSE;

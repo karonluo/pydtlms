@@ -99,3 +99,9 @@ CREATE TABLE IF NOT EXISTS dtlms_runtime_workflow_tasks (
     payload JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS dtlms_runtime_portal_students (
+    id BIGINT PRIMARY KEY,
+    payload JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

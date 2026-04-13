@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DTLMS Manual Capture Bootstrap</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: "Microsoft YaHei", sans-serif;
+      background: #f4f7fb;
+      color: #183153;
+    }
+
+    body {
+      position: relative;
+    }
+
+    .panel {
+      position: absolute;
+      inset: 24px 24px auto auto;
+      width: 360px;
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 16px;
+      box-shadow: 0 18px 40px rgba(15, 76, 189, 0.12);
+      padding: 20px 24px;
+      z-index: 2;
+      transition: opacity 0.3s ease;
+    }
+
+    .panel.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 24px;
+    }
+
+    p {
+      margin: 0;
+      line-height: 1.6;
+      color: #526581;
+    }
+
+    code {
+      color: #0f4cbd;
+      word-break: break-all;
+    }
+
+    iframe {
+      border: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <h1>DTLMS 截图准备页</h1>
+    <p id="status">正在写入会话并跳转，请稍候。</p>
+  </section>
+  <script>
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token') || ''
+    const target = params.get('target') || '/dashboard'
+    const delay = Number(params.get('delay') || '600')
+    const status = document.getElementById('status')
+    const panel = document.querySelector('.panel')
+
+    if (!token) {
+      status.innerHTML = '缺少 token 参数，无法初始化会话。'
+    } else {
+      localStorage.setItem('dtlms-access-token', token)
+      status.innerHTML = `会话初始化完成，准备加载 <code>${target}</code>`
+      window.setTimeout(() => {
+        const frame = document.createElement('iframe')
+        frame.src = target
+        frame.title = 'manual-capture-frame'
+        frame.addEventListener('load', () => {
+          window.setTimeout(() => {
+            panel?.classList.add('is-hidden')
+          }, 1200)
+        })
+        document.body.appendChild(frame)
+      }, Number.isFinite(delay) ? delay : 600)
+    }
+  </script>
+</body>
+</html>

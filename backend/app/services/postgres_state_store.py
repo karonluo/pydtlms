@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 class PostgresStateStore:
+    CONNECT_TIMEOUT_SECONDS = 5
+    RUNTIME_COUNTERS_REGCLASS = "public.dtlms_runtime_counters"
+    MIGRATION_SQL_FILES: tuple[str, ...] = (
+        "015_team_schema_migration.sql",
+        "016_business_key_migration.sql",
+        "017_workflow_flowable_schema.sql",
+        "018_recruitment_application_profile.sql",
+        "019_portal_student_and_brochure.sql",
+        "021_portal_auth_and_profile_fields.sql",
+        "050_dict_schema.sql",
+    )
+
     DATASET_TABLES: dict[str, str] = {
         "profiles": "dtlms_runtime_profiles",
         "students": "dtlms_runtime_students",
@@ -34,6 +46,7 @@ class PostgresStateStore:
         "operation_logs": "dtlms_runtime_operation_logs",
         "sync_logs": "dtlms_runtime_sync_logs",
         "workflow_tasks": "dtlms_runtime_workflow_tasks",
+        "portal_students": "dtlms_runtime_portal_students",
     }
 
     SQL_FILES: tuple[str, ...] = (
@@ -42,6 +55,9 @@ class PostgresStateStore:
         "015_team_schema_migration.sql",
         "016_business_key_migration.sql",
         "017_workflow_flowable_schema.sql",
+        "018_recruitment_application_profile.sql",
+        "019_portal_student_and_brochure.sql",
+        "021_portal_auth_and_profile_fields.sql",
         "020_views.sql",
         "030_seed_rbac.sql",
         "040_runtime_store.sql",
@@ -61,8 +77,14 @@ class PostgresStateStore:
     def _build_dsn(self, database_name: str, username: str) -> str:
         return (
             f"host={settings.postgres_host} port={settings.postgres_port} "
-            f"dbname={database_name} user={username} password={settings.postgres_password} client_encoding=utf8"
+            f"dbname={database_name} user={username} password={settings.postgres_password} "
+            f"client_encoding=utf8 connect_timeout={self.CONNECT_TIMEOUT_SECONDS}"
         )
+
+    def _schema_initialized(self, cur: psycopg.Cursor[Any]) -> bool:
+        cur.execute("SELECT to_regclass(%s) AS table_name", (self.RUNTIME_COUNTERS_REGCLASS,))
+        row = cur.fetchone()
+        return bool(row and row[0])
 
     def _connect(self, database_name: str, autocommit: bool = False) -> psycopg.Connection[Any]:
         last_error: Exception | None = None
@@ -89,6 +111,12 @@ class PostgresStateStore:
         self.ensure_database()
         with self._connect(settings.postgres_db, autocommit=True) as conn:
             with conn.cursor() as cur:
+                if self._schema_initialized(cur):
+                    for file_name in self.MIGRATION_SQL_FILES:
+                        sql_text = (self._sql_dir / file_name).read_text(encoding="utf-8")
+                        cur.execute(sql_text)
+                    self._schema_ready = True
+                    return
                 for file_name in self.SQL_FILES[1:]:
                     sql_text = (self._sql_dir / file_name).read_text(encoding="utf-8")
                     cur.execute(sql_text)
@@ -100,8 +128,9 @@ class PostgresStateStore:
             with self._connect(settings.postgres_db) as conn:
                 conn.row_factory = dict_row
                 with conn.cursor() as cur:
-                    cur.execute("SELECT to_regclass('public.dtlms_runtime_counters') AS table_name")
-                    if not cur.fetchone()["table_name"]:
+                    cur.execute("SELECT to_regclass(%s) AS table_name", (self.RUNTIME_COUNTERS_REGCLASS,))
+                    row = cur.fetchone()
+                    if not row or not row["table_name"]:
                         return None
 
                     cur.execute("SELECT counter_name, counter_value FROM dtlms_runtime_counters")
@@ -111,7 +140,7 @@ class PostgresStateStore:
 
                     state: dict[str, Any] = {"counters": counters}
                     for dataset, table_name in self.DATASET_TABLES.items():
-                        cur.execute(f"SELECT payload FROM {table_name} ORDER BY updated_at DESC, 1 DESC")
+                        cur.execute(f"SELECT payload FROM {table_name}")
                         rows = [row["payload"] for row in cur.fetchall()]
                         if dataset == "profiles":
                             state[dataset] = {row["username"]: row for row in rows}
@@ -153,6 +182,22 @@ class PostgresStateStore:
                 self._seed_relational_tables(cur, state)
             conn.commit()
 
+    def update_runtime_system_user(self, user_id: int, payload: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_runtime_system_users (id, payload, updated_at)
+                    VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (int(user_id), self._json_payload(payload)),
+                )
+            conn.commit()
+
     def _seed_relational_tables(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
         self._seed_users_and_roles(cur, state)
         advisor_map = self._seed_advisors(cur, state)
@@ -160,6 +205,7 @@ class PostgresStateStore:
         student_map = self._seed_students(cur, state, advisor_map, team_map)
         plan_map = self._seed_recruitment(cur, state)
         training_plan_map = self._seed_training(cur, state, student_map, advisor_map)
+        self._seed_portal_students(cur, state, plan_map)
         thesis_map = self._seed_degree(cur, state, student_map, advisor_map)
         self._seed_operation_logs(cur, state)
         self._seed_sync_logs(cur, state)
@@ -346,8 +392,8 @@ class PostgresStateStore:
             cur.execute(
                 """
                 INSERT INTO dtlms_recruitment_plans (
-                    id, plan_code, plan_name, academic_year, semester, start_date, end_date, target_quota, plan_status, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                    id, plan_code, plan_name, academic_year, semester, start_date, end_date, target_quota, plan_status, brochure_image_url, is_deleted
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
                     int(item["id"]),
@@ -359,6 +405,7 @@ class PostgresStateStore:
                     f"{item['academic_year']}-10-31 18:00:00+08",
                     int(item["target_quota"]),
                     plan_status,
+                    item.get("brochure_image_url"),
                 ),
             )
             plan_map[int(item["id"])] = int(item["id"])
@@ -376,29 +423,126 @@ class PostgresStateStore:
         application_rows = state.get("recruitment_applications", [])
         for item in application_rows:
             application_status = self._map_application_status(item.get("application_status", "报名已提交"))
+            application_columns = [
+                "id",
+                "plan_id",
+                "business_key",
+                "student_name",
+                "candidate_no",
+                "gender",
+                "graduation_school",
+                "highest_degree",
+                "intended_field_id",
+                "application_status",
+                "review_round",
+                "first_choice",
+                "second_choice",
+                "political_status",
+                "marital_status",
+                "religious_belief",
+                "native_place",
+                "phone_number",
+                "email",
+                "mailing_address",
+                "id_type",
+                "id_number",
+                "undergraduate_school",
+                "accept_adjustment",
+                "undergraduate_average_score",
+                "undergraduate_gpa",
+                "undergraduate_rank",
+                "undergraduate_major",
+                "graduate_average_score",
+                "graduate_gpa",
+                "graduate_rank",
+                "graduate_major",
+                "intended_advisor_name",
+                "discovery_channel",
+                "graduate_school",
+                "overseas_university_name",
+                "overseas_master_university_name",
+                "self_evaluation",
+                "applied_at",
+                "research_problem",
+                "research_status_analysis",
+                "research_impact",
+                "ai_society_impact",
+                "dissenting_view",
+                "family_info",
+                "education_experience",
+                "practice_experience",
+                "personal_statement_text",
+                "student_activity_experience",
+                "personal_statement_attachment",
+                "material_list_attachment",
+                "supplementary_profile",
+            ]
+            application_values = (
+                int(item["id"]),
+                plan_map[int(item["plan_id"])],
+                item.get("business_key") or item["candidate_no"],
+                item["student_name"],
+                item["candidate_no"],
+                item.get("gender") or "未知",
+                item.get("graduation_school"),
+                item.get("highest_degree"),
+                field_map.get(item.get("intended_field")),
+                application_status,
+                item.get("review_round"),
+                item.get("first_choice"),
+                item.get("second_choice"),
+                item.get("political_status"),
+                item.get("marital_status"),
+                item.get("religious_belief"),
+                item.get("native_place"),
+                item.get("phone_number"),
+                item.get("email"),
+                item.get("mailing_address"),
+                item.get("id_type"),
+                item.get("id_number"),
+                item.get("undergraduate_school"),
+                item.get("accept_adjustment"),
+                item.get("undergraduate_average_score"),
+                item.get("undergraduate_gpa"),
+                item.get("undergraduate_rank"),
+                item.get("undergraduate_major"),
+                item.get("graduate_average_score"),
+                item.get("graduate_gpa"),
+                item.get("graduate_rank"),
+                item.get("graduate_major"),
+                item.get("intended_advisor_name"),
+                item.get("discovery_channel"),
+                item.get("graduate_school"),
+                item.get("overseas_university_name"),
+                item.get("overseas_master_university_name"),
+                item.get("self_evaluation"),
+                item.get("applied_at"),
+                item.get("research_problem"),
+                item.get("research_status_analysis"),
+                item.get("research_impact"),
+                item.get("ai_society_impact"),
+                item.get("dissenting_view"),
+                item.get("family_info"),
+                item.get("education_experience"),
+                item.get("practice_experience"),
+                item.get("personal_statement_text"),
+                item.get("student_activity_experience"),
+                item.get("personal_statement_attachment"),
+                item.get("material_list_attachment"),
+                item.get("supplementary_profile"),
+            )
             cur.execute(
-                """
-                INSERT INTO dtlms_recruitment_applications (
-                    id, plan_id, business_key, student_name, candidate_no, gender, graduation_school, highest_degree,
-                    intended_field_id, application_status, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
-                """,
-                (
-                    int(item["id"]),
-                    plan_map[int(item["plan_id"])],
-                    item.get("business_key") or item["candidate_no"],
-                    item["student_name"],
-                    item["candidate_no"],
-                    "未知",
-                    item.get("graduation_school"),
-                    item.get("highest_degree"),
-                    field_map.get(item.get("intended_field")),
-                    application_status,
-                ),
+                f"INSERT INTO dtlms_recruitment_applications ({', '.join(application_columns)}, is_deleted) VALUES ({', '.join(['%s'] * len(application_columns))}, FALSE)",
+                application_values,
             )
             cur.execute(
                 "INSERT INTO dtlms_application_materials (application_id, material_type, material_status, file_url, is_deleted) VALUES (%s, %s, %s, %s, FALSE)",
-                (int(item["id"]), "报名材料", self._map_material_status(item.get("material_status", "待补材料")), f"/materials/{item['candidate_no']}.zip"),
+                (
+                    int(item["id"]),
+                    "报名材料",
+                    self._map_material_status(item.get("material_status", "待补材料")),
+                    item.get("material_list_attachment") or f"/materials/{item['candidate_no']}.zip",
+                ),
             )
             reviewer = item.get("reviewer_name") or "system.auto"
             cur.execute(
@@ -447,6 +591,56 @@ class PostgresStateStore:
                 (int(item["id"]), "2026-03-20", item.get("final_score"), "SIM-2026-01"),
             )
         return plan_map
+
+    def _seed_portal_students(self, cur: psycopg.Cursor[Any], state: dict[str, Any], plan_map: dict[int, int]) -> None:
+        cur.execute("TRUNCATE TABLE dtlms_portal_students RESTART IDENTITY CASCADE")
+        for item in state.get("portal_students", []):
+            selected_plan_id = item.get("selected_plan_id")
+            cur.execute(
+                """
+                INSERT INTO dtlms_portal_students (
+                    id, full_name, phone_number, email, id_number, password_hash, gender, birth_date,
+                    ethnic_group, native_place, marital_status, religious_belief, id_type, mailing_address,
+                    graduation_school, highest_degree, intended_field, political_status, english_level,
+                    family_info, education_experience, practice_experience, personal_profile,
+                    recommendation_notes, personal_statement_text, signed_agreement, selected_plan_id,
+                    selected_team_name, selected_advisor_name, self_evaluation, submitted_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    int(item["id"]),
+                    item["full_name"],
+                    item["phone_number"],
+                    item["email"],
+                    item["id_number"],
+                    item.get("password_hash"),
+                    item.get("gender"),
+                    item.get("birth_date"),
+                    item.get("ethnic_group"),
+                    item.get("native_place"),
+                    item.get("marital_status"),
+                    item.get("religious_belief"),
+                    item.get("id_type"),
+                    item.get("mailing_address"),
+                    item.get("graduation_school"),
+                    item.get("highest_degree"),
+                    item.get("intended_field"),
+                    item.get("political_status"),
+                    item.get("english_level"),
+                    item.get("family_info"),
+                    item.get("education_experience"),
+                    item.get("practice_experience"),
+                    item.get("personal_profile"),
+                    item.get("recommendation_notes"),
+                    item.get("personal_statement_text"),
+                    bool(item.get("signed_agreement")),
+                    plan_map.get(int(selected_plan_id)) if selected_plan_id else None,
+                    item.get("selected_team_name"),
+                    item.get("selected_advisor_name"),
+                    item.get("self_evaluation"),
+                    item.get("submitted_at"),
+                ),
+            )
 
     def _seed_training(self, cur: psycopg.Cursor[Any], state: dict[str, Any], student_map: dict[str, int], advisor_map: dict[str, int]) -> dict[int, int]:
         cur.execute(

@@ -124,7 +124,7 @@ const menuGroups: MenuGroup[] = [
 const currentTitle = computed(() => String(route.meta.title || '博士生生命周期管理系统'))
 const visibleMenuGroups = computed(() => {
   const permissionSet = new Set(authStore.permissions)
-  const hasPermission = (permission?: string) => !permission || permissionSet.has(permission)
+  const hasPermission = (permission?: string) => !permission || permissionSet.has('*') || permissionSet.has(permission)
 
   return menuGroups
     .map((group) => {
@@ -430,6 +430,7 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
 
 .layout-main {
   padding: 4px 18px 18px;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -437,6 +438,7 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
 
 .layout-view-host {
   min-height: 100%;
+  min-width: 0;
 }
 
 .layout-shell > .el-container {

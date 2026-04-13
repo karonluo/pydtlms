@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import axios from 'axios'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -10,11 +11,15 @@ import {
   createRecruitmentApplication,
   createRecruitmentPlan,
   deleteRecruitmentApplication,
+  downloadRecruitmentTemplate,
+  exportRecruitmentApplications,
   getRecruitmentOptions,
   getRecruitmentStats,
   getRecruitmentWorkbench,
+  importRecruitmentApplications,
   listRecruitmentApplications,
   listRecruitmentPlans,
+  uploadRecruitmentBrochureImage,
   updateRecruitmentApplication,
   updateRecruitmentPlan,
   type RecruitApplicationRecord,
@@ -60,19 +65,27 @@ const plansLoading = ref(false)
 const applicationsLoading = ref(false)
 const planDialogVisible = ref(false)
 const applicationDialogVisible = ref(false)
+const applicationDetailVisible = ref(false)
 const planMode = ref<'create' | 'edit'>('create')
 const applicationMode = ref<'create' | 'edit'>('create')
 const planSubmitting = ref(false)
 const applicationSubmitting = ref(false)
+const importSubmitting = ref(false)
+const exportSubmitting = ref(false)
+const templateSubmitting = ref(false)
+const brochureUploading = ref(false)
 const selectedPlanId = ref<number | undefined>()
 const editingPlanId = ref<number | null>(null)
 const editingApplicationId = ref<number | null>(null)
 const planReferenceList = ref<RecruitPlanRecord[]>([])
+const viewingApplication = ref<RecruitApplicationRecord | null>(null)
 const applicationStatusColors = ref<DictColorMap>({})
 const materialStatusColors = ref<DictColorMap>({})
 
 const planFormRef = ref<FormInstance>()
 const applicationFormRef = ref<FormInstance>()
+const importInputRef = ref<HTMLInputElement | null>(null)
+const brochureInputRef = ref<HTMLInputElement | null>(null)
 
 const applicationFilters = reactive({
   keyword: '',
@@ -92,16 +105,60 @@ const planForm = reactive<RecruitPlanUpsert>({
   target_quota: 30,
   interview_group_count: 3,
   is_open: true,
+  brochure_image_url: '',
 })
 
 const applicationForm = reactive<RecruitApplicationUpsert>({
   plan_id: 0,
   business_key: '',
   candidate_no: '',
+  review_round: '',
   student_name: '',
+  first_choice: '',
+  second_choice: '',
+  gender: '',
+  political_status: '',
+  marital_status: '未婚',
+  religious_belief: '无',
+  native_place: '',
+  phone_number: '',
+  email: '',
+  mailing_address: '',
+  id_type: '居民身份证',
+  id_number: '',
   graduation_school: '',
+  undergraduate_school: '',
+  accept_adjustment: '是',
+  undergraduate_average_score: '',
+  undergraduate_gpa: '',
+  undergraduate_rank: '',
+  undergraduate_major: '',
+  graduate_average_score: '',
+  graduate_gpa: '',
+  graduate_rank: '',
+  graduate_major: '',
   highest_degree: '硕士',
   intended_field: '',
+  intended_advisor_name: '',
+  discovery_channel: '',
+  graduate_school: '',
+  overseas_university_name: '',
+  overseas_master_university_name: '',
+  self_evaluation: '',
+  applied_at: '',
+  research_problem: '',
+  research_status_analysis: '',
+  research_impact: '',
+  ai_society_impact: '',
+  dissenting_view: '',
+  family_info: '',
+  education_experience: '',
+  practice_experience: '',
+  personal_statement_text: '',
+  student_activity_experience: '',
+  personal_statement_attachment: '',
+  material_list_attachment: '',
+  supplementary_profile: '',
   material_status: '材料齐全',
   application_status: '报名已提交',
   reviewer_name: '',
@@ -135,6 +192,60 @@ const statsCards = computed(() => [
   { label: '预录取', value: stats.value.pre_admit_total, tone: 'healthy' },
 ])
 
+const applicationDetailSections: Array<{ title: string; fields: Array<{ label: string; key: keyof RecruitApplicationRecord }> }> = [
+  {
+    title: '基础信息',
+    fields: [
+      { label: '业务编号', key: 'business_key' },
+      { label: '轮次', key: 'review_round' },
+      { label: '姓名', key: 'student_name' },
+      { label: '性别', key: 'gender' },
+      { label: '电话', key: 'phone_number' },
+      { label: '邮箱', key: 'email' },
+      { label: '第一志愿', key: 'first_choice' },
+      { label: '第二志愿', key: 'second_choice' },
+      { label: '意向导师', key: 'intended_advisor_name' },
+      { label: '资料审核', key: 'material_status' },
+      { label: '申请状态', key: 'application_status' },
+      { label: '审核人', key: 'reviewer_name' },
+    ],
+  },
+  {
+    title: '个人与联系',
+    fields: [
+      { label: '政治面貌', key: 'political_status' },
+      { label: '婚否', key: 'marital_status' },
+      { label: '宗教信仰', key: 'religious_belief' },
+      { label: '籍贯', key: 'native_place' },
+      { label: '证件类型', key: 'id_type' },
+      { label: '证件号码', key: 'id_number' },
+      { label: '联系地址', key: 'mailing_address' },
+      { label: '申请时间', key: 'applied_at' },
+      { label: '是否接受调剂', key: 'accept_adjustment' },
+      { label: '材料得分', key: 'final_score' },
+      { label: '个人陈述附件', key: 'personal_statement_attachment' },
+      { label: '材料清单附件', key: 'material_list_attachment' },
+    ],
+  },
+  {
+    title: '教育背景',
+    fields: [
+      { label: '本科院校', key: 'graduation_school' },
+      { label: '本科院校扩展', key: 'undergraduate_school' },
+      { label: '本科均分', key: 'undergraduate_average_score' },
+      { label: '本科绩点', key: 'undergraduate_gpa' },
+      { label: '本科排名', key: 'undergraduate_rank' },
+      { label: '本科专业', key: 'undergraduate_major' },
+      { label: '硕士院校', key: 'graduate_school' },
+      { label: '硕士均分', key: 'graduate_average_score' },
+      { label: '硕士绩点', key: 'graduate_gpa' },
+      { label: '硕士排名', key: 'graduate_rank' },
+      { label: '硕士专业', key: 'graduate_major' },
+      { label: '最高学历', key: 'highest_degree' },
+    ],
+  },
+]
+
 const selectedPlan = computed(() => plans.value.find((item) => item.id === selectedPlanId.value))
 const planPager = useServerPagination()
 const applicationPager = useServerPagination()
@@ -160,6 +271,13 @@ function applicationTagType(status: string) {
 
 function materialTagType(status: string) {
   return resolveDictTagType(status, materialStatusColors.value)
+}
+
+function displayDetailValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '—'
+  }
+  return String(value)
 }
 
 async function loadOverview() {
@@ -231,6 +349,7 @@ function resetPlanForm() {
     target_quota: 30,
     interview_group_count: 3,
     is_open: true,
+    brochure_image_url: '',
   })
   planFormRef.value?.clearValidate()
 }
@@ -241,10 +360,53 @@ function resetApplicationForm() {
     plan_id: selectedPlanId.value ?? planReferenceList.value[0]?.id ?? 0,
     business_key: '',
     candidate_no: '',
+    review_round: '',
     student_name: '',
+    first_choice: '',
+    second_choice: '',
+    gender: '',
+    political_status: '',
+    marital_status: '未婚',
+    religious_belief: '无',
+    native_place: '',
+    phone_number: '',
+    email: '',
+    mailing_address: '',
+    id_type: '居民身份证',
+    id_number: '',
     graduation_school: '',
+    undergraduate_school: '',
+    accept_adjustment: '是',
+    undergraduate_average_score: '',
+    undergraduate_gpa: '',
+    undergraduate_rank: '',
+    undergraduate_major: '',
+    graduate_average_score: '',
+    graduate_gpa: '',
+    graduate_rank: '',
+    graduate_major: '',
     highest_degree: '硕士',
     intended_field: '',
+    intended_advisor_name: '',
+    discovery_channel: '',
+    graduate_school: '',
+    overseas_university_name: '',
+    overseas_master_university_name: '',
+    self_evaluation: '',
+    applied_at: '',
+    research_problem: '',
+    research_status_analysis: '',
+    research_impact: '',
+    ai_society_impact: '',
+    dissenting_view: '',
+    family_info: '',
+    education_experience: '',
+    practice_experience: '',
+    personal_statement_text: '',
+    student_activity_experience: '',
+    personal_statement_attachment: '',
+    material_list_attachment: '',
+    supplementary_profile: '',
     material_status: '材料齐全',
     application_status: '报名已提交',
     reviewer_name: '',
@@ -270,6 +432,7 @@ function openEditPlanDialog(row: RecruitPlanRecord) {
     target_quota: row.target_quota,
     interview_group_count: row.interview_group_count,
     is_open: row.is_open,
+    brochure_image_url: row.brochure_image_url || '',
   })
   planDialogVisible.value = true
 }
@@ -287,16 +450,64 @@ function openEditApplicationDialog(row: RecruitApplicationRecord) {
     plan_id: row.plan_id,
     business_key: row.business_key,
     candidate_no: row.candidate_no,
+    review_round: row.review_round || '',
     student_name: row.student_name,
+    first_choice: row.first_choice || '',
+    second_choice: row.second_choice || '',
+    gender: row.gender || '',
+    political_status: row.political_status || '',
+    marital_status: row.marital_status || '未婚',
+    religious_belief: row.religious_belief || '无',
+    native_place: row.native_place || '',
+    phone_number: row.phone_number || '',
+    email: row.email || '',
+    mailing_address: row.mailing_address || '',
+    id_type: row.id_type || '居民身份证',
+    id_number: row.id_number || '',
     graduation_school: row.graduation_school,
+    undergraduate_school: row.undergraduate_school || '',
+    accept_adjustment: row.accept_adjustment || '是',
+    undergraduate_average_score: row.undergraduate_average_score || '',
+    undergraduate_gpa: row.undergraduate_gpa || '',
+    undergraduate_rank: row.undergraduate_rank || '',
+    undergraduate_major: row.undergraduate_major || '',
+    graduate_average_score: row.graduate_average_score || '',
+    graduate_gpa: row.graduate_gpa || '',
+    graduate_rank: row.graduate_rank || '',
+    graduate_major: row.graduate_major || '',
     highest_degree: row.highest_degree,
     intended_field: row.intended_field,
+    intended_advisor_name: row.intended_advisor_name || '',
+    discovery_channel: row.discovery_channel || '',
+    graduate_school: row.graduate_school || '',
+    overseas_university_name: row.overseas_university_name || '',
+    overseas_master_university_name: row.overseas_master_university_name || '',
+    self_evaluation: row.self_evaluation || '',
+    applied_at: row.applied_at || '',
+    research_problem: row.research_problem || '',
+    research_status_analysis: row.research_status_analysis || '',
+    research_impact: row.research_impact || '',
+    ai_society_impact: row.ai_society_impact || '',
+    dissenting_view: row.dissenting_view || '',
+    family_info: row.family_info || '',
+    education_experience: row.education_experience || '',
+    practice_experience: row.practice_experience || '',
+    personal_statement_text: row.personal_statement_text || '',
+    student_activity_experience: row.student_activity_experience || '',
+    personal_statement_attachment: row.personal_statement_attachment || '',
+    material_list_attachment: row.material_list_attachment || '',
+    supplementary_profile: row.supplementary_profile || '',
     material_status: row.material_status,
     application_status: row.application_status,
     reviewer_name: row.reviewer_name || '',
     final_score: row.final_score ?? undefined,
   })
   applicationDialogVisible.value = true
+}
+
+function openViewApplicationDetail(row: RecruitApplicationRecord) {
+  viewingApplication.value = row
+  applicationDetailVisible.value = true
 }
 
 async function submitPlanForm() {
@@ -324,6 +535,31 @@ async function submitPlanForm() {
     await refreshAll()
   } finally {
     planSubmitting.value = false
+  }
+}
+
+function triggerBrochureUpload() {
+  brochureInputRef.value?.click()
+}
+
+async function handleBrochureUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+
+  brochureUploading.value = true
+  try {
+    const response = await uploadRecruitmentBrochureImage(file)
+    planForm.brochure_image_url = response.data.url
+    ElMessage.success('招生简章图片已上传')
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '图片上传失败'
+    ElMessage.error(message)
+  } finally {
+    input.value = ''
+    brochureUploading.value = false
   }
 }
 
@@ -368,6 +604,102 @@ async function handleDeleteApplication(row: RecruitApplicationRecord) {
   await deleteRecruitmentApplication(row.id)
   ElMessage.success('报名申请已删除')
   await refreshAll()
+}
+
+function triggerTemplateImport() {
+  if (!selectedPlanId.value) {
+    ElMessage.warning('请先在左侧选择一个招生计划，再导入模板')
+    return
+  }
+  importInputRef.value?.click()
+}
+
+async function handleTemplateImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+  if (!selectedPlanId.value) {
+    ElMessage.warning('请先选择招生计划')
+    input.value = ''
+    return
+  }
+
+  importSubmitting.value = true
+  try {
+    const response = await importRecruitmentApplications(selectedPlanId.value, file)
+    const result = response.data
+    if (result.issues.length > 0) {
+      const topIssues = result.issues.slice(0, 3).map((item) => `${item.row_number} 行${item.student_name ? ` ${item.student_name}` : ''}：${item.reason}`)
+      ElMessage.warning(`成功导入 ${result.imported_count} 条，跳过 ${result.skipped_count} 条。${topIssues.join('；')}`)
+    } else {
+      ElMessage.success(`已导入 ${result.imported_count} 条报名申请`)
+    }
+    await refreshAll()
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '导入失败'
+    ElMessage.error(message)
+  } finally {
+    input.value = ''
+    importSubmitting.value = false
+  }
+}
+
+async function handleTemplateExport() {
+  exportSubmitting.value = true
+  try {
+    const response = await exportRecruitmentApplications({
+      keyword: applicationFilters.keyword || undefined,
+      status: applicationFilters.status || undefined,
+      plan_id: selectedPlanId.value,
+    })
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const disposition = String(response.headers['content-disposition'] || '')
+    const matched = disposition.match(/filename\*=UTF-8''([^;]+)/)
+    link.href = url
+    link.download = matched ? decodeURIComponent(matched[1]) : '资料审核名单.xlsx'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('资料审核名单已导出')
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? error.message : '导出失败'
+    ElMessage.error(message)
+  } finally {
+    exportSubmitting.value = false
+  }
+}
+
+async function handleTemplateDownload() {
+  templateSubmitting.value = true
+  try {
+    const response = await downloadRecruitmentTemplate()
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const disposition = String(response.headers['content-disposition'] || '')
+    const matched = disposition.match(/filename\*=UTF-8''([^;]+)/)
+    link.href = url
+    link.download = matched ? decodeURIComponent(matched[1]) : '资料审核名单模板.xlsx'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('空白模板已下载')
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? error.message : '模板下载失败'
+    ElMessage.error(message)
+  } finally {
+    templateSubmitting.value = false
+  }
 }
 
 async function handlePlanSelection(row: RecruitPlanRecord) {
@@ -441,6 +773,7 @@ onMounted(() => {
         </div>
         <div class="header-actions">
           <span class="summary-text" v-if="selectedPlan">当前计划：{{ selectedPlan.plan_name }}</span>
+          <el-button v-if="selectedPlan" @click="openEditPlanDialog(selectedPlan)">编辑当前计划</el-button>
           <el-button type="primary" round @click="openCreatePlanDialog">新增招生计划</el-button>
         </div>
       </div>
@@ -482,31 +815,23 @@ onMounted(() => {
             <el-button @click="handlePlanReset">重置</el-button>
           </el-form-item>
         </el-form>
-        <el-table :data="plans" stripe border v-loading="plansLoading" @row-click="handlePlanSelection">
-          <el-table-column prop="plan_name" label="计划名称" min-width="220" />
-          <el-table-column prop="academic_term" label="学年学期" width="120" />
-          <el-table-column prop="current_stage" label="当前阶段" width="120" />
-          <el-table-column prop="target_quota" label="计划名额" width="100" />
-          <el-table-column prop="application_count" label="申请数" width="100" />
-          <el-table-column prop="interview_group_count" label="面试组" width="100" />
-          <el-table-column label="开放状态" width="120">
-            <template #default="scope">
-              <el-tag :type="scope.row.is_open ? 'success' : 'info'">{{ scope.row.is_open ? '开放中' : '已关闭' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="96" align="left">
-            <template #default="scope">
-              <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditPlanDialog }]" />
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-scroll">
+          <el-table :data="plans" stripe border v-loading="plansLoading" @row-click="handlePlanSelection">
+            <el-table-column prop="plan_name" label="计划名称" min-width="188" show-overflow-tooltip />
+            <el-table-column prop="academic_term" label="学年学期" width="110" show-overflow-tooltip />
+            <el-table-column prop="current_stage" label="当前阶段" width="110" show-overflow-tooltip />
+            <el-table-column prop="target_quota" label="计划名额" width="92" />
+            <el-table-column prop="application_count" label="申请数" width="82" />
+            <el-table-column prop="interview_group_count" label="面试组" width="82" />
+          </el-table>
+        </div>
         <div class="pagination-bar">
           <el-pagination
             :current-page="planPager.pagination.currentPage"
             :page-size="planPager.pagination.pageSize"
             :page-sizes="[10, 20, 50, 100]"
             :total="planPager.pagination.total"
-            layout="total, sizes, prev, pager, next, jumper"
+            layout="total, sizes, prev, pager, next"
             @current-change="handlePlanPageChange"
             @size-change="handlePlanPageSizeChange"
           />
@@ -540,9 +865,14 @@ onMounted(() => {
         </div>
         <div class="header-actions">
           <span class="summary-text">{{ selectedPlan ? `已筛选计划：${selectedPlan.plan_name}` : '当前显示全部计划' }}</span>
+          <el-button :loading="templateSubmitting" @click="handleTemplateDownload">下载空白模板</el-button>
+          <el-button :loading="importSubmitting" @click="triggerTemplateImport">模板导入</el-button>
+          <el-button :loading="exportSubmitting" @click="handleTemplateExport">导出名单</el-button>
           <el-button type="primary" round @click="openCreateApplicationDialog">新增报名申请</el-button>
         </div>
       </div>
+
+      <input ref="importInputRef" type="file" accept=".xlsx" class="hidden-input" @change="handleTemplateImport" />
 
       <el-form class="filter-form" :inline="true">
         <el-form-item label="关键字">
@@ -559,37 +889,41 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-table :data="applications" stripe border v-loading="applicationsLoading">
-        <el-table-column prop="business_key" label="业务编号" width="190" />
-        <el-table-column prop="student_name" label="姓名" width="110" />
-        <el-table-column prop="graduation_school" label="毕业院校" min-width="180" />
-        <el-table-column prop="highest_degree" label="最高学历" width="100" />
-        <el-table-column prop="intended_field" label="研究方向" width="140" />
-        <el-table-column label="材料状态" width="120">
-          <template #default="scope">
-            <el-tag :type="materialTagType(scope.row.material_status)">{{ scope.row.material_status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="申请状态" width="130">
-          <template #default="scope">
-            <el-tag :type="applicationTagType(scope.row.application_status)">{{ scope.row.application_status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="reviewer_name" label="审核人" width="110" />
-        <el-table-column prop="final_score" label="得分" width="90" />
-        <el-table-column label="操作" width="118" align="left">
-          <template #default="scope">
-            <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openEditApplicationDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteApplication }]" />
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="table-scroll">
+        <el-table :data="applications" stripe border v-loading="applicationsLoading">
+          <el-table-column prop="business_key" label="业务编号" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="student_name" label="姓名" width="92" show-overflow-tooltip />
+          <el-table-column prop="first_choice" label="第一志愿" min-width="106" show-overflow-tooltip />
+          <el-table-column prop="intended_advisor_name" label="意向导师" width="92" show-overflow-tooltip />
+          <el-table-column prop="phone_number" label="电话" width="120" show-overflow-tooltip />
+          <el-table-column prop="graduation_school" label="本科院校" min-width="124" show-overflow-tooltip />
+          <el-table-column prop="intended_field" label="研究方向" min-width="108" show-overflow-tooltip />
+          <el-table-column label="材料状态" width="100">
+            <template #default="scope">
+              <el-tag :type="materialTagType(scope.row.material_status)">{{ scope.row.material_status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="申请状态" width="108">
+            <template #default="scope">
+              <el-tag :type="applicationTagType(scope.row.application_status)">{{ scope.row.application_status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="reviewer_name" label="审核人" width="92" show-overflow-tooltip />
+          <el-table-column prop="final_score" label="得分" width="72" />
+          <el-table-column label="操作" width="132" align="left">
+            <template #default="scope">
+              <TableRowActions :row="scope.row" :main-actions="[{ key: 'view', label: '详情', type: 'info', onClick: openViewApplicationDetail }, { key: 'edit', label: '编辑', type: 'primary', onClick: openEditApplicationDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteApplication }]" />
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
       <div class="pagination-bar">
         <el-pagination
           :current-page="applicationPager.pagination.currentPage"
           :page-size="applicationPager.pagination.pageSize"
           :page-sizes="[10, 20, 50, 100]"
           :total="applicationPager.pagination.total"
-          layout="total, sizes, prev, pager, next, jumper"
+          layout="total, sizes, prev, pager, next"
           @current-change="handleApplicationPageChange"
           @size-change="handleApplicationPageSizeChange"
         />
@@ -598,6 +932,7 @@ onMounted(() => {
 
     <el-dialog v-model="planDialogVisible" :title="planMode === 'create' ? '新增招生计划' : '编辑招生计划'" width="680px" destroy-on-close>
       <el-form ref="planFormRef" :model="planForm" :rules="planRules" label-width="96px">
+        <input ref="brochureInputRef" type="file" accept="image/*" class="hidden-input" @change="handleBrochureUpload" />
         <div class="dialog-grid">
           <el-form-item label="计划名称" prop="plan_name">
             <el-input v-model="planForm.plan_name" placeholder="请输入招生计划名称" />
@@ -624,6 +959,17 @@ onMounted(() => {
           <el-form-item label="开放状态">
             <el-switch v-model="planForm.is_open" active-text="开放中" inactive-text="已关闭" />
           </el-form-item>
+          <el-form-item label="简章图片">
+            <div class="brochure-upload-field">
+              <div class="brochure-upload-actions">
+                <el-input v-model="planForm.brochure_image_url" placeholder="上传后自动回填图片地址" readonly />
+                <el-button :loading="brochureUploading" @click="triggerBrochureUpload">上传图片</el-button>
+              </div>
+              <div v-if="planForm.brochure_image_url" class="brochure-upload-preview">
+                <img :src="planForm.brochure_image_url" alt="招生简章预览" />
+              </div>
+            </div>
+          </el-form-item>
         </div>
       </el-form>
       <template #footer>
@@ -632,60 +978,228 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="applicationDialogVisible" :title="applicationMode === 'create' ? '新增报名申请' : '编辑报名申请'" width="760px" destroy-on-close>
+    <el-dialog v-model="applicationDialogVisible" :title="applicationMode === 'create' ? '新增报名申请' : '编辑报名申请'" width="1180px" destroy-on-close>
       <el-form ref="applicationFormRef" :model="applicationForm" :rules="applicationRules" label-width="96px">
-        <div class="dialog-grid">
-          <el-form-item label="招生计划" prop="plan_id">
-            <el-select v-model="applicationForm.plan_id" placeholder="请选择计划">
-              <el-option v-for="item in planReferenceList" :key="item.id" :label="item.plan_name" :value="item.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="业务编号">
-            <el-input :model-value="applicationForm.business_key || '保存后自动生成'" disabled />
-          </el-form-item>
-          <el-form-item label="姓名" prop="student_name">
-            <el-input v-model="applicationForm.student_name" placeholder="请输入姓名" />
-          </el-form-item>
-          <el-form-item label="毕业院校" prop="graduation_school">
-            <el-select v-model="applicationForm.graduation_school" filterable allow-create default-first-option placeholder="请选择或录入毕业院校">
-              <el-option v-for="item in options.graduation_school_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="最高学历" prop="highest_degree">
-            <el-select v-model="applicationForm.highest_degree" placeholder="请选择学历">
-              <el-option v-for="item in options.degree_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="研究方向" prop="intended_field">
-            <el-select v-model="applicationForm.intended_field" filterable allow-create default-first-option placeholder="请选择研究方向">
-              <el-option v-for="item in options.intended_field_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="材料状态" prop="material_status">
-            <el-select v-model="applicationForm.material_status" placeholder="请选择材料状态">
-              <el-option v-for="item in options.material_status_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="申请状态" prop="application_status">
-            <el-select v-model="applicationForm.application_status" placeholder="请选择申请状态">
-              <el-option v-for="item in options.application_status_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="审核人">
-            <el-select v-model="applicationForm.reviewer_name" filterable allow-create default-first-option placeholder="请选择审核人">
-              <el-option v-for="item in options.reviewer_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="材料得分">
-            <el-input-number v-model="applicationForm.final_score" :min="0" :max="100" :precision="1" controls-position="right" />
-          </el-form-item>
-        </div>
+        <section class="dialog-section">
+          <h3 class="dialog-section__title">基础信息</h3>
+          <div class="dialog-grid dialog-grid--three">
+            <el-form-item label="招生计划" prop="plan_id">
+              <el-select v-model="applicationForm.plan_id" placeholder="请选择计划">
+                <el-option v-for="item in planReferenceList" :key="item.id" :label="item.plan_name" :value="item.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="业务编号">
+              <el-input :model-value="applicationForm.business_key || '保存后自动生成'" disabled />
+            </el-form-item>
+            <el-form-item label="轮次">
+              <el-input v-model="applicationForm.review_round" placeholder="如 2026 秋季第一轮" />
+            </el-form-item>
+            <el-form-item label="姓名" prop="student_name">
+              <el-input v-model="applicationForm.student_name" placeholder="请输入姓名" />
+            </el-form-item>
+            <el-form-item label="性别">
+              <el-input v-model="applicationForm.gender" placeholder="请输入性别" />
+            </el-form-item>
+            <el-form-item label="政治面貌">
+              <el-input v-model="applicationForm.political_status" placeholder="请输入政治面貌" />
+            </el-form-item>
+            <el-form-item label="电话">
+              <el-input v-model="applicationForm.phone_number" placeholder="请输入联系电话" />
+            </el-form-item>
+            <el-form-item label="邮箱">
+              <el-input v-model="applicationForm.email" placeholder="请输入邮箱" />
+            </el-form-item>
+            <el-form-item label="联系地址" class="grid-span-3">
+              <el-input v-model="applicationForm.mailing_address" placeholder="请输入联系地址" />
+            </el-form-item>
+            <el-form-item label="证件类型">
+              <el-input v-model="applicationForm.id_type" placeholder="请输入证件类型" />
+            </el-form-item>
+            <el-form-item label="证件号码" class="grid-span-2">
+              <el-input v-model="applicationForm.id_number" placeholder="请输入证件号码" />
+            </el-form-item>
+            <el-form-item label="第一志愿">
+              <el-input v-model="applicationForm.first_choice" placeholder="请输入第一志愿" />
+            </el-form-item>
+            <el-form-item label="第二志愿">
+              <el-input v-model="applicationForm.second_choice" placeholder="请输入第二志愿" />
+            </el-form-item>
+            <el-form-item label="研究方向" prop="intended_field">
+              <el-select v-model="applicationForm.intended_field" filterable allow-create default-first-option placeholder="请选择研究方向">
+                <el-option v-for="item in options.intended_field_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="意向导师">
+              <el-select v-model="applicationForm.intended_advisor_name" filterable allow-create default-first-option placeholder="请选择意向导师">
+                <el-option v-for="item in options.reviewer_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="资料审核" prop="material_status">
+              <el-select v-model="applicationForm.material_status" placeholder="请选择资料审核状态">
+                <el-option v-for="item in options.material_status_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="申请状态" prop="application_status">
+              <el-select v-model="applicationForm.application_status" placeholder="请选择申请状态">
+                <el-option v-for="item in options.application_status_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="审核人">
+              <el-select v-model="applicationForm.reviewer_name" filterable allow-create default-first-option placeholder="请选择审核人">
+                <el-option v-for="item in options.reviewer_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="材料得分">
+              <el-input-number v-model="applicationForm.final_score" :min="0" :max="100" :precision="1" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="是否接受调剂">
+              <el-input v-model="applicationForm.accept_adjustment" placeholder="请输入是否接受调剂" />
+            </el-form-item>
+            <el-form-item label="申请时间">
+              <el-input v-model="applicationForm.applied_at" placeholder="请输入申请时间" />
+            </el-form-item>
+          </div>
+        </section>
+
+        <section class="dialog-section">
+          <h3 class="dialog-section__title">教育背景</h3>
+          <div class="dialog-grid dialog-grid--three">
+            <el-form-item label="本科院校" prop="graduation_school">
+              <el-select v-model="applicationForm.graduation_school" filterable allow-create default-first-option placeholder="请选择或录入本科院校">
+                <el-option v-for="item in options.graduation_school_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="本科院校扩展">
+              <el-input v-model="applicationForm.undergraduate_school" placeholder="保留模板原字段" />
+            </el-form-item>
+            <el-form-item label="最高学历" prop="highest_degree">
+              <el-select v-model="applicationForm.highest_degree" placeholder="请选择学历">
+                <el-option v-for="item in options.degree_options" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="本科均分">
+              <el-input v-model="applicationForm.undergraduate_average_score" placeholder="请输入本科均分" />
+            </el-form-item>
+            <el-form-item label="本科绩点">
+              <el-input v-model="applicationForm.undergraduate_gpa" placeholder="请输入本科绩点" />
+            </el-form-item>
+            <el-form-item label="本科排名">
+              <el-input v-model="applicationForm.undergraduate_rank" placeholder="请输入本科排名" />
+            </el-form-item>
+            <el-form-item label="本科专业">
+              <el-input v-model="applicationForm.undergraduate_major" placeholder="请输入本科专业" />
+            </el-form-item>
+            <el-form-item label="硕士院校">
+              <el-input v-model="applicationForm.graduate_school" placeholder="请输入硕士院校" />
+            </el-form-item>
+            <el-form-item label="境外大学">
+              <el-input v-model="applicationForm.overseas_university_name" placeholder="请输入境外本科大学名称" />
+            </el-form-item>
+            <el-form-item label="硕士均分">
+              <el-input v-model="applicationForm.graduate_average_score" placeholder="请输入硕士均分" />
+            </el-form-item>
+            <el-form-item label="硕士绩点">
+              <el-input v-model="applicationForm.graduate_gpa" placeholder="请输入硕士绩点" />
+            </el-form-item>
+            <el-form-item label="硕士排名">
+              <el-input v-model="applicationForm.graduate_rank" placeholder="请输入硕士排名" />
+            </el-form-item>
+            <el-form-item label="硕士专业">
+              <el-input v-model="applicationForm.graduate_major" placeholder="请输入硕士专业" />
+            </el-form-item>
+            <el-form-item label="境外硕士院校" class="grid-span-2">
+              <el-input v-model="applicationForm.overseas_master_university_name" placeholder="请输入境外硕士大学名称" />
+            </el-form-item>
+          </div>
+        </section>
+
+        <section class="dialog-section">
+          <h3 class="dialog-section__title">文本材料</h3>
+          <div class="dialog-grid dialog-grid--single">
+            <el-form-item label="了解渠道">
+              <el-input v-model="applicationForm.discovery_channel" placeholder="请输入了解联合培养博士生项目的方式" />
+            </el-form-item>
+            <el-form-item label="本人自我评价">
+              <el-input v-model="applicationForm.self_evaluation" type="textarea" :rows="3" placeholder="请输入本人自我评价" />
+            </el-form-item>
+            <el-form-item label="关键科研问题">
+              <el-input v-model="applicationForm.research_problem" type="textarea" :rows="4" placeholder="请输入候选人关注的关键科研问题" />
+            </el-form-item>
+            <el-form-item label="研究现状与局限">
+              <el-input v-model="applicationForm.research_status_analysis" type="textarea" :rows="4" placeholder="请输入科研进展与局限分析" />
+            </el-form-item>
+            <el-form-item label="问题解决后的影响">
+              <el-input v-model="applicationForm.research_impact" type="textarea" :rows="4" placeholder="请输入对技术与生活影响的判断" />
+            </el-form-item>
+            <el-form-item label="AI 对社会影响判断">
+              <el-input v-model="applicationForm.ai_society_impact" type="textarea" :rows="4" placeholder="请输入对 AI 影响场景的判断" />
+            </el-form-item>
+            <el-form-item label="不同意的行业共识">
+              <el-input v-model="applicationForm.dissenting_view" type="textarea" :rows="3" placeholder="请输入不同意的观点" />
+            </el-form-item>
+            <el-form-item label="家庭情况">
+              <el-input v-model="applicationForm.family_info" type="textarea" :rows="3" placeholder="请输入家庭情况" />
+            </el-form-item>
+            <el-form-item label="教育经历">
+              <el-input v-model="applicationForm.education_experience" type="textarea" :rows="3" placeholder="请输入教育经历" />
+            </el-form-item>
+            <el-form-item label="实践经历">
+              <el-input v-model="applicationForm.practice_experience" type="textarea" :rows="3" placeholder="请输入实践经历" />
+            </el-form-item>
+            <el-form-item label="个人陈述">
+              <el-input v-model="applicationForm.personal_statement_text" type="textarea" :rows="3" placeholder="请输入个人陈述" />
+            </el-form-item>
+            <el-form-item label="学生活动经历">
+              <el-input v-model="applicationForm.student_activity_experience" type="textarea" :rows="3" placeholder="请输入学生活动经历" />
+            </el-form-item>
+            <el-form-item label="补充简介">
+              <el-input v-model="applicationForm.supplementary_profile" type="textarea" :rows="3" placeholder="模板中重复个人简介字段已拆分为补充简介" />
+            </el-form-item>
+            <el-form-item label="个人陈述附件">
+              <el-input v-model="applicationForm.personal_statement_attachment" placeholder="请输入个人陈述附件地址" />
+            </el-form-item>
+            <el-form-item label="材料清单附件">
+              <el-input v-model="applicationForm.material_list_attachment" placeholder="请输入材料清单附件地址" />
+            </el-form-item>
+          </div>
+        </section>
       </el-form>
       <template #footer>
         <el-button @click="applicationDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="applicationSubmitting" @click="submitApplicationForm">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="applicationDetailVisible" title="报名申请详情" size="760px" destroy-on-close>
+      <template v-if="viewingApplication">
+        <section v-for="section in applicationDetailSections" :key="section.title" class="detail-section">
+          <h3 class="dialog-section__title">{{ section.title }}</h3>
+          <div class="detail-grid">
+            <div v-for="field in section.fields" :key="field.key" class="detail-item">
+              <span class="detail-item__label">{{ field.label }}</span>
+              <span class="detail-item__value">{{ displayDetailValue(viewingApplication[field.key]) }}</span>
+            </div>
+          </div>
+        </section>
+        <section class="detail-section">
+          <h3 class="dialog-section__title">文本陈述</h3>
+          <div class="detail-text-list">
+            <article class="detail-text-card"><h4>本人自我评价</h4><p>{{ displayDetailValue(viewingApplication.self_evaluation) }}</p></article>
+            <article class="detail-text-card"><h4>关键科研问题</h4><p>{{ displayDetailValue(viewingApplication.research_problem) }}</p></article>
+            <article class="detail-text-card"><h4>研究现状与局限</h4><p>{{ displayDetailValue(viewingApplication.research_status_analysis) }}</p></article>
+            <article class="detail-text-card"><h4>问题解决后的影响</h4><p>{{ displayDetailValue(viewingApplication.research_impact) }}</p></article>
+            <article class="detail-text-card"><h4>AI 对社会影响判断</h4><p>{{ displayDetailValue(viewingApplication.ai_society_impact) }}</p></article>
+            <article class="detail-text-card"><h4>不同意的行业共识</h4><p>{{ displayDetailValue(viewingApplication.dissenting_view) }}</p></article>
+            <article class="detail-text-card"><h4>家庭情况</h4><p>{{ displayDetailValue(viewingApplication.family_info) }}</p></article>
+            <article class="detail-text-card"><h4>教育经历</h4><p>{{ displayDetailValue(viewingApplication.education_experience) }}</p></article>
+            <article class="detail-text-card"><h4>实践经历</h4><p>{{ displayDetailValue(viewingApplication.practice_experience) }}</p></article>
+            <article class="detail-text-card"><h4>个人陈述</h4><p>{{ displayDetailValue(viewingApplication.personal_statement_text) }}</p></article>
+            <article class="detail-text-card"><h4>学生活动经历</h4><p>{{ displayDetailValue(viewingApplication.student_activity_experience) }}</p></article>
+            <article class="detail-text-card"><h4>补充简介</h4><p>{{ displayDetailValue(viewingApplication.supplementary_profile) }}</p></article>
+          </div>
+        </section>
+      </template>
+    </el-drawer>
   </section>
 </template>
 
@@ -715,6 +1229,7 @@ onMounted(() => {
 
 .section-card {
   padding: 16px;
+  min-width: 0;
 }
 
 .stat-card {
@@ -782,6 +1297,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.table-scroll {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.table-scroll :deep(.el-table) {
+  width: 100%;
+  min-width: 0;
 }
 
 .summary-text {
@@ -841,6 +1369,122 @@ onMounted(() => {
   gap: 4px 18px;
 }
 
+.dialog-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dialog-grid--single {
+  grid-template-columns: 1fr;
+}
+
+.brochure-upload-field {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.brochure-upload-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.brochure-upload-preview {
+  width: 100%;
+  max-width: 280px;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(18, 50, 95, 0.12);
+  background: rgba(246, 249, 255, 0.72);
+}
+
+.brochure-upload-preview img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
+
+.grid-span-2 {
+  grid-column: span 2;
+}
+
+.grid-span-3 {
+  grid-column: span 3;
+}
+
+.dialog-section,
+.detail-section {
+  margin-bottom: 18px;
+}
+
+.dialog-section__title {
+  margin: 0 0 10px;
+  color: #18355d;
+  font-size: 14px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.detail-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(18, 50, 95, 0.08);
+  border-radius: 14px;
+  background: rgba(246, 249, 255, 0.72);
+}
+
+.detail-item__label {
+  color: #6e819d;
+  font-size: 12px;
+}
+
+.detail-item__value {
+  color: #12315e;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.detail-text-list {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-text-card {
+  padding: 12px 14px;
+  border: 1px solid rgba(18, 50, 95, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.detail-text-card h4,
+.detail-text-card p {
+  margin: 0;
+}
+
+.detail-text-card h4 {
+  color: #18355d;
+  font-size: 13px;
+}
+
+.detail-text-card p {
+  margin-top: 8px;
+  color: #4e6381;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.hidden-input {
+  display: none;
+}
+
 @media (max-width: 980px) {
   .stats-grid,
   .two-column-grid {
@@ -855,6 +1499,19 @@ onMounted(() => {
 
   .dialog-grid {
     grid-template-columns: 1fr;
+  }
+
+  .brochure-upload-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-span-2,
+  .grid-span-3 {
+    grid-column: auto;
   }
 }
 </style>

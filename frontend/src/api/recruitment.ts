@@ -13,6 +13,7 @@ export type RecruitPlanRecord = {
   application_count: number
   interview_group_count: number
   is_open: boolean
+  brochure_image_url?: string | null
 }
 
 
@@ -24,10 +25,53 @@ export type RecruitApplicationRecord = {
   plan_id: number
   business_key: string
   candidate_no?: string | null
+  review_round?: string | null
   student_name: string
+  first_choice?: string | null
+  second_choice?: string | null
+  gender?: string | null
+  political_status?: string | null
+  marital_status?: string | null
+  religious_belief?: string | null
+  native_place?: string | null
+  phone_number?: string | null
+  email?: string | null
+  mailing_address?: string | null
+  id_type?: string | null
+  id_number?: string | null
   graduation_school: string
+  undergraduate_school?: string | null
+  accept_adjustment?: string | null
+  undergraduate_average_score?: string | null
+  undergraduate_gpa?: string | null
+  undergraduate_rank?: string | null
+  undergraduate_major?: string | null
+  graduate_average_score?: string | null
+  graduate_gpa?: string | null
+  graduate_rank?: string | null
+  graduate_major?: string | null
   highest_degree: string
   intended_field: string
+  intended_advisor_name?: string | null
+  discovery_channel?: string | null
+  graduate_school?: string | null
+  overseas_university_name?: string | null
+  overseas_master_university_name?: string | null
+  self_evaluation?: string | null
+  applied_at?: string | null
+  research_problem?: string | null
+  research_status_analysis?: string | null
+  research_impact?: string | null
+  ai_society_impact?: string | null
+  dissenting_view?: string | null
+  family_info?: string | null
+  education_experience?: string | null
+  practice_experience?: string | null
+  personal_statement_text?: string | null
+  student_activity_experience?: string | null
+  personal_statement_attachment?: string | null
+  material_list_attachment?: string | null
+  supplementary_profile?: string | null
   material_status: string
   application_status: string
   reviewer_name?: string | null
@@ -44,6 +88,27 @@ export type RecruitPlanListResponse = PagedResponse<RecruitPlanRecord>
 
 
 export type RecruitApplicationListResponse = PagedResponse<RecruitApplicationRecord>
+
+
+export type RecruitApplicationImportIssue = {
+  row_number: number
+  student_name?: string | null
+  reason: string
+}
+
+
+export type RecruitApplicationImportResult = {
+  imported_count: number
+  skipped_count: number
+  plan_id: number
+  imported_business_keys: string[]
+  issues: RecruitApplicationImportIssue[]
+}
+
+
+export type RecruitmentBrochureUploadResponse = {
+  url: string
+}
 
 
 export type RecruitStats = {
@@ -135,4 +200,42 @@ export function updateRecruitmentApplication(id: number, payload: RecruitApplica
 
 export function deleteRecruitmentApplication(id: number) {
   return http.delete(`/recruitment/applications/${id}`)
+}
+
+
+export function importRecruitmentApplications(planId: number, file: File) {
+  const formData = new FormData()
+  formData.append('plan_id', String(planId))
+  formData.append('file', file)
+  return http.post<RecruitApplicationImportResult>('/recruitment/applications/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+}
+
+
+export function exportRecruitmentApplications(params?: { keyword?: string; status?: string; plan_id?: number }) {
+  return http.get<Blob>('/recruitment/applications/export', {
+    params,
+    responseType: 'blob',
+  })
+}
+
+
+export function downloadRecruitmentTemplate() {
+  return http.get<Blob>('/recruitment/applications/template', {
+    responseType: 'blob',
+  })
+}
+
+
+export function uploadRecruitmentBrochureImage(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<RecruitmentBrochureUploadResponse>('/recruitment/plans/brochure-upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
 }

@@ -16,6 +16,6 @@ app.use(router)
 app.use(ElementPlus)
 
 const authStore = useAuthStore(pinia)
-void authStore.hydrateSession()
-
-app.mount('#app')
+void authStore.hydrateSession().catch(() => undefined).finally(() => {
+	app.mount('#app')
+})

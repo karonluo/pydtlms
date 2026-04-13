@@ -2,13 +2,21 @@
 
 本仓库用于建设博士生生命周期管理系统，覆盖招生、入学、培养、学位、毕业和就业跟踪，并同时沉淀 RBAC、JWT、审计日志、Redis Sentinel、数据驾驶舱和跨系统集成能力。
 
+## 最新更新（2026-04）
+
+- 新增对外学生门户，面向考生提供注册、登录、找回密码、查看招生计划、选择导师团队和在线填写学生档案能力。
+- 学生门户入口已拆分为两个页面：`/portal` 用于注册登录与密码找回，`/portal/application` 用于计划选择与档案填写。
+- 学生档案页已升级为科技感表单界面，包含顶部流程箭头、左侧章节导航、可折叠章节面板、右下角快捷目录与回到顶部入口。
+- 招生计划新增招生简章图片字段 `brochure_image_url`，管理端招生计划维护页已支持展示该字段，学生端会随所选计划展示不同简章图片。
+- 前端最新构建已通过；当前仍存在 Vite 大 chunk 告警，但不影响使用。
+
 ## 当前交付内容
 
 - `documents/系统详细设计文档.docx`：已根据需求基线生成的详细设计文档。
 - `documents/images/`：详细设计文档引用的 SVG 与 PNG 图像资产。
 - `documents/baseline/`：从 Markdown、Word、PDF、PPTX 抽取的需求基线文本。
 - `backend/`：FastAPI 后端工程，包含配置、JWT/RBAC、模型、SQL 脚本，以及招生管理、学生管理等联调接口。
-- `frontend/`：Vue3 + Element Plus 前端工程，已提供驾驶舱、招生管理、学生管理、团队管理、培养、学位、系统治理六个业务视图与若干治理子页。
+- `frontend/`：Vue3 + Element Plus 前端工程，已提供驾驶舱、招生管理、学生管理、团队管理、培养、学位、系统治理六个业务视图，以及对外学生门户页面。
 - `tools/generate_design_assets.py`：一键再生 SVG、PNG 和详细设计文档的脚本。
 - `tools/dtmls_cli.py`：DTLMS 命令行工具，支持登录、查询、删除学生、斜杠命令菜单和通用 API 调用。
 - `tools/dist/dtmls_cli.exe`：已编译的 Windows 可执行版 CLI，需与同目录 INI 配置一起使用。
@@ -96,10 +104,11 @@ REDIS_KEY_PREFIX=CTDTLMS_
 2. `backend/sql/015_team_schema_migration.sql`
 3. `backend/sql/016_business_key_migration.sql`
 4. `backend/sql/017_workflow_flowable_schema.sql`
-5. `backend/sql/020_views.sql`
-6. `backend/sql/030_seed_rbac.sql`
-7. `backend/sql/040_runtime_store.sql`
-8. `backend/sql/050_dict_schema.sql`
+5. `backend/sql/019_portal_student_and_brochure.sql`
+6. `backend/sql/020_views.sql`
+7. `backend/sql/030_seed_rbac.sql`
+8. `backend/sql/040_runtime_store.sql`
+9. `backend/sql/050_dict_schema.sql`
 
 ## 流程引擎演进约定
 
@@ -139,6 +148,20 @@ npm run dev
 
 - 管理员：`admin / Admin@123456`
 - 导师：`mentor.demo / Mentor@123456`
+
+### 5.0 学生门户入口
+
+学生门户与管理端前端共用同一套 Vite 服务，入口如下：
+
+- 学生认证页：`http://127.0.0.1:5173/portal`
+- 学生申请页：`http://127.0.0.1:5173/portal/application`
+
+当前门户流程说明：
+
+- 新考生可在 `/portal` 完成注册，注册信息为手机号、邮箱、姓名、身份证号和密码。
+- 已注册考生可在 `/portal` 登录，也可在同页通过“找回密码”重设密码。
+- 登录成功后进入 `/portal/application`，先选择一个正在执行的招生计划，再按章节填写档案、选择导师团队并提交申请表。
+- 学生申请页右下角已提供“目录”和“回到顶部”快捷入口，适配长表单场景。
 
 ### 5.2 登录与会话联调说明
 
@@ -292,11 +315,18 @@ Set-Location tools\dist
 - `backend/app/main.py`：FastAPI 应用入口。
 - `backend/app/core/`：配置、数据库、JWT、RBAC、Redis Sentinel 与日志。
 - `backend/app/models/`：系统治理、招生、培养与学位领域模型。
-- `backend/app/api/v1/`：面向前端联调的认证、驾驶舱、招生、学生、培养、学位与系统治理接口。
+- `backend/app/api/v1/`：面向前端联调的认证、驾驶舱、招生、学生、培养、学位、系统治理与学生门户接口。
 - `backend/app/services/management_service.py`：当前统一业务管理服务，优先从 PostgreSQL 读写，并保留本地 JSON 快照。
 - `backend/app/services/postgres_state_store.py`：PostgreSQL 运行时持久化、关系表灌数与库初始化实现。
 - `backend/app/tasks/reminders.py`：Celery 提醒任务骨架。
 - `backend/sql/`：数据库与视图初始化脚本。
+
+当前与学生门户直接相关的核心文件包括：
+
+- `backend/app/api/v1/portal.py`：门户注册、登录、密码找回、计划列表、团队列表、申请提交接口。
+- `backend/app/schemas/portal.py`：门户账号与学生档案契约。
+- `backend/app/core/portal_security.py`：门户 JWT 签发与校验。
+- `backend/sql/019_portal_student_and_brochure.sql`：门户学生表与招生简章图片字段迁移脚本。
 
 ## CLI 命令概览
 
@@ -327,11 +357,17 @@ Set-Location tools\dist
 - `frontend/src/views/training/`：培养方案、科研报告、外出研修三类治理页，支持查询、状态筛选、字典选择、单删与批量删除。
 - `frontend/src/views/degree/`：论文、盲审、答辩流水线视图。
 - `frontend/src/views/system/`：安全、审计、集成和部署治理视图。
+- `frontend/src/views/portal/StudentPortalAuthView.vue`：学生门户注册、登录、找回密码页面。
+- `frontend/src/views/portal/StudentPortalApplicationView.vue`：学生门户申请表页面，含计划选择、导师团队选择、分段档案填写、快捷目录和回到顶部交互。
+- `frontend/src/api/portal.ts`：学生门户前端 API 与 token 管理。
 
 ## 当前实现边界
 
 - 已完成初始化项目骨架、数据库脚本、详细设计文档和图像资产生成。
 - 已落地招生、学生、培养、学位、流程审批、系统治理等管理页面，并接入统一后端接口。
+- 已新增对外学生门户，支持学生自助注册、登录、找回密码、浏览招生计划、选择导师团队并在线填报档案。
+- 学生门户当前采用“认证页 + 申请页”两段式流程，申请页支持科技感流程条、分组导航、折叠章节、快捷目录和回到顶部操作。
+- 招生计划已补充 `brochure_image_url` 字段，学生端会根据选定计划展示对应招生简章图片。
 - 当前业务服务已支持 PostgreSQL 真实持久化，同时保留 JSON 快照作为离线回退与调试副本。
 - 已导入一套完整模拟数据到 PostgreSQL，覆盖用户、学生、招生计划、报名申请、培养方案、科研报告、外出研修、论文、审批任务与审计日志。
 - 学生管理已补充团队主数据实体，学生新增/编辑时的导师和团队改为受控选择，并通过团队-导师约束避免脏数据。
@@ -339,6 +375,7 @@ Set-Location tools\dist
 - CLI 已支持登录、资料维护、学生删除、多模块查询与通用 API 调用；尚未把所有 Web 写操作都做成专用命令，但可通过 `/api` 命令覆盖调用。
 - 认证链路已接入 Redis Sentinel 会话，支持登录、登出、会话失效校验与 401 回登录页。
 - 培养管理模块已升级为治理页交互，覆盖培养方案、科研报告、外出研修的筛选、字典项、业务化按钮与批量删除。
+- 学生门户相关接口测试与前端构建已通过，但学生门户档案字段目前仍以门户申请场景为主，尚未完全替代管理端完整学生主档治理流程。
 - Redis Sentinel、更多外部系统同步、审批引擎细化和自动化测试仍可继续深化。
 
 ## 后续研发优先级建议

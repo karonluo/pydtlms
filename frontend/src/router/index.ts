@@ -14,6 +14,8 @@ const DictView = () => import('../views/system/DictView.vue')
 const WorkflowCenterView = () => import('../views/workflow/WorkflowCenterView.vue')
 const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
+const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
+const StudentPortalApplicationView = () => import('../views/portal/StudentPortalApplicationView.vue')
 
 const APP_TITLE = '博士生生命周期管理系统'
 
@@ -21,6 +23,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: LoginView, meta: { public: true, title: '系统登录' } },
+    { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
+    { path: '/portal/application', component: StudentPortalApplicationView, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
     {
       path: '/',
       component: AppLayout,
@@ -57,6 +61,16 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const authStore = useAuthStore()
   const hasAccessToken = Boolean(localStorage.getItem('dtlms-access-token'))
+  const hasPortalToken = Boolean(localStorage.getItem('dtlms-portal-access-token'))
+
+  if (to.meta.portalProtected && !hasPortalToken) {
+    return { path: '/portal' }
+  }
+
+  if (to.path === '/portal' && hasPortalToken) {
+    return '/portal/application'
+  }
+
 
   if (to.path === '/login' && hasAccessToken && authStore.sessionState !== 'ready') {
     try {

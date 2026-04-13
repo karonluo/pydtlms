@@ -92,6 +92,7 @@ export const useAuthStore = defineStore('auth', () => {
   const profile = ref<UserProfile | null>(null)
   const sessionState = ref<SessionState>('idle')
   const sessionError = ref('')
+  let hydratePromise: Promise<void> | null = null
 
   const initials = computed(() => fullName.value.slice(0, 1) || 'D')
   const isAuthenticated = computed(() => Boolean(localStorage.getItem('dtlms-access-token')) && sessionState.value === 'ready')
@@ -187,23 +188,29 @@ export const useAuthStore = defineStore('auth', () => {
       return
     }
 
-    if (sessionState.value === 'loading') {
-      return
+    if (hydratePromise) {
+      return hydratePromise
     }
 
-    sessionState.value = 'loading'
-    sessionError.value = ''
+    hydratePromise = (async () => {
+      sessionState.value = 'loading'
+      sessionError.value = ''
 
-    try {
-      await loadPrincipal()
-      await loadProfile()
-      sessionState.value = 'ready'
-    } catch (error) {
-      clearSession()
-      sessionState.value = 'error'
-      sessionError.value = '会话已失效，请重新登录。'
-      throw error
-    }
+      try {
+        await loadPrincipal()
+        await loadProfile()
+        sessionState.value = 'ready'
+      } catch (error) {
+        clearSession()
+        sessionState.value = 'error'
+        sessionError.value = '会话已失效，请重新登录。'
+        throw error
+      } finally {
+        hydratePromise = null
+      }
+    })()
+
+    return hydratePromise
   }
 
   async function login(usernameValue: string, password: string) {

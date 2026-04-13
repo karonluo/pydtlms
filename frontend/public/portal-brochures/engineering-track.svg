@@ -1,0 +1,11 @@
+<svg width="1200" height="720" viewBox="0 0 1200 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="720" rx="40" fill="#1E2D45"/>
+  <path d="M0 512C234 426 350 426 570 512C790 598 930 598 1200 478V720H0V512Z" fill="#6CA6B8" fill-opacity="0.34"/>
+  <rect x="74" y="76" width="1052" height="568" rx="30" fill="#FFFFFF" fill-opacity="0.06" stroke="#CFE2E9" stroke-opacity="0.24"/>
+  <text x="96" y="174" fill="#CFE2E9" font-size="34" font-family="Microsoft YaHei">工程博士专项通道</text>
+  <text x="96" y="270" fill="#FFFFFF" font-size="88" font-weight="700" font-family="Microsoft YaHei">产业场景驱动型招生计划</text>
+  <text x="96" y="360" fill="#D8E5F1" font-size="30" font-family="Microsoft YaHei">面向高端装备、工业互联网与智能产线应用场景</text>
+  <text x="96" y="470" fill="#FFFFFF" font-size="28" font-family="Microsoft YaHei">培养特点</text>
+  <text x="96" y="520" fill="#C7E2E6" font-size="40" font-weight="700" font-family="Microsoft YaHei">项目制课题 / 校企联合导师 / 闭环交付验证</text>
+  <text x="96" y="600" fill="#D9E7F2" font-size="24" font-family="Microsoft YaHei">适用于学生门户顶部简章视觉位</text>
+</svg>

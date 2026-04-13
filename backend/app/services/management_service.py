@@ -10,8 +10,23 @@ from passlib.context import CryptContext
 
 from app.core.cache import build_cache_key, get_cache_client
 from app.schemas.auth import UserProfile, UserProfileUpdate
+from app.schemas.portal import (
+    PortalApplicationSubmissionResponse,
+    PortalApplicationUpsert,
+    PortalLoginRequest,
+    PortalPlanListResponse,
+    PortalPlanRecord,
+    PortalPasswordResetRequest,
+    PortalRegistrationRequest,
+    PortalRegistrationResponse,
+    PortalStudentRecord,
+    PortalTeamListResponse,
+    PortalTeamRecord,
+)
 from app.schemas.dashboard import DashboardAlert, DashboardOverview, MetricCard
 from app.schemas.recruitment import (
+    RecruitApplicationImportIssue,
+    RecruitApplicationImportResult,
     RecruitApplicationListResponse,
     RecruitApplicationRecord,
     RecruitApplicationUpsert,
@@ -95,6 +110,7 @@ from app.schemas.training import (
 )
 from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
 from app.services.postgres_state_store import PostgresStateStore
+from app.services.recruitment_excel_service import build_recruitment_template
 from app.services.runtime_seed_data import build_runtime_seed_state
 
 
@@ -415,8 +431,7 @@ class RuntimeManagementStore:
         self._postgres_store = PostgresStateStore()
         self.state = self._load_state()
         self._counters = self.state.setdefault("counters", {})
-        if self._migrate_state():
-            self._save()
+        self._migrate_state()
 
     def _load_state(self) -> dict[str, Any]:
         postgres_state = self._postgres_store.load_state()
@@ -436,6 +451,26 @@ class RuntimeManagementStore:
             self.state["teams"] = self._bootstrap_teams_from_students()
             changed = True
         self._counters.setdefault("teams", max([item.get("id", 0) for item in self.state.setdefault("teams", [])], default=0))
+        self.state.setdefault("portal_students", [])
+        self._counters.setdefault("portal_students", max([item.get("id", 0) for item in self.state["portal_students"]], default=0))
+        for portal_student in self.state["portal_students"]:
+            portal_student.setdefault("password_hash", None)
+            portal_student.setdefault("gender", None)
+            portal_student.setdefault("birth_date", None)
+            portal_student.setdefault("ethnic_group", None)
+            portal_student.setdefault("native_place", None)
+            portal_student.setdefault("marital_status", None)
+            portal_student.setdefault("religious_belief", None)
+            portal_student.setdefault("id_type", "居民身份证")
+            portal_student.setdefault("mailing_address", None)
+            portal_student.setdefault("english_level", None)
+            portal_student.setdefault("family_info", None)
+            portal_student.setdefault("education_experience", None)
+            portal_student.setdefault("practice_experience", None)
+            portal_student.setdefault("personal_profile", None)
+            portal_student.setdefault("recommendation_notes", None)
+            portal_student.setdefault("personal_statement_text", None)
+            portal_student.setdefault("signed_agreement", False)
 
         for user in self.state.setdefault("system_users", []):
             if not user.get("password_hash"):
@@ -465,6 +500,11 @@ class RuntimeManagementStore:
         for policy in self.state.setdefault("audit_policies", []):
             if not policy.get("status"):
                 policy["status"] = "启用"
+                changed = True
+
+        for plan in self.state.setdefault("recruitment_plans", []):
+            if "brochure_image_url" not in plan:
+                plan["brochure_image_url"] = None
                 changed = True
 
         team_lookup = {item["team_name"]: item for item in self.state.setdefault("teams", [])}
@@ -504,6 +544,72 @@ class RuntimeManagementStore:
         if self._migrate_workflow_runtime():
             changed = True
 
+        if self._normalize_recruitment_application_profiles():
+            changed = True
+
+        return changed
+
+    def _normalize_recruitment_application_profiles(self) -> bool:
+        changed = False
+        fallback_second_choices = [
+            "机器学习",
+            "工业互联网",
+            "知识图谱",
+            "数据智能",
+            "数字孪生",
+            "软件工程",
+        ]
+        fallback_political_statuses = ["中共党员", "共青团员", "群众", "中共预备党员"]
+        for index, item in enumerate(self.state.setdefault("recruitment_applications", []), start=1):
+            defaults = {
+                "review_round": f'{item.get("plan_id") or 0}轮次' if item.get("plan_id") else "默认轮次",
+                "first_choice": item.get("intended_field"),
+                "second_choice": fallback_second_choices[(index - 1) % len(fallback_second_choices)],
+                "gender": "未知",
+                "political_status": fallback_political_statuses[(index - 1) % len(fallback_political_statuses)],
+                "marital_status": "未婚",
+                "religious_belief": "无",
+                "native_place": "待补充",
+                "phone_number": f'1390002{index:04d}',
+                "email": f'candidate{index:02d}@mail.example.com',
+                "mailing_address": "待补充",
+                "id_type": "居民身份证",
+                "id_number": None,
+                "undergraduate_school": item.get("graduation_school"),
+                "accept_adjustment": "是",
+                "undergraduate_average_score": None,
+                "undergraduate_gpa": None,
+                "undergraduate_rank": None,
+                "undergraduate_major": item.get("intended_field"),
+                "graduate_average_score": None,
+                "graduate_gpa": None,
+                "graduate_rank": None,
+                "graduate_major": item.get("intended_field"),
+                "intended_advisor_name": item.get("reviewer_name"),
+                "discovery_channel": None,
+                "graduate_school": None,
+                "overseas_university_name": None,
+                "overseas_master_university_name": None,
+                "self_evaluation": None,
+                "applied_at": None,
+                "research_problem": None,
+                "research_status_analysis": None,
+                "research_impact": None,
+                "ai_society_impact": None,
+                "dissenting_view": None,
+                "family_info": None,
+                "education_experience": None,
+                "practice_experience": None,
+                "personal_statement_text": None,
+                "student_activity_experience": None,
+                "personal_statement_attachment": None,
+                "material_list_attachment": None,
+                "supplementary_profile": None,
+            }
+            for key, value in defaults.items():
+                if key not in item:
+                    item[key] = value
+                    changed = True
         return changed
 
     def _next_id(self, key: str) -> int:
@@ -1389,8 +1495,9 @@ class RuntimeManagementStore:
         with self._lock:
             for index, item in enumerate(self._list("system_users")):
                 if item["username"] == username:
-                    self._list("system_users")[index] = {**item, "last_login_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-                    self._save()
+                    updated_user = {**item, "last_login_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                    self._list("system_users")[index] = updated_user
+                    self._postgres_store.update_runtime_system_user(int(updated_user["id"]), updated_user)
                     return
             raise KeyError(username)
 
@@ -1420,6 +1527,36 @@ class RuntimeManagementStore:
             application_count=application_count,
             interview_group_count=item["interview_group_count"],
             is_open=item["is_open"],
+            brochure_image_url=item.get("brochure_image_url"),
+        )
+
+    def _build_portal_student_record(self, item: dict[str, Any]) -> PortalStudentRecord:
+        return PortalStudentRecord(**item)
+
+    def _build_portal_plan_record(self, item: dict[str, Any]) -> PortalPlanRecord:
+        plan = self._build_recruit_plan_record(item)
+        return PortalPlanRecord(
+            id=plan.id,
+            plan_name=plan.plan_name,
+            academic_term=plan.academic_term,
+            current_stage=plan.current_stage,
+            target_quota=plan.target_quota,
+            interview_group_count=plan.interview_group_count,
+            brochure_image_url=plan.brochure_image_url,
+            summary=f"当前阶段：{plan.current_stage}，计划名额 {plan.target_quota} 人，面试组 {plan.interview_group_count} 个。",
+        )
+
+    def _build_portal_team_record(self, item: dict[str, Any]) -> PortalTeamRecord:
+        team = self._build_team_record(item)
+        return PortalTeamRecord(
+            id=team.id,
+            team_name=team.team_name,
+            lead_advisor_name=team.lead_advisor_name,
+            advisor_names=team.advisor_names,
+            department_name=team.department_name,
+            discipline_name=team.discipline_name,
+            research_directions=team.research_directions,
+            description=team.description,
         )
 
     def get_dashboard_overview(self) -> DashboardOverview:
@@ -1545,8 +1682,14 @@ class RuntimeManagementStore:
                 if term in str(item.get("business_key") or "").lower()
                 or term in str(item.get("candidate_no") or "").lower()
                 or term in item["student_name"].lower()
-                or term in item["graduation_school"].lower()
-                or term in item["intended_field"].lower()
+                or term in str(item.get("graduation_school") or "").lower()
+                or term in str(item.get("graduate_school") or "").lower()
+                or term in str(item.get("intended_field") or "").lower()
+                or term in str(item.get("first_choice") or "").lower()
+                or term in str(item.get("second_choice") or "").lower()
+                or term in str(item.get("intended_advisor_name") or "").lower()
+                or term in str(item.get("phone_number") or "").lower()
+                or term in str(item.get("email") or "").lower()
             ]
         records = [RecruitApplicationRecord(**item) for item in items]
         paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
@@ -1562,6 +1705,303 @@ class RuntimeManagementStore:
             self._record_operation("招生管理", "报名申请", str(item["id"]), "新增", f'新增报名申请 {item["student_name"]}', operator_username=operator["username"])
             self._save()
             return RecruitApplicationRecord(**item)
+
+    def import_recruitment_applications(
+        self,
+        plan_id: int,
+        rows: list[dict[str, Any]],
+        principal: Any | None = None,
+    ) -> RecruitApplicationImportResult:
+        with self._lock:
+            self._find_required("recruitment_plans", plan_id)
+            operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
+            imported_business_keys: list[str] = []
+            issues: list[RecruitApplicationImportIssue] = []
+            for row_number, row in enumerate(rows, start=2):
+                student_name = str(row.get("student_name") or "").strip()
+                if not student_name:
+                    issues.append(RecruitApplicationImportIssue(row_number=row_number, student_name=None, reason="姓名为空，已跳过"))
+                    continue
+
+                duplicated = next(
+                    (
+                        item
+                        for item in self._list("recruitment_applications")
+                        if int(item.get("plan_id") or 0) == int(plan_id)
+                        and str(item.get("student_name") or "").strip() == student_name
+                        and (
+                            (row.get("phone_number") and item.get("phone_number") == row.get("phone_number"))
+                            or (row.get("email") and item.get("email") == row.get("email"))
+                        )
+                    ),
+                    None,
+                )
+                if duplicated:
+                    issues.append(
+                        RecruitApplicationImportIssue(
+                            row_number=row_number,
+                            student_name=student_name,
+                            reason=f'检测到重复报名申请，已跳过：{duplicated.get("business_key")}',
+                        )
+                    )
+                    continue
+
+                payload_data = {
+                    **row,
+                    "plan_id": int(plan_id),
+                    "business_key": None,
+                    "candidate_no": None,
+                    "graduation_school": row.get("graduation_school") or row.get("undergraduate_school") or "待补充",
+                    "highest_degree": row.get("highest_degree") or "硕士",
+                    "intended_field": row.get("intended_field") or row.get("first_choice") or row.get("second_choice") or "待分配方向",
+                    "material_status": row.get("material_status") or "待审核",
+                    "application_status": row.get("application_status") or "报名已提交",
+                    "reviewer_name": row.get("reviewer_name") or None,
+                    "final_score": None,
+                }
+                item = self._workflow_initial_item("recruitment_application", RecruitApplicationUpsert(**payload_data).model_dump())
+                item["id"] = self._next_id("recruitment_applications")
+                self._list("recruitment_applications").insert(0, item)
+                self._start_managed_workflow("recruitment_application", item, operator_username=operator["username"])
+                self._record_operation("招生管理", "报名申请", str(item["id"]), "导入", f'导入报名申请 {item["student_name"]}', operator_username=operator["username"])
+                imported_business_keys.append(str(item["business_key"]))
+
+            if imported_business_keys:
+                self._save()
+
+            return RecruitApplicationImportResult(
+                imported_count=len(imported_business_keys),
+                skipped_count=len(issues),
+                plan_id=int(plan_id),
+                imported_business_keys=imported_business_keys,
+                issues=issues,
+            )
+
+    def export_recruitment_applications(
+        self,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        status: str | None = None,
+    ) -> bytes:
+        records = self.get_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status, page=1, page_size=10000).items
+        return build_recruitment_template([record.model_dump() for record in records])
+
+    def export_recruitment_application_blank_template(self) -> bytes:
+        return build_recruitment_template([])
+
+    def register_portal_student(self, payload: PortalRegistrationRequest) -> PortalRegistrationResponse:
+        with self._lock:
+            if any(item.get("phone_number") == payload.phone_number for item in self._list("portal_students")):
+                raise ValueError("该手机号已注册，请直接登录")
+            if any(item.get("email") == payload.email for item in self._list("portal_students")):
+                raise ValueError("该邮箱已注册，请直接登录")
+            if any(item.get("id_number") == payload.id_number for item in self._list("portal_students")):
+                raise ValueError("该身份证号已注册，请使用找回密码")
+
+            item = payload.model_dump()
+            password = item.pop("password")
+            item.update(
+                {
+                    "id": self._next_id("portal_students"),
+                    "password_hash": PASSWORD_CONTEXT.hash(password),
+                    "gender": None,
+                    "birth_date": None,
+                    "ethnic_group": None,
+                    "native_place": None,
+                    "marital_status": None,
+                    "religious_belief": None,
+                    "id_type": "居民身份证",
+                    "mailing_address": None,
+                    "graduation_school": None,
+                    "highest_degree": None,
+                    "intended_field": None,
+                    "political_status": None,
+                    "english_level": None,
+                    "family_info": None,
+                    "education_experience": None,
+                    "practice_experience": None,
+                    "personal_profile": None,
+                    "recommendation_notes": None,
+                    "personal_statement_text": None,
+                    "signed_agreement": False,
+                    "selected_plan_id": None,
+                    "selected_team_name": None,
+                    "selected_advisor_name": None,
+                    "self_evaluation": None,
+                    "submitted_at": None,
+                }
+            )
+            self._list("portal_students").insert(0, item)
+            self._record_operation("学生门户", "门户注册", str(item["id"]), "注册", f'学生 {item["full_name"]} 完成门户注册', operator_username=item["phone_number"])
+            self._save()
+            return PortalRegistrationResponse(message="注册成功，请使用手机号或邮箱登录", student=self._build_portal_student_record(item))
+
+    def login_portal_student(self, payload: PortalLoginRequest) -> PortalStudentRecord:
+        account = payload.account.strip()
+        with self._lock:
+            student = next(
+                (
+                    item for item in self._list("portal_students")
+                    if item.get("phone_number") == account or item.get("email") == account
+                ),
+                None,
+            )
+            if not student:
+                raise ValueError("账号不存在")
+            password_hash = student.get("password_hash")
+            if not password_hash or not PASSWORD_CONTEXT.verify(payload.password, password_hash):
+                raise ValueError("账号或密码错误")
+            return self._build_portal_student_record(student)
+
+    def reset_portal_student_password(self, payload: PortalPasswordResetRequest) -> None:
+        account = payload.account.strip()
+        with self._lock:
+            student = next(
+                (
+                    item for item in self._list("portal_students")
+                    if item.get("phone_number") == account or item.get("email") == account
+                ),
+                None,
+            )
+            if not student:
+                raise ValueError("账号不存在")
+            if student.get("id_number") != payload.id_number:
+                raise ValueError("身份证号校验失败")
+            student["password_hash"] = PASSWORD_CONTEXT.hash(payload.new_password)
+            self._record_operation("学生门户", "找回密码", str(student["id"]), "重置密码", f'学生 {student["full_name"]} 重置门户密码', operator_username=student["phone_number"])
+            self._save()
+
+    def get_portal_student(self, student_id: int) -> PortalStudentRecord:
+        _, item = self._find_required("portal_students", student_id)
+        return self._build_portal_student_record(item)
+
+    def get_public_recruitment_plans(self) -> PortalPlanListResponse:
+        items = [self._build_portal_plan_record(item) for item in self._list("recruitment_plans") if item.get("is_open")]
+        return PortalPlanListResponse(items=items)
+
+    def get_public_teams(self) -> PortalTeamListResponse:
+        items = [self._build_portal_team_record(item) for item in self._list("teams") if item.get("status") != "停用"]
+        return PortalTeamListResponse(items=items)
+
+    def submit_portal_application(self, student_id: int, payload: PortalApplicationUpsert) -> PortalApplicationSubmissionResponse:
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            _, plan = self._find_required("recruitment_plans", payload.plan_id)
+            if not plan.get("is_open"):
+                raise ValueError("当前招生计划未开放报名")
+            team = self._ensure_team_exists(payload.selected_team_name)
+            advisor_names = self._normalize_name_list(team.get("advisor_names", []), team.get("lead_advisor_name"))
+            advisor_name = payload.selected_advisor_name or team.get("lead_advisor_name")
+            if advisor_name not in advisor_names:
+                raise ValueError("所选导师不属于当前团队")
+
+            student.update(
+                {
+                    "gender": payload.gender,
+                    "birth_date": payload.birth_date,
+                    "ethnic_group": payload.ethnic_group,
+                    "native_place": payload.native_place,
+                    "marital_status": payload.marital_status,
+                    "religious_belief": payload.religious_belief,
+                    "id_type": payload.id_type,
+                    "mailing_address": payload.mailing_address,
+                    "graduation_school": payload.graduation_school,
+                    "highest_degree": payload.highest_degree,
+                    "intended_field": payload.intended_field,
+                    "political_status": payload.political_status,
+                    "english_level": payload.english_level,
+                    "family_info": payload.family_info,
+                    "education_experience": payload.education_experience,
+                    "practice_experience": payload.practice_experience,
+                    "personal_profile": payload.personal_profile,
+                    "recommendation_notes": payload.recommendation_notes,
+                    "personal_statement_text": payload.personal_statement_text,
+                    "signed_agreement": payload.signed_agreement,
+                    "selected_plan_id": payload.plan_id,
+                    "selected_team_name": payload.selected_team_name,
+                    "selected_advisor_name": advisor_name,
+                    "self_evaluation": payload.self_evaluation,
+                    "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+
+            existing_application = next(
+                (
+                    item for item in self._list("recruitment_applications")
+                    if int(item.get("plan_id") or 0) == int(payload.plan_id)
+                    and item.get("phone_number") == student.get("phone_number")
+                    and item.get("email") == student.get("email")
+                ),
+                None,
+            )
+            if existing_application:
+                existing_application.update(
+                    {
+                        "student_name": student["full_name"],
+                        "gender": payload.gender,
+                        "graduation_school": payload.graduation_school,
+                        "highest_degree": payload.highest_degree,
+                        "intended_field": payload.intended_field,
+                        "first_choice": payload.intended_field,
+                        "political_status": payload.political_status,
+                        "marital_status": payload.marital_status,
+                        "religious_belief": payload.religious_belief,
+                        "native_place": payload.native_place,
+                        "mailing_address": payload.mailing_address,
+                        "id_type": payload.id_type,
+                        "intended_advisor_name": advisor_name,
+                        "phone_number": student["phone_number"],
+                        "email": student["email"],
+                        "id_number": student["id_number"],
+                        "family_info": payload.family_info,
+                        "education_experience": payload.education_experience,
+                        "practice_experience": payload.practice_experience,
+                        "personal_statement_text": payload.personal_statement_text,
+                        "supplementary_profile": payload.personal_profile,
+                        "self_evaluation": payload.self_evaluation,
+                    }
+                )
+                business_key = str(existing_application["business_key"])
+                application_status = str(existing_application["application_status"])
+            else:
+                record = self.create_recruitment_application(
+                    RecruitApplicationUpsert(
+                        plan_id=payload.plan_id,
+                        student_name=student["full_name"],
+                        gender=payload.gender,
+                        graduation_school=payload.graduation_school,
+                        highest_degree=payload.highest_degree,
+                        intended_field=payload.intended_field,
+                        first_choice=payload.intended_field,
+                        political_status=payload.political_status,
+                        marital_status=payload.marital_status,
+                        religious_belief=payload.religious_belief,
+                        native_place=payload.native_place,
+                        mailing_address=payload.mailing_address,
+                        id_type=payload.id_type,
+                        phone_number=student["phone_number"],
+                        email=student["email"],
+                        id_number=student["id_number"],
+                        intended_advisor_name=advisor_name,
+                        family_info=payload.family_info,
+                        education_experience=payload.education_experience,
+                        practice_experience=payload.practice_experience,
+                        personal_statement_text=payload.personal_statement_text,
+                        supplementary_profile=payload.personal_profile,
+                        self_evaluation=payload.self_evaluation,
+                        material_status="待审核",
+                        application_status="报名已提交",
+                    ),
+                    principal={"username": student["phone_number"], "full_name": student["full_name"], "roles": ["portal_student"]},
+                )
+                business_key = record.business_key
+                application_status = record.application_status
+            self._save()
+            return PortalApplicationSubmissionResponse(
+                student=self._build_portal_student_record(student),
+                application_business_key=business_key,
+                application_status=application_status,
+            )
 
     def update_recruitment_application(self, application_id: int, payload: RecruitApplicationUpsert) -> RecruitApplicationRecord:
         with self._lock:
@@ -2532,4 +2972,20 @@ class RuntimeManagementStore:
             return UserProfile(**updated)
 
 
-store = RuntimeManagementStore()
+class LazyRuntimeManagementStore:
+    def __init__(self) -> None:
+        self._instance: RuntimeManagementStore | None = None
+        self._instance_lock = Lock()
+
+    def _get_instance(self) -> RuntimeManagementStore:
+        if self._instance is None:
+            with self._instance_lock:
+                if self._instance is None:
+                    self._instance = RuntimeManagementStore()
+        return self._instance
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_instance(), name)
+
+
+store = LazyRuntimeManagementStore()

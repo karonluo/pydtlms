@@ -18,6 +18,9 @@ const form = reactive({
 const presets = ['招生协同', '培养流程', '学位治理']
 
 async function submit() {
+  if (loading.value) {
+    return
+  }
   loading.value = true
   try {
     await authStore.login(form.username, form.password)
@@ -26,9 +29,12 @@ async function submit() {
     const redirect = queryRedirect || authStore.consumeRedirectTarget() || '/dashboard'
     const target = redirect === '/login' ? '/dashboard' : redirect
     await router.replace(target)
+    await router.isReady()
     await nextTick()
-    if (router.currentRoute.value.path === '/login' || window.location.pathname === '/login') {
-      window.location.replace(target)
+
+    if (router.currentRoute.value.fullPath !== target && router.currentRoute.value.path !== target) {
+      const resolved = router.resolve(target)
+      window.location.assign(resolved.href)
     }
   } catch {
     ElMessage.error(authStore.sessionError || '登录失败')
@@ -72,14 +78,14 @@ async function submit() {
           <p class="login-panel__tip">请输入账号密码进入业务后台。</p>
         </div>
 
-        <el-form label-position="top" class="login-form">
+        <el-form label-position="top" class="login-form" @submit.prevent="submit">
           <el-form-item label="用户名">
             <el-input v-model="form.username" placeholder="请输入用户名" />
           </el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" @keyup.enter="submit" />
+            <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
           </el-form-item>
-          <el-button type="primary" size="large" class="login-button" :loading="loading" @click="submit">登录系统</el-button>
+          <el-button type="primary" native-type="submit" size="large" class="login-button" :loading="loading">登录系统</el-button>
         </el-form>
 
         <div class="account-panel">
