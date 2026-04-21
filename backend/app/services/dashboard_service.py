@@ -3,10 +3,13 @@ from typing import Any
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.dashboard import DashboardOverview
 from app.schemas.portal import (
+    PortalApplicationDraftUpsert,
     PortalApplicationSubmissionResponse,
     PortalApplicationUpsert,
     PortalLoginRequest,
+    PortalPasswordChangeRequest,
     PortalPlanListResponse,
+    PortalProfileOptionsResponse,
     PortalPasswordResetRequest,
     PortalRegistrationResponse,
     PortalSessionResponse,
@@ -17,13 +20,16 @@ from app.schemas.portal import (
 from app.schemas.recruitment import RecruitApplicationListResponse, RecruitPlanListResponse, RecruitmentOptionsResponse, RecruitStats, RecruitWorkbench
 from app.schemas.recruitment import RecruitApplicationImportResult
 from app.schemas.student import (
+    CenterListResponse,
+    CenterUpsert,
+    RegisteredPortalStudentActionResponse,
+    RegisteredPortalStudentEmailRequest,
+    RegisteredPortalStudentListResponse,
     StudentLifecycleBoard,
     StudentManagementResponse,
     StudentOptionsResponse,
     StudentStats,
     StudentUpsert,
-    TeamListResponse,
-    TeamUpsert,
 )
 from app.schemas.system import (
     AuditPolicyListResponse,
@@ -97,30 +103,58 @@ def get_student_management_list(
     keyword: str | None = None,
     status: str | None = None,
     advisor_name: str | None = None,
-    team_name: str | None = None,
+    center_name: str | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> StudentManagementResponse:
-    return store.get_students(keyword=keyword, status=status, advisor_name=advisor_name, team_name=team_name, page=page, page_size=page_size)
+    return store.get_students(keyword=keyword, status=status, advisor_name=advisor_name, center_name=center_name, page=page, page_size=page_size)
+
+
+def get_registered_portal_student_list(
+    keyword: str | None = None,
+    application_form_status: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> RegisteredPortalStudentListResponse:
+    return store.get_registered_portal_students(
+        keyword=keyword,
+        application_form_status=application_form_status,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def deactivate_registered_portal_student(student_id: int) -> RegisteredPortalStudentActionResponse:
+    return store.deactivate_registered_portal_student(student_id)
+
+
+def activate_registered_portal_student(student_id: int) -> RegisteredPortalStudentActionResponse:
+    return store.activate_registered_portal_student(student_id)
+
+
+def reset_registered_portal_student_password(student_id: int) -> RegisteredPortalStudentActionResponse:
+    return store.reset_registered_portal_student_password(student_id)
+
+
+def send_registered_portal_student_email(student_id: int, payload: RegisteredPortalStudentEmailRequest) -> RegisteredPortalStudentActionResponse:
+    return store.send_registered_portal_student_email(student_id, payload)
 
 
 def get_student_options() -> StudentOptionsResponse:
     return store.get_student_options()
 
 
-def get_team_list(
+def get_center_list(
     keyword: str | None = None,
-    status: str | None = None,
-    department_name: str | None = None,
-    lead_advisor_name: str | None = None,
+    is_enabled: bool | None = None,
+    director_name: str | None = None,
     page: int = 1,
     page_size: int = 10,
-) -> TeamListResponse:
-    return store.get_teams(
+) -> CenterListResponse:
+    return store.get_centers(
         keyword=keyword,
-        status=status,
-        department_name=department_name,
-        lead_advisor_name=lead_advisor_name,
+        is_enabled=is_enabled,
+        director_name=director_name,
         page=page,
         page_size=page_size,
     )
@@ -142,30 +176,29 @@ def delete_student(student_id: int) -> None:
     store.delete_student(student_id)
 
 
-def create_team(payload: TeamUpsert):
-    return store.create_team(payload)
+def create_center(payload: CenterUpsert):
+    return store.create_center(payload)
 
 
-def update_team(team_id: int, payload: TeamUpsert):
-    return store.update_team(team_id, payload)
+def update_center(center_id: int, payload: CenterUpsert):
+    return store.update_center(center_id, payload)
 
 
-def delete_team(team_id: int) -> None:
-    store.delete_team(team_id)
+def delete_center(center_id: int) -> None:
+    store.delete_center(center_id)
 
 
-def delete_teams(team_ids: list[int]):
-    return store.delete_teams(team_ids)
+def delete_centers(center_ids: list[int]):
+    return store.delete_centers(center_ids)
 
 
 def get_recruitment_plan_list(
     keyword: str | None = None,
     semester: str | None = None,
-    current_stage: str | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> RecruitPlanListResponse:
-    return store.get_recruitment_plans(keyword=keyword, semester=semester, current_stage=current_stage, page=page, page_size=page_size)
+    return store.get_recruitment_plans(keyword=keyword, semester=semester, page=page, page_size=page_size)
 
 
 def create_recruitment_plan(payload):
@@ -222,8 +255,16 @@ def reset_portal_student_password(payload: PortalPasswordResetRequest) -> None:
     store.reset_portal_student_password(payload)
 
 
+def change_portal_student_password(student_id: int, payload: PortalPasswordChangeRequest) -> None:
+    store.change_portal_student_password(student_id, payload)
+
+
 def get_portal_student(student_id: int) -> PortalStudentRecord:
     return store.get_portal_student(student_id)
+
+
+def get_portal_profile_options() -> PortalProfileOptionsResponse:
+    return store.get_portal_profile_options()
 
 
 def get_public_recruitment_plans() -> PortalPlanListResponse:
@@ -236,6 +277,10 @@ def get_public_teams() -> PortalTeamListResponse:
 
 def submit_portal_application(student_id: int, payload: PortalApplicationUpsert) -> PortalApplicationSubmissionResponse:
     return store.submit_portal_application(student_id, payload)
+
+
+def save_portal_application_draft(student_id: int, payload: PortalApplicationDraftUpsert) -> PortalStudentRecord:
+    return store.save_portal_application_draft(student_id, payload)
 
 
 def get_recruitment_stats() -> RecruitStats:

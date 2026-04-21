@@ -1,6 +1,112 @@
 import axios from 'axios'
 
+import type { SelectOption } from './common'
+
 const PORTAL_TOKEN_KEY = 'dtlms-portal-access-token'
+
+export type PortalApplicantProfileData = {
+  full_name_pinyin?: string | null
+  profile_photo_url?: string | null
+  gender?: string | null
+  birth_date?: string | null
+  ethnic_group?: string | null
+  native_place?: string | null
+  political_status?: string | null
+  marital_status?: string | null
+  religious_belief?: string | null
+  id_type?: string | null
+  mailing_address?: string | null
+  emergency_contact_name?: string | null
+  emergency_contact_phone?: string | null
+}
+
+export type PortalApplicationPreferenceItem = {
+  preference_order: number
+  research_center_name: string
+  advisor_name?: string | null
+  is_optional: boolean
+}
+
+export type PortalEducationExperienceItem = {
+  sort_order: number
+  education_stage: string
+  start_month?: string | null
+  end_month?: string | null
+  school_name: string
+  major_name?: string | null
+  average_score?: string | null
+  gpa?: string | null
+  ranking?: string | null
+  verifier_name?: string | null
+  verifier_phone?: string | null
+  transcript_attachment_url?: string | null
+  degree_certificate_attachment_url?: string | null
+}
+
+export type PortalPracticeExperienceItem = {
+  start_month?: string | null
+  end_month?: string | null
+  organization_name: string
+  position_name?: string | null
+  responsibility_text?: string | null
+  verifier_name?: string | null
+  verifier_phone?: string | null
+}
+
+export type PortalEnglishProficiencyItem = {
+  exam_name: string
+  score_text?: string | null
+  certificate_attachment_url?: string | null
+}
+
+export type PortalFamilyMemberItem = {
+  member_name: string
+  relation_type: string
+  employer_name?: string | null
+  job_title?: string | null
+  contact_phone?: string | null
+}
+
+export type PortalAchievementRecordItem = {
+  achievement_type: string
+  paper_title?: string | null
+  author_order?: string | null
+  journal_or_conference?: string | null
+  publish_or_index_month?: string | null
+  award_name?: string | null
+  awarding_organization?: string | null
+  award_level?: string | null
+  award_year?: string | null
+  responsibility_text?: string | null
+}
+
+export type PortalPersonalStatementData = {
+  personal_statement_text?: string | null
+  ai_problem_statement?: string | null
+  ai_industry_opinion?: string | null
+  resume_attachment_url?: string | null
+}
+
+export type PortalApplicationDeclarationData = {
+  has_read_declaration: boolean
+  declaration_text?: string | null
+  progress_snapshot?: Record<string, unknown> | null
+}
+
+export type PortalApplicationDraftRecord = {
+  selected_plan_id?: number | null
+  source_channel?: string | null
+  source_channel_other?: string | null
+  preferences: PortalApplicationPreferenceItem[]
+  education_experiences: PortalEducationExperienceItem[]
+  practice_experiences: PortalPracticeExperienceItem[]
+  english_proficiencies: PortalEnglishProficiencyItem[]
+  family_members: PortalFamilyMemberItem[]
+  achievement_records: PortalAchievementRecordItem[]
+  personal_statement: PortalPersonalStatementData
+  declaration: PortalApplicationDeclarationData
+  submitted_at?: string | null
+}
 
 export type PortalStudentRecord = {
   id: number
@@ -8,6 +114,7 @@ export type PortalStudentRecord = {
   phone_number: string
   email: string
   id_number: string
+  account_status?: string | null
   gender?: string | null
   birth_date?: string | null
   ethnic_group?: string | null
@@ -33,6 +140,8 @@ export type PortalStudentRecord = {
   selected_advisor_name?: string | null
   self_evaluation?: string | null
   submitted_at?: string | null
+  profile?: PortalApplicantProfileData | null
+  application_draft?: PortalApplicationDraftRecord | null
 }
 
 export type PortalRegistrationResponse = {
@@ -50,11 +159,13 @@ export type PortalPlanRecord = {
   id: number
   plan_name: string
   academic_term: string
-  current_stage: string
-  target_quota: number
-  interview_group_count: number
   brochure_image_url?: string | null
   summary?: string | null
+}
+
+export type PortalProfileOptionsResponse = {
+  political_status_options: SelectOption[]
+  ethnic_group_options: SelectOption[]
 }
 
 export type PortalTeamRecord = {
@@ -87,8 +198,24 @@ export type PortalPasswordResetRequest = {
   new_password: string
 }
 
+export type PortalPasswordChangeRequest = {
+  current_password: string
+  new_password: string
+}
+
 export type PortalApplicationUpsert = {
   plan_id: number
+  profile?: PortalApplicantProfileData | null
+  source_channel?: string | null
+  source_channel_other?: string | null
+  preferences?: PortalApplicationPreferenceItem[]
+  education_experiences?: PortalEducationExperienceItem[]
+  practice_experiences?: PortalPracticeExperienceItem[]
+  english_proficiencies?: PortalEnglishProficiencyItem[]
+  family_members?: PortalFamilyMemberItem[]
+  achievement_records?: PortalAchievementRecordItem[]
+  personal_statement?: PortalPersonalStatementData | null
+  declaration?: PortalApplicationDeclarationData | null
   gender?: string | null
   birth_date?: string | null
   ethnic_group?: string | null
@@ -97,9 +224,9 @@ export type PortalApplicationUpsert = {
   religious_belief?: string | null
   id_type?: string | null
   mailing_address?: string | null
-  graduation_school: string
-  highest_degree: string
-  intended_field: string
+  graduation_school?: string | null
+  highest_degree?: string | null
+  intended_field?: string | null
   political_status?: string | null
   english_level?: string | null
   family_info?: string | null
@@ -108,8 +235,8 @@ export type PortalApplicationUpsert = {
   personal_profile?: string | null
   recommendation_notes?: string | null
   personal_statement_text?: string | null
-  signed_agreement: boolean
-  selected_team_name: string
+  signed_agreement?: boolean
+  selected_team_name?: string | null
   selected_advisor_name?: string | null
   self_evaluation?: string | null
 }
@@ -120,8 +247,28 @@ export type PortalApplicationSubmissionResponse = {
   application_status: string
 }
 
+export type PortalApplicationDraftSaveResponse = {
+  message: string
+  student: PortalStudentRecord
+}
+
+export type PortalAttachmentCategory =
+  | 'education_transcript'
+  | 'education_degree_certificate'
+  | 'english_certificate'
+  | 'profile_photo'
+  | 'resume'
+
+export type PortalAttachmentUploadResponse = {
+  category: PortalAttachmentCategory
+  file_name: string
+  file_type?: string | null
+  file_size: number
+  url: string
+}
+
 const portalHttp = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 10000,
 })
 
@@ -167,8 +314,17 @@ export function resetPortalStudentPassword(payload: PortalPasswordResetRequest) 
   return portalHttp.post<{ message: string }>('/portal/forgot-password', payload)
 }
 
+
+export function changePortalStudentPassword(payload: PortalPasswordChangeRequest) {
+  return portalHttp.post<{ message: string }>('/portal/change-password', payload)
+}
+
 export function getPortalProfile() {
   return portalHttp.get<PortalStudentRecord>('/portal/me')
+}
+
+export function getPortalProfileOptions() {
+  return portalHttp.get<PortalProfileOptionsResponse>('/portal/profile-options')
 }
 
 export function listPortalPlans() {
@@ -181,4 +337,19 @@ export function listPortalTeams() {
 
 export function submitPortalApplication(payload: PortalApplicationUpsert) {
   return portalHttp.post<PortalApplicationSubmissionResponse>('/portal/applications', payload)
+}
+
+export function savePortalApplicationDraft(payload: PortalApplicationUpsert) {
+  return portalHttp.post<PortalApplicationDraftSaveResponse>('/portal/applications/draft', payload)
+}
+
+export function uploadPortalAttachment(file: File, category: PortalAttachmentCategory) {
+  const formData = new FormData()
+  formData.append('category', category)
+  formData.append('file', file)
+  return portalHttp.post<PortalAttachmentUploadResponse>('/portal/attachments/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
 }

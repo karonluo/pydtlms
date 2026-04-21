@@ -61,7 +61,8 @@ const menuGroups: MenuGroup[] = [
     icon: UserFilled,
     items: [
       { path: '/students/records', label: '学生主档', icon: UserFilled, requiredPermission: 'students:read' },
-      { path: '/students/teams', label: '团队管理', icon: UserFilled, requiredPermission: 'students:read' },
+      { path: '/students/portal-registrations', label: '注册学生', icon: UserFilled, requiredPermission: 'students:read' },
+      { path: '/students/centers', label: '研究中心', icon: UserFilled, requiredPermission: 'students:read' },
     ],
   },
   {

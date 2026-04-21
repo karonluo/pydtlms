@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import axios from 'axios'
 import { useRouter } from 'vue-router'
 
-import { getPortalToken, loginPortalStudent, registerPortalStudent, resetPortalStudentPassword, setPortalToken } from '../../api/portal'
+import {
+  clearPortalToken,
+  getPortalProfile,
+  getPortalToken,
+  loginPortalStudent,
+  registerPortalStudent,
+  resetPortalStudentPassword,
+  setPortalToken,
+} from '../../api/portal'
+import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 const router = useRouter()
 const mode = ref<'login' | 'register' | 'reset'>('login')
@@ -14,6 +21,7 @@ const agreed = ref(true)
 const loginForm = reactive({
   account: '',
   password: '',
+  captcha: '',
 })
 
 const registerForm = reactive({
@@ -23,6 +31,7 @@ const registerForm = reactive({
   id_number: '',
   password: '',
   confirm_password: '',
+  captcha: '',
 })
 
 const resetForm = reactive({
@@ -30,7 +39,12 @@ const resetForm = reactive({
   id_number: '',
   new_password: '',
   confirm_password: '',
+  captcha: '',
 })
+
+const captchaSeed = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+const captchaCode = ref('')
+const captchaImage = ref('')
 
 const panelTitle = computed(() => {
   if (mode.value === 'register') {
@@ -42,38 +56,130 @@ const panelTitle = computed(() => {
   return '账号登录'
 })
 
+const registerButtonText = computed(() => (submitting.value ? '注册中...' : '立即注册'))
+const loginButtonText = computed(() => (submitting.value ? '登录中...' : '立即登录'))
+const resetButtonText = computed(() => (submitting.value ? '提交中...' : '重置密码'))
+
+function switchMode(nextMode: 'login' | 'register' | 'reset') {
+  if (submitting.value) {
+    return
+  }
+  mode.value = nextMode
+  refreshCaptcha()
+}
+
+function createCaptcha() {
+  return Array.from({ length: 5 }, () => captchaSeed[Math.floor(Math.random() * captchaSeed.length)]).join('')
+}
+
+function createCaptchaImage(code: string) {
+  const palette = ['#1c4e92', '#2b63b8', '#4c6fb2', '#32527d', '#596d8f']
+  const linePalette = ['rgba(36, 98, 172, 0.35)', 'rgba(64, 143, 214, 0.3)', 'rgba(88, 108, 156, 0.28)']
+  const noise = Array.from({ length: 28 }, () => {
+    const cx = Math.floor(Math.random() * 150) + 5
+    const cy = Math.floor(Math.random() * 42) + 6
+    const r = (Math.random() * 1.6 + 0.6).toFixed(2)
+    const fill = Math.random() > 0.5 ? '#8cb4ea' : '#d6e4fb'
+    const opacity = (Math.random() * 0.5 + 0.2).toFixed(2)
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" opacity="${opacity}" />`
+  }).join('')
+
+  const lines = Array.from({ length: 4 }, (_, index) => {
+    const y1 = Math.floor(Math.random() * 48) + 4
+    const y2 = Math.floor(Math.random() * 48) + 4
+    const midX = 30 + index * 28 + Math.floor(Math.random() * 16)
+    const midY = Math.floor(Math.random() * 48) + 4
+    const stroke = linePalette[index % linePalette.length]
+    return `<path d="M 0 ${y1} Q ${midX} ${midY}, 160 ${y2}" stroke="${stroke}" stroke-width="1.4" fill="none" />`
+  }).join('')
+
+  const chars = code.split('').map((char, index) => {
+    const x = 18 + index * 27
+    const y = 34 + Math.floor(Math.random() * 8)
+    const rotate = Math.floor(Math.random() * 26) - 13
+    const fill = palette[index % palette.length]
+    return `<text x="${x}" y="${y}" fill="${fill}" font-size="24" font-weight="700" font-family="Bahnschrift, Aptos Display, Microsoft YaHei UI, sans-serif" transform="rotate(${rotate} ${x} ${y})">${char}</text>`
+  }).join('')
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="160" height="54" viewBox="0 0 160 54">
+      <defs>
+        <linearGradient id="captchaBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f6faff" />
+          <stop offset="100%" stop-color="#e1efff" />
+        </linearGradient>
+      </defs>
+      <rect x="0.5" y="0.5" width="159" height="53" rx="15" fill="url(#captchaBg)" stroke="#bfd2ee" />
+      ${noise}
+      ${lines}
+      ${chars}
+    </svg>
+  `.trim()
+
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`
+}
+
+function refreshCaptcha() {
+  captchaCode.value = createCaptcha()
+  captchaImage.value = createCaptchaImage(captchaCode.value)
+  loginForm.captcha = ''
+  registerForm.captcha = ''
+  resetForm.captcha = ''
+}
+
+function ensureCaptcha(input: string) {
+  if (!input.trim()) {
+    void showPortalAlert('请先填写随机验证码', '提示', 'warning')
+    return false
+  }
+  if (input.trim().toUpperCase() !== captchaCode.value) {
+    void showPortalAlert('随机验证码不正确，请重新输入', '提示', 'warning')
+    refreshCaptcha()
+    return false
+  }
+  return true
+}
+
 function ensureAgreement() {
   if (!agreed.value) {
-    ElMessage.warning('请先同意使用条款和隐私政策')
+    void showPortalAlert('请先同意使用条款和隐私政策', '提示', 'warning')
     return false
   }
   return true
 }
 
 async function submitLogin() {
-  if (!ensureAgreement()) {
+  if (submitting.value) {
+    return
+  }
+  if (!ensureAgreement() || !ensureCaptcha(loginForm.captcha)) {
     return
   }
   submitting.value = true
   try {
     const response = await loginPortalStudent(loginForm)
     setPortalToken(response.data.access_token)
-    ElMessage.success('登录成功')
-    await router.replace('/portal/application')
+    await router.replace('/portal/applicationv2')
   } catch (error) {
-    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || '登录失败') : '登录失败'
-    ElMessage.error(detail)
+    refreshCaptcha()
+    await showPortalAlert(resolveRequestError(error, '登录失败'), '登录失败', 'error')
   } finally {
     submitting.value = false
   }
 }
 
 async function submitRegister() {
+  if (submitting.value) {
+    return
+  }
   if (!ensureAgreement()) {
     return
   }
   if (registerForm.password !== registerForm.confirm_password) {
-    ElMessage.warning('两次输入的密码不一致')
+    await showPortalAlert('两次输入的密码不一致', '提示', 'warning')
+    return
+  }
+  if (!ensureCaptcha(registerForm.captcha)) {
     return
   }
   submitting.value = true
@@ -85,24 +191,31 @@ async function submitRegister() {
       id_number: registerForm.id_number,
       password: registerForm.password,
     })
-    ElMessage.success(response.data.message)
     loginForm.account = registerForm.phone_number
     loginForm.password = registerForm.password
+    await showPortalAlert(response.data.message, '完成注册', 'success')
     mode.value = 'login'
+    refreshCaptcha()
   } catch (error) {
-    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || '注册失败') : '注册失败'
-    ElMessage.error(detail)
+    refreshCaptcha()
+    await showPortalAlert(resolveRequestError(error, '注册失败'), '注册失败', 'error')
   } finally {
     submitting.value = false
   }
 }
 
 async function submitReset() {
+  if (submitting.value) {
+    return
+  }
   if (!ensureAgreement()) {
     return
   }
   if (resetForm.new_password !== resetForm.confirm_password) {
-    ElMessage.warning('两次输入的新密码不一致')
+    await showPortalAlert('两次输入的新密码不一致', '提示', 'warning')
+    return
+  }
+  if (!ensureCaptcha(resetForm.captcha)) {
     return
   }
   submitting.value = true
@@ -112,47 +225,40 @@ async function submitReset() {
       id_number: resetForm.id_number,
       new_password: resetForm.new_password,
     })
-    ElMessage.success(response.data.message)
+    await showPortalAlert(response.data.message, '操作成功', 'success')
     loginForm.account = resetForm.account
     loginForm.password = resetForm.new_password
     mode.value = 'login'
+    refreshCaptcha()
   } catch (error) {
-    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || '找回密码失败') : '找回密码失败'
-    ElMessage.error(detail)
+    refreshCaptcha()
+    await showPortalAlert(resolveRequestError(error, '找回密码失败'), '找回密码失败', 'error')
   } finally {
     submitting.value = false
   }
 }
 
 onMounted(async () => {
+  refreshCaptcha()
   if (getPortalToken()) {
-    await router.replace('/portal/application')
+    try {
+      await getPortalProfile()
+      await router.replace('/portal/applicationv2')
+    } catch {
+      clearPortalToken()
+    }
   }
 })
 </script>
 
 <template>
   <div class="portal-auth-shell">
-    <section class="auth-brand-panel">
-      <div class="brand-mark">SAIL</div>
-      <p class="brand-kicker">Shanghai Artificial Intelligence Laboratory</p>
-      <h1>欢迎加入上海人工智能实验室</h1>
-      <p class="brand-summary">
-        面向博士研究生考生提供独立注册、账户登录、密码找回、招生计划选择与在线申请表填写能力。
-      </p>
-      <ul class="brand-points">
-        <li>独立学生端入口，与管理后台完全分离</li>
-        <li>登录后查看开放中的招生计划与对应招生简章</li>
-        <li>在线填写个人档案、教育经历和导师团队志愿</li>
-      </ul>
-    </section>
-
     <section class="auth-card">
       <div class="auth-card__header">
         <div class="auth-tabs">
-          <button type="button" :class="{ active: mode === 'login' }" @click="mode = 'login'">账号登录</button>
-          <button type="button" :class="{ active: mode === 'register' }" @click="mode = 'register'">立即注册</button>
-          <button type="button" :class="{ active: mode === 'reset' }" @click="mode = 'reset'">忘记密码</button>
+          <button type="button" :class="{ active: mode === 'login' }" :disabled="submitting" @click="switchMode('login')">账号登录</button>
+          <button type="button" :class="{ active: mode === 'register' }" :disabled="submitting" @click="switchMode('register')">立即注册</button>
+          <button type="button" :class="{ active: mode === 'reset' }" :disabled="submitting" @click="switchMode('reset')">忘记密码</button>
         </div>
         <strong>{{ panelTitle }}</strong>
       </div>
@@ -160,65 +266,92 @@ onMounted(async () => {
       <div v-if="mode === 'login'" class="auth-form">
         <label>
           <span>账号</span>
-          <input v-model="loginForm.account" placeholder="请输入手机号或邮箱" />
+          <input v-model="loginForm.account" :disabled="submitting" placeholder="请输入手机号或邮箱" />
         </label>
         <label>
           <span>密码</span>
-          <input v-model="loginForm.password" type="password" placeholder="请输入登录密码" />
+          <input v-model="loginForm.password" :disabled="submitting" type="password" placeholder="请输入登录密码" />
         </label>
-        <button class="auth-submit" type="button" :disabled="submitting" @click="submitLogin">立即登录</button>
+        <label>
+          <span>随机验证码</span>
+          <div class="captcha-row">
+            <input v-model="loginForm.captcha" :disabled="submitting" placeholder="请输入右侧验证码" />
+            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting" @click="refreshCaptcha">
+              <span class="captcha-chip__sr">点击刷新验证码，当前验证码 {{ captchaCode }}</span>
+            </button>
+          </div>
+        </label>
+        <button class="auth-submit" type="button" :disabled="submitting" @click="submitLogin">{{ loginButtonText }}</button>
       </div>
 
       <div v-else-if="mode === 'register'" class="auth-form auth-form--grid">
         <label>
           <span>姓名</span>
-          <input v-model="registerForm.full_name" placeholder="请输入真实姓名" />
+          <input v-model="registerForm.full_name" :disabled="submitting" placeholder="请输入真实姓名" />
         </label>
         <label>
           <span>手机号</span>
-          <input v-model="registerForm.phone_number" placeholder="请输入手机号" />
+          <input v-model="registerForm.phone_number" :disabled="submitting" placeholder="请输入手机号" />
         </label>
         <label>
           <span>邮箱</span>
-          <input v-model="registerForm.email" placeholder="请输入邮箱" />
+          <input v-model="registerForm.email" :disabled="submitting" placeholder="请输入邮箱" />
         </label>
         <label>
           <span>身份证号</span>
-          <input v-model="registerForm.id_number" placeholder="请输入身份证号" />
+          <input v-model="registerForm.id_number" :disabled="submitting" placeholder="请输入身份证号" />
         </label>
         <label>
           <span>设置密码</span>
-          <input v-model="registerForm.password" type="password" placeholder="请输入登录密码" />
+          <input v-model="registerForm.password" :disabled="submitting" type="password" placeholder="请输入登录密码" />
         </label>
         <label>
           <span>确认密码</span>
-          <input v-model="registerForm.confirm_password" type="password" placeholder="请再次输入密码" />
+          <input v-model="registerForm.confirm_password" :disabled="submitting" type="password" placeholder="请再次输入密码" />
         </label>
-        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitRegister">立即注册</button>
+        <label class="auth-form__full">
+          <span>随机验证码</span>
+          <div class="captcha-row">
+            <input v-model="registerForm.captcha" :disabled="submitting" placeholder="请输入右侧验证码" />
+            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting" @click="refreshCaptcha">
+              <span class="captcha-chip__sr">点击刷新验证码，当前验证码 {{ captchaCode }}</span>
+            </button>
+          </div>
+        </label>
+        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitRegister">{{ registerButtonText }}</button>
       </div>
 
       <div v-else class="auth-form auth-form--grid">
         <label>
           <span>账号</span>
-          <input v-model="resetForm.account" placeholder="请输入手机号或邮箱" />
+          <input v-model="resetForm.account" :disabled="submitting" placeholder="请输入手机号或邮箱" />
         </label>
         <label>
           <span>身份证号</span>
-          <input v-model="resetForm.id_number" placeholder="请输入注册身份证号" />
+          <input v-model="resetForm.id_number" :disabled="submitting" placeholder="请输入注册身份证号" />
         </label>
         <label>
           <span>新密码</span>
-          <input v-model="resetForm.new_password" type="password" placeholder="请输入新密码" />
+          <input v-model="resetForm.new_password" :disabled="submitting" type="password" placeholder="请输入新密码" />
         </label>
         <label>
           <span>确认新密码</span>
-          <input v-model="resetForm.confirm_password" type="password" placeholder="请再次输入新密码" />
+          <input v-model="resetForm.confirm_password" :disabled="submitting" type="password" placeholder="请再次输入新密码" />
         </label>
-        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitReset">重置密码</button>
+        <label class="auth-form__full">
+          <span>随机验证码</span>
+          <div class="captcha-row">
+            <input v-model="resetForm.captcha" :disabled="submitting" placeholder="请输入右侧验证码" />
+            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting" @click="refreshCaptcha">
+              <span class="captcha-chip__sr">点击刷新验证码，当前验证码 {{ captchaCode }}</span>
+            </button>
+          </div>
+        </label>
+        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitReset">{{ resetButtonText }}</button>
       </div>
 
       <label class="auth-agreement">
-        <input v-model="agreed" type="checkbox" />
+        <input v-model="agreed" :disabled="submitting" type="checkbox" />
         <span>我同意并已仔细阅读使用条款和隐私政策。</span>
       </label>
     </section>
@@ -228,68 +361,15 @@ onMounted(async () => {
 <style scoped>
 .portal-auth-shell {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: minmax(360px, 1.05fr) minmax(360px, 520px);
-  background: linear-gradient(135deg, #f3f5fb 0%, #eef1f7 45%, #f8fafc 100%);
-}
-
-.auth-brand-panel {
-  padding: 56px 64px;
-  color: #fff;
-  background: linear-gradient(145deg, #0d1f73 0%, #2f12b8 38%, #3e2ad8 100%);
-}
-
-.brand-mark {
-  width: 88px;
-  height: 88px;
-  display: grid;
-  place-items: center;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-}
-
-.brand-kicker {
-  margin: 24px 0 12px;
-  font-size: 12px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  opacity: 0.72;
-}
-
-.auth-brand-panel h1 {
-  margin: 0;
-  font-size: clamp(32px, 4vw, 48px);
-  line-height: 1.1;
-}
-
-.brand-summary {
-  max-width: 640px;
-  margin: 20px 0 30px;
-  line-height: 1.9;
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.brand-points {
-  display: grid;
-  gap: 12px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.brand-points li {
-  padding: 16px 18px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 32px 200px 32px 32px;
+  background: url('/images/login_background.png') center center / cover no-repeat;
 }
 
 .auth-card {
-  align-self: center;
-  margin: 32px;
+  width: min(100%, 520px);
   padding: 34px 32px;
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.96);
@@ -316,6 +396,11 @@ onMounted(async () => {
   cursor: pointer;
 }
 
+.auth-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .auth-tabs button.active {
   color: #1f2f96;
   font-weight: 700;
@@ -328,6 +413,11 @@ onMounted(async () => {
 
 .auth-form--grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.auth-form__full,
+.auth-submit--full {
+  grid-column: 1 / -1;
 }
 
 .auth-form label,
@@ -351,6 +441,47 @@ onMounted(async () => {
   background: #f8faff;
 }
 
+.auth-form input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.captcha-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 10px;
+  align-items: center;
+}
+
+.captcha-chip {
+  position: relative;
+  min-height: 54px;
+  border: 1px dashed rgba(52, 91, 149, 0.24);
+  border-radius: 16px;
+  background-color: #edf5ff;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.captcha-chip:hover {
+  border-color: rgba(52, 91, 149, 0.46);
+}
+
+.captcha-chip__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .auth-submit {
   min-height: 48px;
   border: none;
@@ -362,8 +493,9 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-.auth-submit--full {
-  grid-column: 1 / -1;
+.auth-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .auth-agreement {
@@ -373,24 +505,22 @@ onMounted(async () => {
 }
 
 @media (max-width: 1080px) {
-  .portal-auth-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-brand-panel,
   .auth-card {
-    margin: 0;
     border-radius: 0;
   }
 }
 
 @media (max-width: 720px) {
-  .auth-brand-panel,
+  .portal-auth-shell {
+    padding: 0;
+  }
+
   .auth-card {
     padding: 24px 18px;
   }
 
-  .auth-form--grid {
+  .auth-form--grid,
+  .captcha-row {
     grid-template-columns: 1fr;
   }
 }

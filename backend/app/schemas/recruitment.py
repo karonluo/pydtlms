@@ -1,14 +1,104 @@
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.common import PaginationResponseBase, SelectOption
+from app.schemas.portal import (
+    PortalApplicantProfileData,
+    PortalApplicationDeclarationData,
+    PortalApplicationPreferenceItem,
+    PortalEducationExperienceItem,
+    PortalFamilyMemberItem,
+    PortalPersonalStatementData,
+    PortalPracticeExperienceItem,
+)
+
+
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return None
+
+
+def _serialize_models(items: list[BaseModel] | list[dict[str, Any]] | None) -> str | None:
+    if not items:
+        return None
+    payload: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, BaseModel):
+            payload.append(item.model_dump(mode="json", exclude_none=True))
+        elif isinstance(item, dict):
+            payload.append({key: value for key, value in item.items() if value is not None})
+    return __import__("json").dumps(payload, ensure_ascii=False) if payload else None
+
+
+def _parse_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        parsed = __import__("json").loads(value)
+    except Exception:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _parse_model_list(value: Any, model_cls: type[BaseModel]) -> list[BaseModel]:
+    items: list[BaseModel] = []
+    for raw in _parse_json_list(value):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            items.append(model_cls.model_validate(raw))
+        except Exception:
+            continue
+    return items
+
+
+def _fallback_education_experiences(data: dict[str, Any]) -> list[PortalEducationExperienceItem]:
+    parsed = _parse_model_list(data.get("education_experience"), PortalEducationExperienceItem)
+    if parsed:
+        return parsed
+
+    items: list[PortalEducationExperienceItem] = []
+    graduation_school = _first_non_empty(data.get("graduation_school"), data.get("undergraduate_school"))
+    if graduation_school:
+        items.append(
+            PortalEducationExperienceItem(
+                sort_order=1,
+                education_stage=str(data.get("highest_degree") or "本科"),
+                school_name=graduation_school,
+                major_name=data.get("undergraduate_major"),
+                average_score=data.get("undergraduate_average_score"),
+                gpa=data.get("undergraduate_gpa"),
+                ranking=data.get("undergraduate_rank"),
+            )
+        )
+    graduate_school = _first_non_empty(data.get("graduate_school"), data.get("overseas_master_university_name"))
+    if graduate_school:
+        items.append(
+            PortalEducationExperienceItem(
+                sort_order=len(items) + 1,
+                education_stage="硕士",
+                school_name=graduate_school,
+                major_name=data.get("graduate_major"),
+                average_score=data.get("graduate_average_score"),
+                gpa=data.get("graduate_gpa"),
+                ranking=data.get("graduate_rank"),
+            )
+        )
+    return items
 
 
 class RecruitPlanSummary(BaseModel):
     plan_name: str
     academic_term: str
-    current_stage: str
+    plan_description: str | None = None
     application_count: int
-    interview_group_count: int
 
 
 class RecruitWorkbench(BaseModel):
@@ -23,23 +113,17 @@ class RecruitPlanRecord(BaseModel):
     academic_term: str
     academic_year: str
     semester: str
-    current_stage: str
-    target_quota: int
     application_count: int
-    interview_group_count: int
-    is_open: bool
     brochure_image_url: str | None = None
+    plan_description: str | None = None
 
 
 class RecruitPlanUpsert(BaseModel):
     plan_name: str
     academic_year: str
     semester: str
-    current_stage: str
-    target_quota: int
-    interview_group_count: int
-    is_open: bool
     brochure_image_url: str | None = None
+    plan_description: str | None = None
 
 
 class RecruitPlanListResponse(PaginationResponseBase):
@@ -50,6 +134,7 @@ class RecruitApplicationRecord(BaseModel):
     id: int
     plan_id: int
     business_key: str
+    portal_student_id: int | None = None
     candidate_no: str | None = None
     review_round: str | None = None
     student_name: str
@@ -80,6 +165,8 @@ class RecruitApplicationRecord(BaseModel):
     intended_field: str
     intended_advisor_name: str | None = None
     discovery_channel: str | None = None
+    source_channel: str | None = None
+    source_channel_other: str | None = None
     graduate_school: str | None = None
     overseas_university_name: str | None = None
     overseas_master_university_name: str | None = None
@@ -102,10 +189,76 @@ class RecruitApplicationRecord(BaseModel):
     application_status: str
     reviewer_name: str | None = None
     final_score: float | None = None
+    profile: PortalApplicantProfileData | None = None
+    preferences: list[PortalApplicationPreferenceItem] = Field(default_factory=list)
+    education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
+    practice_experiences: list[PortalPracticeExperienceItem] = Field(default_factory=list)
+    family_members: list[PortalFamilyMemberItem] = Field(default_factory=list)
+    personal_statement: PortalPersonalStatementData | None = None
+    declaration: PortalApplicationDeclarationData | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_structured_sections(cls, raw_value: Any) -> Any:
+        if not isinstance(raw_value, dict):
+            return raw_value
+        data = dict(raw_value)
+        if data.get("profile") is None:
+            profile_payload = {
+                "gender": data.get("gender"),
+                "native_place": data.get("native_place"),
+                "political_status": data.get("political_status"),
+                "marital_status": data.get("marital_status"),
+                "religious_belief": data.get("religious_belief"),
+                "id_type": data.get("id_type"),
+                "mailing_address": data.get("mailing_address"),
+            }
+            if any(value is not None for value in profile_payload.values()):
+                data["profile"] = profile_payload
+
+        if not data.get("preferences"):
+            preferences: list[dict[str, Any]] = []
+            if _first_non_empty(data.get("first_choice")):
+                preferences.append(
+                    {
+                        "preference_order": 1,
+                        "research_center_name": data.get("first_choice"),
+                        "advisor_name": data.get("intended_advisor_name"),
+                        "is_optional": False,
+                    }
+                )
+            if _first_non_empty(data.get("second_choice")):
+                preferences.append(
+                    {
+                        "preference_order": 2,
+                        "research_center_name": data.get("second_choice"),
+                        "advisor_name": None,
+                        "is_optional": True,
+                    }
+                )
+            data["preferences"] = preferences
+
+        if not data.get("education_experiences"):
+            data["education_experiences"] = _fallback_education_experiences(data)
+        if not data.get("practice_experiences"):
+            data["practice_experiences"] = _parse_model_list(data.get("practice_experience"), PortalPracticeExperienceItem)
+        if not data.get("family_members"):
+            data["family_members"] = _parse_model_list(data.get("family_info"), PortalFamilyMemberItem)
+        if data.get("personal_statement") is None:
+            data["personal_statement"] = PortalPersonalStatementData(
+                personal_statement_text=data.get("personal_statement_text"),
+                ai_problem_statement=data.get("research_problem"),
+                ai_industry_opinion=data.get("dissenting_view"),
+                resume_attachment_url=data.get("personal_statement_attachment"),
+            )
+        if data.get("declaration") is None:
+            data["declaration"] = PortalApplicationDeclarationData(has_read_declaration=False)
+        return data
 
 
 class RecruitApplicationUpsert(BaseModel):
     plan_id: int
+    portal_student_id: int | None = None
     business_key: str | None = None
     candidate_no: str | None = None
     review_round: str | None = None
@@ -137,6 +290,8 @@ class RecruitApplicationUpsert(BaseModel):
     intended_field: str
     intended_advisor_name: str | None = None
     discovery_channel: str | None = None
+    source_channel: str | None = None
+    source_channel_other: str | None = None
     graduate_school: str | None = None
     overseas_university_name: str | None = None
     overseas_master_university_name: str | None = None
@@ -159,6 +314,70 @@ class RecruitApplicationUpsert(BaseModel):
     application_status: str
     reviewer_name: str | None = None
     final_score: float | None = None
+    profile: PortalApplicantProfileData | None = None
+    preferences: list[PortalApplicationPreferenceItem] = Field(default_factory=list)
+    education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
+    practice_experiences: list[PortalPracticeExperienceItem] = Field(default_factory=list)
+    family_members: list[PortalFamilyMemberItem] = Field(default_factory=list)
+    personal_statement: PortalPersonalStatementData | None = None
+    declaration: PortalApplicationDeclarationData | None = None
+
+    @model_validator(mode="after")
+    def populate_legacy_fields(self) -> "RecruitApplicationUpsert":
+        if self.profile is not None:
+            self.gender = self.gender or self.profile.gender
+            self.native_place = self.native_place or self.profile.native_place
+            self.political_status = self.political_status or self.profile.political_status
+            self.marital_status = self.marital_status or self.profile.marital_status
+            self.religious_belief = self.religious_belief or self.profile.religious_belief
+            self.id_type = self.id_type or self.profile.id_type
+            self.mailing_address = self.mailing_address or self.profile.mailing_address
+
+        preferences = sorted(self.preferences, key=lambda item: item.preference_order)
+        if preferences:
+            self.first_choice = self.first_choice or preferences[0].research_center_name
+            self.intended_advisor_name = self.intended_advisor_name or preferences[0].advisor_name
+            self.intended_field = self.intended_field or preferences[0].research_center_name
+            if len(preferences) > 1:
+                self.second_choice = self.second_choice or preferences[1].research_center_name
+
+        if self.source_channel or self.source_channel_other:
+            self.discovery_channel = self.discovery_channel or self.source_channel_other or self.source_channel
+
+        ordered_education = sorted(self.education_experiences, key=lambda item: item.sort_order)
+        if ordered_education:
+            primary_education = ordered_education[0]
+            self.graduation_school = self.graduation_school or primary_education.school_name
+            self.highest_degree = self.highest_degree or primary_education.education_stage
+            self.undergraduate_major = self.undergraduate_major or primary_education.major_name
+            self.undergraduate_average_score = self.undergraduate_average_score or primary_education.average_score
+            self.undergraduate_gpa = self.undergraduate_gpa or primary_education.gpa
+            self.undergraduate_rank = self.undergraduate_rank or primary_education.ranking
+            if len(ordered_education) > 1:
+                secondary_education = ordered_education[1]
+                self.graduate_school = self.graduate_school or secondary_education.school_name
+                self.graduate_major = self.graduate_major or secondary_education.major_name
+                self.graduate_average_score = self.graduate_average_score or secondary_education.average_score
+                self.graduate_gpa = self.graduate_gpa or secondary_education.gpa
+                self.graduate_rank = self.graduate_rank or secondary_education.ranking
+            self.education_experience = self.education_experience or _serialize_models(self.education_experiences)
+
+        if self.practice_experiences and not self.practice_experience:
+            self.practice_experience = _serialize_models(self.practice_experiences)
+        if self.family_members and not self.family_info:
+            self.family_info = _serialize_models(self.family_members)
+
+        if self.personal_statement is not None:
+            self.personal_statement_text = self.personal_statement_text or self.personal_statement.personal_statement_text
+            self.research_problem = self.research_problem or self.personal_statement.ai_problem_statement
+            self.dissenting_view = self.dissenting_view or self.personal_statement.ai_industry_opinion
+            self.personal_statement_attachment = self.personal_statement_attachment or self.personal_statement.resume_attachment_url
+
+        if not _first_non_empty(self.graduation_school):
+            raise ValueError("缺少毕业院校/就读学校信息")
+        if not _first_non_empty(self.highest_degree):
+            raise ValueError("缺少最高学历/教育阶段信息")
+        return self
 
 
 class RecruitApplicationListResponse(PaginationResponseBase):

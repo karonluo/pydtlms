@@ -91,3 +91,58 @@ def test_ensure_schema_executes_sql_files_when_schema_missing(monkeypatch, tmp_p
 
     assert store._schema_ready is True
     assert [sql for sql, _ in cursor.executed] == expected_sql
+
+
+def test_seed_portal_application_structures_uses_application_id_for_personal_statement_attachment() -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor()
+    state = {
+        "portal_students": [
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "profile": {
+                    "gender": "男",
+                },
+                "application_draft": {
+                    "preferences": [],
+                    "education_experiences": [],
+                    "practice_experiences": [],
+                    "english_proficiencies": [],
+                    "family_members": [],
+                    "achievement_records": [],
+                    "personal_statement": {
+                        "personal_statement_text": "真实联调提交",
+                        "resume_attachment_url": "/portal-attachments/uploads/student-7/resume/resume-a.pdf",
+                    },
+                    "declaration": {
+                        "has_read_declaration": True,
+                        "declaration_text": "本人承诺以上填写内容真实、准确。",
+                    },
+                },
+            }
+        ],
+        "recruitment_applications": [
+            {
+                "id": 15,
+                "portal_student_id": 7,
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "personal_statement_attachment": None,
+                "material_list_attachment": None,
+            }
+        ],
+    }
+
+    store._seed_portal_application_structures(cursor, state)
+
+    personal_statement_sql = [sql for sql, _ in cursor.executed if "dtlms_portal_application_personal_statements" in sql]
+    attachment_rows = [params for sql, params in cursor.executed if "dtlms_portal_application_attachments" in sql]
+
+    assert len(personal_statement_sql) == 1
+    assert "RETURNING id" not in personal_statement_sql[0]
+    assert attachment_rows == [
+        (7, 15, "personal_statement", 15, "resume", "resume-a.pdf", "/portal-attachments/uploads/student-7/resume/resume-a.pdf", "pdf")
+    ]

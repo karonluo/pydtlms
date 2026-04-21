@@ -2,6 +2,9 @@ import type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption 
 import http from './http'
 
 
+const CENTER_MUTATION_TIMEOUT = 30000
+
+
 export type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
 
 
@@ -11,7 +14,7 @@ export type StudentRecord = {
   full_name: string
   status: string
   advisor_name: string
-  team_name: string
+  center_name: string
   degree_type: string
   enrollment_year: number
   phone_number?: string | null
@@ -25,31 +28,60 @@ export type StudentUpsert = Omit<StudentRecord, 'id'>
 export type StudentManagementResponse = PagedResponse<StudentRecord>
 
 
-export type TeamRecord = {
+export type RegisteredPortalStudentRecord = {
   id: number
-  team_code: string
-  team_name: string
-  department_name: string
-  discipline_name: string
-  lead_advisor_name: string
+  full_name: string
+  phone_number: string
+  email: string
+  id_number: string
+  account_status: string
+  application_form_status: string
+  selected_plan_name?: string | null
+  selected_center_name?: string | null
+  selected_advisor_name?: string | null
+  recruitment_application_status?: string | null
+  registered_at?: string | null
+  submitted_at?: string | null
+}
+
+
+export type RegisteredPortalStudentListResponse = PagedResponse<RegisteredPortalStudentRecord>
+
+
+export type RegisteredPortalStudentActionResponse = {
+  message: string
+  account_status?: string | null
+  email_sent?: boolean | null
+  temporary_password?: string | null
+}
+
+
+export type RegisteredPortalStudentEmailRequest = {
+  subject: string
+  content: string
+}
+
+
+export type CenterRecord = {
+  id: number
+  center_name: string
+  director_name: string
   advisor_names: string[]
-  research_directions: string[]
-  status: string
-  established_on?: string | null
-  description?: string | null
+  is_enabled: boolean
+  created_date?: string | null
   member_student_count: number
   active_student_count: number
 }
 
 
-export type TeamUpsert = Omit<TeamRecord, 'id' | 'member_student_count' | 'active_student_count'>
+export type CenterUpsert = Omit<CenterRecord, 'id' | 'member_student_count' | 'active_student_count'>
 
 
-export type TeamListResponse = PagedResponse<TeamRecord>
+export type CenterListResponse = PagedResponse<CenterRecord>
 
 
-export type TeamAdvisorMapItem = {
-  team_name: string
+export type CenterAdvisorMapItem = {
+  center_name: string
   advisors: SelectOption[]
 }
 
@@ -58,12 +90,9 @@ export type StudentOptions = {
   status_options: SelectOption[]
   degree_options: SelectOption[]
   advisor_options: SelectOption[]
-  team_options: SelectOption[]
-  team_status_options: SelectOption[]
+  center_options: SelectOption[]
   political_status_options: SelectOption[]
-  department_options: SelectOption[]
-  discipline_options: SelectOption[]
-  team_advisor_map: TeamAdvisorMapItem[]
+  center_advisor_map: CenterAdvisorMapItem[]
 }
 
 
@@ -73,18 +102,46 @@ export type StudentStats = {
   outbound_students: number
   thesis_students: number
   advisor_count: number
-  team_total: number
-  active_team_total: number
+  center_total: number
+  enabled_center_total: number
+  registered_portal_total: number
+  portal_submitted_total: number
+  portal_unsubmitted_total: number
 }
 
 
-export function listStudents(params?: PaginationParams & { keyword?: string; status?: string; advisor_name?: string; team_name?: string }) {
+export function listStudents(params?: PaginationParams & { keyword?: string; status?: string; advisor_name?: string; center_name?: string }) {
   return http.get<StudentManagementResponse>('/students/management', { params })
 }
 
 
 export function getStudentOptions() {
   return http.get<StudentOptions>('/students/options')
+}
+
+
+export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string }) {
+  return http.get<RegisteredPortalStudentListResponse>('/students/portal-registrations', { params })
+}
+
+
+export function deactivateRegisteredPortalStudent(id: number) {
+  return http.post<RegisteredPortalStudentActionResponse>(`/students/portal-registrations/${id}/deactivate`)
+}
+
+
+export function activateRegisteredPortalStudent(id: number) {
+  return http.post<RegisteredPortalStudentActionResponse>(`/students/portal-registrations/${id}/activate`)
+}
+
+
+export function resetRegisteredPortalStudentPassword(id: number) {
+  return http.post<RegisteredPortalStudentActionResponse>(`/students/portal-registrations/${id}/reset-password`)
+}
+
+
+export function sendRegisteredPortalStudentEmail(id: number, payload: RegisteredPortalStudentEmailRequest) {
+  return http.post<RegisteredPortalStudentActionResponse>(`/students/portal-registrations/${id}/send-email`, payload)
 }
 
 
@@ -108,31 +165,30 @@ export function deleteStudent(id: number) {
 }
 
 
-export function listTeams(params?: PaginationParams & {
+export function listCenters(params?: PaginationParams & {
   keyword?: string
-  status?: string
-  department_name?: string
-  lead_advisor_name?: string
+  is_enabled?: boolean
+  director_name?: string
 }) {
-  return http.get<TeamListResponse>('/students/teams', { params })
+  return http.get<CenterListResponse>('/students/centers', { params })
 }
 
 
-export function createTeam(payload: TeamUpsert) {
-  return http.post<TeamRecord>('/students/teams', payload)
+export function createCenter(payload: CenterUpsert) {
+  return http.post<CenterRecord>('/students/centers', payload, { timeout: CENTER_MUTATION_TIMEOUT })
 }
 
 
-export function updateTeam(id: number, payload: TeamUpsert) {
-  return http.put<TeamRecord>(`/students/teams/${id}`, payload)
+export function updateCenter(id: number, payload: CenterUpsert) {
+  return http.put<CenterRecord>(`/students/centers/${id}`, payload, { timeout: CENTER_MUTATION_TIMEOUT })
 }
 
 
-export function deleteTeam(id: number) {
-  return http.delete(`/students/teams/${id}`)
+export function deleteCenter(id: number) {
+  return http.delete(`/students/centers/${id}`)
 }
 
 
-export function batchDeleteTeams(ids: number[]) {
-  return http.post<BulkActionResponse>('/students/teams/batch-delete', { ids })
+export function batchDeleteCenters(ids: number[]) {
+  return http.post<BulkActionResponse>('/students/centers/batch-delete', { ids })
 }

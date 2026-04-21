@@ -1,6 +1,9 @@
 ALTER TABLE IF EXISTS dtlms_recruitment_plans
     ADD COLUMN IF NOT EXISTS brochure_image_url VARCHAR(255);
 
+ALTER TABLE IF EXISTS dtlms_recruitment_plans
+    ADD COLUMN IF NOT EXISTS plan_description TEXT;
+
 CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     id BIGSERIAL PRIMARY KEY,
     full_name VARCHAR(128) NOT NULL,

@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS dtlms_recruitment_plans (
     plan_name VARCHAR(255) NOT NULL,
     academic_year VARCHAR(16) NOT NULL,
     semester VARCHAR(16) NOT NULL,
+    plan_description TEXT,
     start_date TIMESTAMPTZ NOT NULL,
     end_date TIMESTAMPTZ NOT NULL,
     target_quota INTEGER NOT NULL DEFAULT 0,
@@ -272,6 +273,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     phone_number VARCHAR(32) NOT NULL UNIQUE,
     email VARCHAR(128) NOT NULL UNIQUE,
     id_number VARCHAR(64) NOT NULL UNIQUE,
+    account_status VARCHAR(32) NOT NULL DEFAULT '启用',
     password_hash VARCHAR(255),
     gender VARCHAR(16),
     birth_date VARCHAR(32),
@@ -302,6 +304,25 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS dtlms_portal_student_profiles (
+    portal_student_id BIGINT PRIMARY KEY REFERENCES dtlms_portal_students(id) ON DELETE CASCADE,
+    full_name_pinyin VARCHAR(128),
+    profile_photo_url VARCHAR(255),
+    gender VARCHAR(16),
+    birth_date VARCHAR(32),
+    ethnic_group VARCHAR(64),
+    native_place VARCHAR(128),
+    political_status VARCHAR(64),
+    marital_status VARCHAR(32),
+    religious_belief VARCHAR(128),
+    id_type VARCHAR(64),
+    mailing_address TEXT,
+    emergency_contact_name VARCHAR(128),
+    emergency_contact_phone VARCHAR(32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS dtlms_research_fields (
     id BIGSERIAL PRIMARY KEY,
     field_code VARCHAR(64) NOT NULL UNIQUE,
@@ -315,6 +336,7 @@ CREATE TABLE IF NOT EXISTS dtlms_research_fields (
 CREATE TABLE IF NOT EXISTS dtlms_recruitment_applications (
     id BIGSERIAL PRIMARY KEY,
     plan_id BIGINT NOT NULL REFERENCES dtlms_recruitment_plans(id),
+    portal_student_id BIGINT REFERENCES dtlms_portal_students(id),
     business_key VARCHAR(64) NOT NULL UNIQUE,
     student_name VARCHAR(128) NOT NULL,
     candidate_no VARCHAR(64) NOT NULL UNIQUE,
@@ -345,6 +367,8 @@ CREATE TABLE IF NOT EXISTS dtlms_recruitment_applications (
     highest_degree VARCHAR(64),
     intended_advisor_name VARCHAR(128),
     discovery_channel TEXT,
+    source_channel VARCHAR(64),
+    source_channel_other VARCHAR(255),
     graduate_school VARCHAR(255),
     overseas_university_name VARCHAR(255),
     overseas_master_university_name VARCHAR(255),
@@ -366,6 +390,127 @@ CREATE TABLE IF NOT EXISTS dtlms_recruitment_applications (
     intended_field_id BIGINT REFERENCES dtlms_research_fields(id),
     application_status VARCHAR(32) NOT NULL DEFAULT 'submitted',
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_preferences (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    preference_order INTEGER NOT NULL,
+    research_center_name VARCHAR(128) NOT NULL,
+    advisor_name VARCHAR(128),
+    is_optional BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_portal_application_preferences_order UNIQUE (application_id, preference_order),
+    CONSTRAINT chk_portal_application_preferences_order CHECK (preference_order > 0)
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_education_experiences (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 1,
+    education_stage VARCHAR(64) NOT NULL,
+    start_month VARCHAR(16),
+    end_month VARCHAR(16),
+    school_name VARCHAR(255) NOT NULL,
+    major_name VARCHAR(255),
+    average_score VARCHAR(64),
+    gpa VARCHAR(32),
+    ranking VARCHAR(64),
+    verifier_name VARCHAR(128),
+    verifier_phone VARCHAR(32),
+    transcript_attachment_url TEXT,
+    degree_certificate_attachment_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_portal_application_education_sort_order CHECK (sort_order > 0)
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_practice_experiences (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    start_month VARCHAR(16),
+    end_month VARCHAR(16),
+    organization_name VARCHAR(255) NOT NULL,
+    position_name VARCHAR(128),
+    responsibility_text TEXT,
+    verifier_name VARCHAR(128),
+    verifier_phone VARCHAR(32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_english_proficiencies (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    exam_name VARCHAR(32) NOT NULL,
+    score_text VARCHAR(64) NOT NULL,
+    certificate_attachment_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_family_members (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    member_name VARCHAR(64) NOT NULL,
+    relation_type VARCHAR(16) NOT NULL,
+    employer_name VARCHAR(255),
+    job_title VARCHAR(128),
+    contact_phone VARCHAR(32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_achievement_records (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    achievement_type VARCHAR(32) NOT NULL,
+    paper_title VARCHAR(255),
+    author_order VARCHAR(32),
+    journal_or_conference VARCHAR(255),
+    publish_or_index_month VARCHAR(16),
+    award_name VARCHAR(255),
+    awarding_organization VARCHAR(255),
+    award_level VARCHAR(128),
+    award_year VARCHAR(16),
+    responsibility_text TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_personal_statements (
+    application_id BIGINT PRIMARY KEY REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    personal_statement_text TEXT,
+    ai_problem_statement TEXT,
+    ai_industry_opinion TEXT,
+    resume_attachment_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_declarations (
+    application_id BIGINT PRIMARY KEY REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    has_read_declaration BOOLEAN NOT NULL DEFAULT FALSE,
+    declaration_text TEXT,
+    progress_snapshot JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_portal_application_attachments (
+    id BIGSERIAL PRIMARY KEY,
+    portal_student_id BIGINT REFERENCES dtlms_portal_students(id) ON DELETE CASCADE,
+    application_id BIGINT REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
+    owner_type VARCHAR(64) NOT NULL,
+    owner_id BIGINT,
+    attachment_category VARCHAR(64) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_url TEXT NOT NULL,
+    file_type VARCHAR(32),
+    file_size BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -536,6 +681,15 @@ CREATE INDEX IF NOT EXISTS idx_training_plan_student ON dtlms_training_plans(stu
 CREATE INDEX IF NOT EXISTS idx_outbound_studies_status ON dtlms_outbound_studies(approval_status);
 CREATE INDEX IF NOT EXISTS idx_thesis_status ON dtlms_theses(thesis_status);
 CREATE INDEX IF NOT EXISTS idx_applications_plan_status ON dtlms_recruitment_applications(plan_id, application_status);
+CREATE INDEX IF NOT EXISTS idx_applications_portal_student ON dtlms_recruitment_applications(portal_student_id);
+CREATE INDEX IF NOT EXISTS idx_portal_application_preferences_application ON dtlms_portal_application_preferences(application_id, preference_order);
+CREATE INDEX IF NOT EXISTS idx_portal_application_education_application ON dtlms_portal_application_education_experiences(application_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_portal_application_practice_application ON dtlms_portal_application_practice_experiences(application_id);
+CREATE INDEX IF NOT EXISTS idx_portal_application_english_application ON dtlms_portal_application_english_proficiencies(application_id);
+CREATE INDEX IF NOT EXISTS idx_portal_application_family_application ON dtlms_portal_application_family_members(application_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_portal_application_family_parent_unique ON dtlms_portal_application_family_members(application_id, relation_type) WHERE relation_type IN ('父亲', '母亲');
+CREATE INDEX IF NOT EXISTS idx_portal_application_achievement_application ON dtlms_portal_application_achievement_records(application_id, achievement_type);
+CREATE INDEX IF NOT EXISTS idx_portal_application_attachment_owner ON dtlms_portal_application_attachments(application_id, owner_type, owner_id);
 CREATE INDEX IF NOT EXISTS idx_interview_schedule_time ON dtlms_interview_schedules(starts_at, ends_at);
 CREATE INDEX IF NOT EXISTS idx_admission_decision_status ON dtlms_admission_decisions(decision_status);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_module_time ON dtlms_operation_logs(module_name, created_at);

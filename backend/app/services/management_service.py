@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta
 import hashlib
-from threading import Lock
+import json
+import logging
+import secrets
+import string
+from threading import Lock, RLock
 from typing import Any, TypeVar
 
 from passlib.context import CryptContext
@@ -12,10 +16,13 @@ from app.core.cache import build_cache_key, get_cache_client
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.portal import (
     PortalApplicationSubmissionResponse,
+    PortalApplicationDraftUpsert,
     PortalApplicationUpsert,
     PortalLoginRequest,
+    PortalPasswordChangeRequest,
     PortalPlanListResponse,
     PortalPlanRecord,
+    PortalProfileOptionsResponse,
     PortalPasswordResetRequest,
     PortalRegistrationRequest,
     PortalRegistrationResponse,
@@ -39,6 +46,14 @@ from app.schemas.recruitment import (
     RecruitWorkbench,
 )
 from app.schemas.student import (
+    CenterAdvisorMapItem,
+    CenterListResponse,
+    CenterRecord,
+    CenterUpsert,
+    RegisteredPortalStudentActionResponse,
+    RegisteredPortalStudentEmailRequest,
+    RegisteredPortalStudentListResponse,
+    RegisteredPortalStudentRecord,
     StudentLifecycleBoard,
     StudentManagementResponse,
     StudentOptionsResponse,
@@ -47,10 +62,6 @@ from app.schemas.student import (
     StudentStats,
     StudentSummary,
     StudentUpsert,
-    TeamAdvisorMapItem,
-    TeamListResponse,
-    TeamRecord,
-    TeamUpsert,
 )
 from app.schemas.system import (
     AuditPolicyListResponse,
@@ -109,6 +120,7 @@ from app.schemas.training import (
     TrainingWorkbench,
 )
 from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskListResponse, WorkflowTaskRecord, WorkflowTaskUpsert
+from app.services.email_service import NotificationEmailService
 from app.services.postgres_state_store import PostgresStateStore
 from app.services.recruitment_excel_service import build_recruitment_template
 from app.services.runtime_seed_data import build_runtime_seed_state
@@ -116,7 +128,81 @@ from app.services.runtime_seed_data import build_runtime_seed_state
 
 PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 ListItemT = TypeVar("ListItemT")
+logger = logging.getLogger(__name__)
 FINAL_WORKFLOW_STATUSES = {"已通过", "已驳回"}
+DEFAULT_PORTAL_POLITICAL_STATUS_VALUES = (
+    "中共党员",
+    "中共预备党员",
+    "共青团员",
+    "民革党员",
+    "民盟盟员",
+    "民建会员",
+    "民进会员",
+    "农工党党员",
+    "致公党党员",
+    "九三学社社员",
+    "台盟盟员",
+    "无党派人士",
+    "群众",
+)
+DEFAULT_PORTAL_ETHNIC_GROUP_VALUES = (
+    "汉族",
+    "蒙古族",
+    "回族",
+    "藏族",
+    "维吾尔族",
+    "苗族",
+    "彝族",
+    "壮族",
+    "布依族",
+    "朝鲜族",
+    "满族",
+    "侗族",
+    "瑶族",
+    "白族",
+    "土家族",
+    "哈尼族",
+    "哈萨克族",
+    "傣族",
+    "黎族",
+    "傈僳族",
+    "佤族",
+    "畲族",
+    "高山族",
+    "拉祜族",
+    "水族",
+    "东乡族",
+    "纳西族",
+    "景颇族",
+    "柯尔克孜族",
+    "土族",
+    "达斡尔族",
+    "仫佬族",
+    "羌族",
+    "布朗族",
+    "撒拉族",
+    "毛南族",
+    "仡佬族",
+    "锡伯族",
+    "阿昌族",
+    "普米族",
+    "塔吉克族",
+    "怒族",
+    "乌孜别克族",
+    "俄罗斯族",
+    "鄂温克族",
+    "德昂族",
+    "保安族",
+    "裕固族",
+    "京族",
+    "塔塔尔族",
+    "独龙族",
+    "鄂伦春族",
+    "赫哲族",
+    "门巴族",
+    "珞巴族",
+    "基诺族",
+)
 ROLE_DISPLAY_NAMES = {
     "platform_admin": "学合管理员",
     "advisor": "导师",
@@ -427,8 +513,9 @@ PERMISSION_CATALOG: list[dict[str, str]] = [
 
 class RuntimeManagementStore:
     def __init__(self) -> None:
-        self._lock = Lock()
+        self._lock = RLock()
         self._postgres_store = PostgresStateStore()
+        self._email_service = NotificationEmailService()
         self.state = self._load_state()
         self._counters = self.state.setdefault("counters", {})
         self._migrate_state()
@@ -450,10 +537,18 @@ class RuntimeManagementStore:
         if "teams" not in self.state:
             self.state["teams"] = self._bootstrap_teams_from_students()
             changed = True
+        postgres_teams = self._load_teams_from_postgres()
+        if postgres_teams:
+            state_team_ids = {int(item.get("id", 0)) for item in self.state.setdefault("teams", [])}
+            postgres_team_ids = {int(item.get("id", 0)) for item in postgres_teams}
+            if state_team_ids != postgres_team_ids:
+                self.state["teams"] = postgres_teams
+                changed = True
         self._counters.setdefault("teams", max([item.get("id", 0) for item in self.state.setdefault("teams", [])], default=0))
         self.state.setdefault("portal_students", [])
         self._counters.setdefault("portal_students", max([item.get("id", 0) for item in self.state["portal_students"]], default=0))
         for portal_student in self.state["portal_students"]:
+            portal_student["account_status"] = self._normalize_portal_account_status(portal_student.get("account_status"))
             portal_student.setdefault("password_hash", None)
             portal_student.setdefault("gender", None)
             portal_student.setdefault("birth_date", None)
@@ -471,6 +566,8 @@ class RuntimeManagementStore:
             portal_student.setdefault("recommendation_notes", None)
             portal_student.setdefault("personal_statement_text", None)
             portal_student.setdefault("signed_agreement", False)
+            portal_student.setdefault("created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            portal_student.setdefault("updated_at", portal_student.get("created_at"))
 
         for user in self.state.setdefault("system_users", []):
             if not user.get("password_hash"):
@@ -506,6 +603,21 @@ class RuntimeManagementStore:
             if "brochure_image_url" not in plan:
                 plan["brochure_image_url"] = None
                 changed = True
+            if "plan_description" not in plan:
+                plan["plan_description"] = None
+                changed = True
+            if "current_stage" not in plan:
+                plan["current_stage"] = "报名配置"
+                changed = True
+            if "target_quota" not in plan:
+                plan["target_quota"] = 0
+                changed = True
+            if "interview_group_count" not in plan:
+                plan["interview_group_count"] = 0
+                changed = True
+            if "is_open" not in plan:
+                plan["is_open"] = True
+                changed = True
 
         team_lookup = {item["team_name"]: item for item in self.state.setdefault("teams", [])}
         for team in self.state.setdefault("teams", []):
@@ -517,6 +629,7 @@ class RuntimeManagementStore:
             team["research_directions"] = self._normalize_name_list(team.get("research_directions", []))
             team.setdefault("status", "启用")
             team.setdefault("established_on", None)
+            team.setdefault("created_on", team.get("established_on"))
             team.setdefault("description", None)
         for student in self.state.setdefault("students", []):
             if student.get("team_name") and student["team_name"] not in team_lookup:
@@ -533,6 +646,7 @@ class RuntimeManagementStore:
                         "research_directions": [],
                         "status": "启用",
                         "established_on": None,
+                        "created_on": datetime.now().strftime("%Y-%m-%d"),
                         "description": "由历史学生主档自动迁移生成的团队记录。",
                     }
                 )
@@ -548,6 +662,13 @@ class RuntimeManagementStore:
             changed = True
 
         return changed
+
+    def _load_teams_from_postgres(self) -> list[dict[str, Any]]:
+        try:
+            return self._postgres_store.load_team_state()
+        except Exception as exc:
+            logger.warning("Load teams from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            return []
 
     def _normalize_recruitment_application_profiles(self) -> bool:
         changed = False
@@ -616,7 +737,7 @@ class RuntimeManagementStore:
         self._counters[key] = int(self._counters.get(key, 0)) + 1
         return self._counters[key]
 
-    def _record_operation(self, module_name: str, entity_name: str, entity_id: str, action: str, summary: str, operator_username: str = "admin") -> None:
+    def _record_operation(self, module_name: str, entity_name: str, entity_id: str, action: str, summary: str, operator_username: str = "admin") -> dict[str, Any]:
         entry = {
             "id": self._next_id("operation_logs"),
             "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -629,6 +750,7 @@ class RuntimeManagementStore:
             "summary": summary,
         }
         self.state["operation_logs"].insert(0, entry)
+        return entry
 
     def _list(self, name: str) -> list[dict[str, Any]]:
         return self.state.setdefault(name, [])
@@ -678,6 +800,7 @@ class RuntimeManagementStore:
                     "research_directions": [],
                     "status": "启用",
                     "established_on": None,
+                    "created_on": datetime.now().strftime("%Y-%m-%d"),
                     "description": "由历史学生主档自动生成的团队记录。",
                 },
             )
@@ -721,21 +844,16 @@ class RuntimeManagementStore:
     def _team_lookup_by_name(self) -> dict[str, dict[str, Any]]:
         return {item["team_name"]: item for item in self._list("teams")}
 
-    def _build_team_record(self, item: dict[str, Any]) -> TeamRecord:
+    def _build_center_record(self, item: dict[str, Any]) -> CenterRecord:
         members = [student for student in self._list("students") if student.get("team_name") == item["team_name"]]
         active_statuses = {"在校", "实习中", "外出研修", "请假中", "学位论文阶段"}
-        return TeamRecord(
+        return CenterRecord(
             id=item["id"],
-            team_code=item["team_code"],
-            team_name=item["team_name"],
-            department_name=item["department_name"],
-            discipline_name=item["discipline_name"],
-            lead_advisor_name=item["lead_advisor_name"],
+            center_name=item["team_name"],
+            director_name=item["lead_advisor_name"],
             advisor_names=self._normalize_name_list(item.get("advisor_names", []), item.get("lead_advisor_name")),
-            research_directions=self._normalize_name_list(item.get("research_directions", [])),
-            status=item["status"],
-            established_on=item.get("established_on"),
-            description=item.get("description"),
+            is_enabled=item.get("status") == "启用",
+            created_date=item.get("created_on") or item.get("established_on"),
             member_student_count=len(members),
             active_student_count=len([student for student in members if student.get("status") in active_statuses]),
         )
@@ -750,24 +868,24 @@ class RuntimeManagementStore:
         for item in self._list("students"):
             if item["student_no"] == payload.student_no and item["id"] != current_student_id:
                 raise ValueError("Student number already exists")
-        team = self._ensure_team_exists(payload.team_name)
+        team = self._ensure_team_exists(payload.center_name)
         team_advisors = self._normalize_name_list(team.get("advisor_names", []), team.get("lead_advisor_name"))
         if payload.advisor_name not in team_advisors:
-            raise ValueError("Selected advisor does not belong to the selected team")
+            raise ValueError("Selected advisor does not belong to the selected center")
 
-    def _validate_team_payload(self, payload: TeamUpsert, current_team_id: int | None = None) -> dict[str, Any]:
+    def _validate_center_payload(self, payload: CenterUpsert, current_center_id: int | None = None) -> dict[str, Any]:
         for item in self._list("teams"):
-            if item["team_code"] == payload.team_code and item["id"] != current_team_id:
-                raise ValueError("Team code already exists")
-            if item["team_name"] == payload.team_name and item["id"] != current_team_id:
-                raise ValueError("Team name already exists")
-        advisor_names = self._normalize_name_list(payload.advisor_names, payload.lead_advisor_name)
+            if item["team_name"] == payload.center_name and item["id"] != current_center_id:
+                raise ValueError("Center name already exists")
+        advisor_names = self._normalize_name_list(payload.advisor_names, payload.director_name)
         if not advisor_names:
-            raise ValueError("Team must contain at least one advisor")
+            raise ValueError("Center must contain at least one advisor")
         return {
-            **payload.model_dump(),
+            "team_name": payload.center_name,
+            "lead_advisor_name": payload.director_name,
             "advisor_names": advisor_names,
-            "research_directions": self._normalize_name_list(payload.research_directions),
+            "status": "启用" if payload.is_enabled else "停用",
+            "created_on": payload.created_date or datetime.now().strftime("%Y-%m-%d"),
         }
 
     def _role_lookup(self) -> dict[str, dict[str, Any]]:
@@ -820,6 +938,18 @@ class RuntimeManagementStore:
 
     def _dict_option_values(self, dict_type: str) -> list[str]:
         return [item.value for item in self._dict_options(dict_type)]
+
+    def get_portal_profile_options(self) -> PortalProfileOptionsResponse:
+        political_status_options = self._dict_options("student_political_status")
+        ethnic_group_options = self._dict_options("student_ethnic_group")
+        if not political_status_options:
+            political_status_options = self._select_options_from_values(DEFAULT_PORTAL_POLITICAL_STATUS_VALUES)
+        if not ethnic_group_options:
+            ethnic_group_options = self._select_options_from_values(DEFAULT_PORTAL_ETHNIC_GROUP_VALUES)
+        return PortalProfileOptionsResponse(
+            political_status_options=political_status_options,
+            ethnic_group_options=ethnic_group_options,
+        )
 
     def _workflow_definition(self, flow_code: str) -> dict[str, Any]:
         definition = MANAGED_WORKFLOW_DEFINITIONS.get(flow_code)
@@ -1304,6 +1434,7 @@ class RuntimeManagementStore:
 
     def execute_workflow_action(self, task_id: int, action: str, comment: str | None, principal: Any) -> dict[str, Any]:
         principal_summary = self._principal_summary(principal)
+        notification_payload: dict[str, str] | None = None
         with self._lock:
             index, task = self._find_required("workflow_tasks", task_id)
             flow_code = task.get("flow_code")
@@ -1354,10 +1485,40 @@ class RuntimeManagementStore:
                 operator_username=principal_summary["username"],
             )
             self._save()
-            return {
+            if flow_code == "recruitment_application":
+                notification_payload = self._build_recruitment_email_notification(updated_entity)
+            result = {
                 "task": self._build_workflow_task_record(updated_task, principal_roles=principal_summary["roles"]),
                 "history": [self._build_workflow_history_record(item) for item in updated_task.get("history", [])],
             }
+
+        if notification_payload is not None and self._email_service.enabled():
+            self._email_service.send_recruitment_status_update(**notification_payload)
+        return result
+
+    def _build_recruitment_email_notification(self, application: dict[str, Any]) -> dict[str, str] | None:
+        status = str(application.get("application_status") or "").strip()
+        if status not in {"资格审核通过", "预录取", "同意录取"}:
+            return None
+
+        email = str(application.get("email") or "").strip()
+        if not email:
+            return None
+
+        plan_name = ""
+        plan_id = application.get("plan_id")
+        if plan_id is not None:
+            matched_plan = next((item for item in self._list("recruitment_plans") if int(item.get("id") or 0) == int(plan_id)), None)
+            if matched_plan is not None:
+                plan_name = str(matched_plan.get("plan_name") or "")
+
+        return {
+            "student_name": str(application.get("student_name") or "同学"),
+            "email": email,
+            "business_key": str(application.get("business_key") or ""),
+            "application_status": status,
+            "plan_name": plan_name,
+        }
 
     def get_system_options(self) -> SystemOptionsResponse:
         return SystemOptionsResponse(
@@ -1442,10 +1603,8 @@ class RuntimeManagementStore:
         )
 
     def get_student_options(self) -> StudentOptionsResponse:
-        teams = [self._build_team_record(item) for item in self._list("teams")]
+        centers = [self._build_center_record(item) for item in self._list("teams")]
         advisor_values = self._advisor_name_values()
-        department_values = {item.department_name for item in teams if item.department_name}
-        discipline_values = {item.discipline_name for item in teams if item.discipline_name}
         political_values = {
             *self._dict_option_values("student_political_status"),
             *[item.get("political_status") for item in self._list("students") if item.get("political_status")],
@@ -1454,17 +1613,14 @@ class RuntimeManagementStore:
             status_options=self._dict_options("student_status"),
             degree_options=self._dict_options("student_degree_type"),
             advisor_options=[SelectOption(label=item, value=item) for item in advisor_values],
-            team_options=[SelectOption(label=item.team_name, value=item.team_name) for item in teams if item.status != "停用"],
-            team_status_options=self._dict_options("student_team_status"),
+            center_options=[SelectOption(label=item.center_name, value=item.center_name) for item in centers if item.is_enabled],
             political_status_options=self._select_options_from_values(political_values),
-            department_options=self._select_options_from_values(department_values),
-            discipline_options=self._select_options_from_values(discipline_values),
-            team_advisor_map=[
-                TeamAdvisorMapItem(
-                    team_name=item.team_name,
+            center_advisor_map=[
+                CenterAdvisorMapItem(
+                    center_name=item.center_name,
                     advisors=[SelectOption(label=advisor, value=advisor) for advisor in item.advisor_names],
                 )
-                for item in teams
+                for item in centers
             ],
         )
 
@@ -1522,16 +1678,145 @@ class RuntimeManagementStore:
             academic_term=f'{item["academic_year"]} {item["semester"]}',
             academic_year=item["academic_year"],
             semester=item["semester"],
-            current_stage=item["current_stage"],
-            target_quota=item["target_quota"],
             application_count=application_count,
-            interview_group_count=item["interview_group_count"],
-            is_open=item["is_open"],
             brochure_image_url=item.get("brochure_image_url"),
+            plan_description=item.get("plan_description"),
         )
 
+    @staticmethod
+    def _portal_plan_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
+        year_text = str(item.get("academic_year") or "").strip()
+        try:
+            academic_year = int(year_text)
+        except ValueError:
+            academic_year = 0
+        semester_order = {"春": 1, "夏": 2, "秋": 3, "冬": 4}.get(str(item.get("semester") or "").strip(), 0)
+        return academic_year, semester_order, int(item.get("id") or 0)
+
     def _build_portal_student_record(self, item: dict[str, Any]) -> PortalStudentRecord:
-        return PortalStudentRecord(**item)
+        normalized = dict(item)
+        normalized["account_status"] = self._normalize_portal_account_status(normalized.get("account_status"))
+        return PortalStudentRecord(**normalized)
+
+    @staticmethod
+    def _generate_portal_temporary_password(length: int = 10) -> str:
+        alphabet = string.ascii_letters + string.digits
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    @staticmethod
+    def _normalize_portal_account_status(value: Any) -> str:
+        text = str(value or "").strip()
+        if text in {"已注销", "停用"}:
+            return "停用"
+        return "启用"
+
+    def _build_portal_profile_payload(self, payload: Any) -> dict[str, Any] | None:
+        profile = payload.profile.model_dump(exclude_none=True) if payload.profile is not None else {}
+        fallback_profile = {
+            "gender": payload.gender,
+            "birth_date": payload.birth_date,
+            "ethnic_group": payload.ethnic_group,
+            "native_place": payload.native_place,
+            "political_status": payload.political_status,
+            "marital_status": payload.marital_status,
+            "religious_belief": payload.religious_belief,
+            "id_type": payload.id_type,
+            "mailing_address": payload.mailing_address,
+        }
+        for key, value in fallback_profile.items():
+            profile.setdefault(key, value)
+        return profile or None
+
+    def _build_portal_application_draft_payload(
+        self,
+        payload: Any,
+        advisor_name: str | None,
+        submitted_at: str | None,
+    ) -> dict[str, Any]:
+        preferences = [item.model_dump() for item in payload.preferences]
+        if not preferences and payload.selected_team_name:
+            preferences = [
+                {
+                    "preference_order": 1,
+                    "research_center_name": payload.selected_team_name,
+                    "advisor_name": advisor_name,
+                    "is_optional": False,
+                }
+            ]
+        personal_statement = payload.personal_statement.model_dump(exclude_none=True) if payload.personal_statement is not None else {}
+        if payload.personal_statement_text and not personal_statement.get("personal_statement_text"):
+            personal_statement["personal_statement_text"] = payload.personal_statement_text
+        declaration = payload.declaration.model_dump(exclude_none=True) if payload.declaration is not None else {}
+        declaration.setdefault("has_read_declaration", bool(payload.signed_agreement))
+        return {
+            "selected_plan_id": payload.plan_id,
+            "source_channel": payload.source_channel,
+            "source_channel_other": payload.source_channel_other,
+            "preferences": preferences,
+            "education_experiences": [item.model_dump() for item in payload.education_experiences],
+            "practice_experiences": [item.model_dump() for item in payload.practice_experiences],
+            "english_proficiencies": [item.model_dump() for item in payload.english_proficiencies],
+            "family_members": [item.model_dump() for item in payload.family_members],
+            "achievement_records": [item.model_dump() for item in payload.achievement_records],
+            "personal_statement": personal_statement,
+            "declaration": declaration,
+            "submitted_at": submitted_at,
+        }
+
+    def save_portal_application_draft(self, student_id: int, payload: PortalApplicationDraftUpsert) -> PortalStudentRecord:
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，无法保存草稿")
+
+            selected_team_name = payload.selected_team_name
+            advisor_name = payload.selected_advisor_name
+            if selected_team_name:
+                team = self._ensure_team_exists(selected_team_name)
+                advisor_names = self._normalize_name_list(team.get("advisor_names", []), team.get("lead_advisor_name"))
+                if advisor_name and advisor_name not in advisor_names:
+                    raise ValueError("所选导师不属于当前团队")
+                if not advisor_name:
+                    advisor_name = team.get("lead_advisor_name")
+
+            now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            profile_payload = self._build_portal_profile_payload(payload)
+            application_draft = self._build_portal_application_draft_payload(payload, advisor_name, student.get("submitted_at"))
+
+            student.update(
+                {
+                    "gender": payload.gender,
+                    "birth_date": payload.birth_date,
+                    "ethnic_group": payload.ethnic_group,
+                    "native_place": payload.native_place,
+                    "marital_status": payload.marital_status,
+                    "religious_belief": payload.religious_belief,
+                    "id_type": payload.id_type,
+                    "mailing_address": payload.mailing_address,
+                    "graduation_school": payload.graduation_school,
+                    "highest_degree": payload.highest_degree,
+                    "intended_field": payload.intended_field,
+                    "political_status": payload.political_status,
+                    "english_level": payload.english_level,
+                    "family_info": payload.family_info,
+                    "education_experience": payload.education_experience,
+                    "practice_experience": payload.practice_experience,
+                    "personal_profile": payload.personal_profile,
+                    "recommendation_notes": payload.recommendation_notes,
+                    "personal_statement_text": payload.personal_statement_text,
+                    "signed_agreement": payload.signed_agreement,
+                    "selected_plan_id": payload.plan_id or student.get("selected_plan_id"),
+                    "selected_team_name": selected_team_name,
+                    "selected_advisor_name": advisor_name,
+                    "self_evaluation": payload.self_evaluation,
+                    "updated_at": now_text,
+                    "profile": profile_payload,
+                    "application_draft": application_draft,
+                }
+            )
+            self._record_operation("学生门户", "申请草稿", str(student_id), "保存草稿", f'学生 {student["full_name"]} 保存报名草稿', operator_username=student["phone_number"])
+            self._save()
+            return self._build_portal_student_record(student)
 
     def _build_portal_plan_record(self, item: dict[str, Any]) -> PortalPlanRecord:
         plan = self._build_recruit_plan_record(item)
@@ -1539,24 +1824,21 @@ class RuntimeManagementStore:
             id=plan.id,
             plan_name=plan.plan_name,
             academic_term=plan.academic_term,
-            current_stage=plan.current_stage,
-            target_quota=plan.target_quota,
-            interview_group_count=plan.interview_group_count,
             brochure_image_url=plan.brochure_image_url,
-            summary=f"当前阶段：{plan.current_stage}，计划名额 {plan.target_quota} 人，面试组 {plan.interview_group_count} 个。",
+            summary=plan.plan_description,
         )
 
     def _build_portal_team_record(self, item: dict[str, Any]) -> PortalTeamRecord:
-        team = self._build_team_record(item)
+        team = self._build_center_record(item)
         return PortalTeamRecord(
             id=team.id,
-            team_name=team.team_name,
-            lead_advisor_name=team.lead_advisor_name,
+            team_name=team.center_name,
+            lead_advisor_name=team.director_name,
             advisor_names=team.advisor_names,
-            department_name=team.department_name,
-            discipline_name=team.discipline_name,
-            research_directions=team.research_directions,
-            description=team.description,
+            department_name="",
+            discipline_name="",
+            research_directions=[],
+            description=None,
         )
 
     def get_dashboard_overview(self) -> DashboardOverview:
@@ -1568,11 +1850,11 @@ class RuntimeManagementStore:
         return DashboardOverview(
             lifecycle_coverage=[
                 MetricCard(label="学生总量", value=str(student_stats.total_students), target="主数据", trend="招生到毕业全周期", status="healthy"),
-                MetricCard(label="开放招生计划", value=str(recruitment_stats.open_plan_count), target="年度滚动", trend=f'累计 {recruitment_stats.application_total} 份申请', status="healthy"),
+                MetricCard(label="招生计划", value=str(recruitment_stats.plan_count), target="年度滚动", trend=f'累计 {recruitment_stats.application_total} 份申请', status="healthy"),
                 MetricCard(label="在途审批", value=str(workflow_stats.todo_total + workflow_stats.in_progress_total), target="流程中心", trend="覆盖导师变更/外出研修/授位", status="attention"),
             ],
             recruitment_metrics=[
-                MetricCard(label="招生计划", value=str(recruitment_stats.plan_count), target="年度批次", trend=f'开放 {recruitment_stats.open_plan_count} 个', status="healthy"),
+                MetricCard(label="招生计划", value=str(recruitment_stats.plan_count), target="年度批次", trend=f'累计申请 {recruitment_stats.application_total} 份', status="healthy"),
                 MetricCard(label="待审核申请", value=str(recruitment_stats.pending_review_total), target="及时清零", trend="资格审核与材料评分中", status="attention"),
                 MetricCard(label="预录取池", value=str(recruitment_stats.pre_admit_total), target="录取决策", trend="可下钻到候补与确认", status="healthy"),
             ],
@@ -1605,9 +1887,8 @@ class RuntimeManagementStore:
                 RecruitPlanSummary(
                     plan_name=plan.plan_name,
                     academic_term=plan.academic_term,
-                    current_stage=plan.current_stage,
+                    plan_description=plan.plan_description,
                     application_count=plan.application_count,
-                    interview_group_count=plan.interview_group_count,
                 )
                 for plan in self.get_recruitment_plans().items
             ],
@@ -1629,23 +1910,24 @@ class RuntimeManagementStore:
         self,
         keyword: str | None = None,
         semester: str | None = None,
-        current_stage: str | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> RecruitPlanListResponse:
         items = [self._build_recruit_plan_record(item) for item in self._list("recruitment_plans")]
         if keyword:
-            items = [item for item in items if self._matches_keyword(item.plan_name, item.academic_term, item.current_stage, keyword=keyword)]
+            items = [item for item in items if self._matches_keyword(item.plan_name, item.academic_term, item.plan_description, keyword=keyword)]
         if semester:
             items = [item for item in items if item.semester == semester]
-        if current_stage:
-            items = [item for item in items if item.current_stage == current_stage]
         paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
         return RecruitPlanListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def create_recruitment_plan(self, payload: RecruitPlanUpsert) -> RecruitPlanRecord:
         with self._lock:
             item = payload.model_dump()
+            item.setdefault("current_stage", "报名配置")
+            item.setdefault("target_quota", 0)
+            item.setdefault("interview_group_count", 0)
+            item.setdefault("is_open", True)
             item["id"] = self._next_id("recruitment_plans")
             self._list("recruitment_plans").insert(0, item)
             self._record_operation("招生管理", "招生计划", str(item["id"]), "新增", f'新增招生计划 {item["plan_name"]}')
@@ -1669,6 +1951,19 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> RecruitApplicationListResponse:
+        try:
+            items, total = self._postgres_store.list_recruitment_applications_page(
+                keyword=keyword,
+                plan_id=plan_id,
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
+            records = [RecruitApplicationRecord(**item) for item in items]
+            return RecruitApplicationListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query recruitment applications from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("recruitment_applications"))
         if plan_id is not None:
             items = [item for item in items if item["plan_id"] == plan_id]
@@ -1791,6 +2086,7 @@ class RuntimeManagementStore:
 
     def register_portal_student(self, payload: PortalRegistrationRequest) -> PortalRegistrationResponse:
         with self._lock:
+            now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if any(item.get("phone_number") == payload.phone_number for item in self._list("portal_students")):
                 raise ValueError("该手机号已注册，请直接登录")
             if any(item.get("email") == payload.email for item in self._list("portal_students")):
@@ -1803,6 +2099,7 @@ class RuntimeManagementStore:
             item.update(
                 {
                     "id": self._next_id("portal_students"),
+                    "account_status": "启用",
                     "password_hash": PASSWORD_CONTEXT.hash(password),
                     "gender": None,
                     "birth_date": None,
@@ -1829,12 +2126,18 @@ class RuntimeManagementStore:
                     "selected_advisor_name": None,
                     "self_evaluation": None,
                     "submitted_at": None,
+                    "created_at": now_text,
+                    "updated_at": now_text,
                 }
             )
             self._list("portal_students").insert(0, item)
             self._record_operation("学生门户", "门户注册", str(item["id"]), "注册", f'学生 {item["full_name"]} 完成门户注册', operator_username=item["phone_number"])
             self._save()
-            return PortalRegistrationResponse(message="注册成功，请使用手机号或邮箱登录", student=self._build_portal_student_record(item))
+            response = PortalRegistrationResponse(message="注册成功，请使用手机号或邮箱登录", student=self._build_portal_student_record(item))
+
+        if self._email_service.enabled():
+            self._email_service.send_portal_registration_success(item["full_name"], item["email"])
+        return response
 
     def login_portal_student(self, payload: PortalLoginRequest) -> PortalStudentRecord:
         account = payload.account.strip()
@@ -1848,6 +2151,8 @@ class RuntimeManagementStore:
             )
             if not student:
                 raise ValueError("账号不存在")
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，请联系管理员")
             password_hash = student.get("password_hash")
             if not password_hash or not PASSWORD_CONTEXT.verify(payload.password, password_hash):
                 raise ValueError("账号或密码错误")
@@ -1855,6 +2160,7 @@ class RuntimeManagementStore:
 
     def reset_portal_student_password(self, payload: PortalPasswordResetRequest) -> None:
         account = payload.account.strip()
+        id_number = payload.id_number.strip()
         with self._lock:
             student = next(
                 (
@@ -1865,18 +2171,65 @@ class RuntimeManagementStore:
             )
             if not student:
                 raise ValueError("账号不存在")
-            if student.get("id_number") != payload.id_number:
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，请联系管理员")
+            if str(student.get("id_number") or "").strip() != id_number:
                 raise ValueError("身份证号校验失败")
             student["password_hash"] = PASSWORD_CONTEXT.hash(payload.new_password)
-            self._record_operation("学生门户", "找回密码", str(student["id"]), "重置密码", f'学生 {student["full_name"]} 重置门户密码', operator_username=student["phone_number"])
-            self._save()
+            student["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            operation_log = self._record_operation(
+                "学生门户",
+                "找回密码",
+                str(student["id"]),
+                "重置密码",
+                f'学生 {student["full_name"]} 重置门户密码',
+                operator_username=student["phone_number"],
+            )
+            try:
+                self._postgres_store.update_runtime_portal_student(int(student["id"]), student)
+                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
+                self._postgres_store.insert_runtime_operation_log(operation_log)
+            except Exception:
+                self._save()
+
+        if self._email_service.enabled():
+            self._email_service.send_portal_password_reset_success(student["full_name"], student["email"], account)
+
+    def change_portal_student_password(self, student_id: int, payload: PortalPasswordChangeRequest) -> None:
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，无法修改密码")
+            password_hash = student.get("password_hash")
+            if not password_hash or not PASSWORD_CONTEXT.verify(payload.current_password, password_hash):
+                raise ValueError("当前密码不正确")
+            student["password_hash"] = PASSWORD_CONTEXT.hash(payload.new_password)
+            student["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            operation_log = self._record_operation(
+                "学生门户",
+                "个人空间",
+                str(student_id),
+                "修改密码",
+                f'学生 {student["full_name"]} 在个人空间修改密码',
+                operator_username=student["phone_number"],
+            )
+            try:
+                self._postgres_store.update_runtime_portal_student(int(student_id), student)
+                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
+                self._postgres_store.insert_runtime_operation_log(operation_log)
+            except Exception:
+                self._save()
 
     def get_portal_student(self, student_id: int) -> PortalStudentRecord:
+        postgres_item = self._postgres_store.get_portal_student_detail(student_id)
+        if postgres_item is not None:
+            return self._build_portal_student_record(postgres_item)
         _, item = self._find_required("portal_students", student_id)
         return self._build_portal_student_record(item)
 
     def get_public_recruitment_plans(self) -> PortalPlanListResponse:
-        items = [self._build_portal_plan_record(item) for item in self._list("recruitment_plans") if item.get("is_open")]
+        source_items = sorted(self._list("recruitment_plans"), key=self._portal_plan_sort_key, reverse=True)
+        items = [self._build_portal_plan_record(item) for item in source_items]
         return PortalPlanListResponse(items=items)
 
     def get_public_teams(self) -> PortalTeamListResponse:
@@ -1886,14 +2239,19 @@ class RuntimeManagementStore:
     def submit_portal_application(self, student_id: int, payload: PortalApplicationUpsert) -> PortalApplicationSubmissionResponse:
         with self._lock:
             _, student = self._find_required("portal_students", student_id)
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，无法提交报名")
             _, plan = self._find_required("recruitment_plans", payload.plan_id)
-            if not plan.get("is_open"):
-                raise ValueError("当前招生计划未开放报名")
             team = self._ensure_team_exists(payload.selected_team_name)
             advisor_names = self._normalize_name_list(team.get("advisor_names", []), team.get("lead_advisor_name"))
             advisor_name = payload.selected_advisor_name or team.get("lead_advisor_name")
             if advisor_name not in advisor_names:
                 raise ValueError("所选导师不属于当前团队")
+            submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            profile_payload = self._build_portal_profile_payload(payload)
+            application_draft = self._build_portal_application_draft_payload(payload, advisor_name, submitted_at)
+            preference_names = [item.get("research_center_name") for item in application_draft.get("preferences", []) if item.get("research_center_name")]
+            second_choice = preference_names[1] if len(preference_names) > 1 else None
 
             student.update(
                 {
@@ -1921,7 +2279,10 @@ class RuntimeManagementStore:
                     "selected_team_name": payload.selected_team_name,
                     "selected_advisor_name": advisor_name,
                     "self_evaluation": payload.self_evaluation,
-                    "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "submitted_at": submitted_at,
+                    "updated_at": submitted_at,
+                    "profile": profile_payload,
+                    "application_draft": application_draft,
                 }
             )
 
@@ -1943,6 +2304,7 @@ class RuntimeManagementStore:
                         "highest_degree": payload.highest_degree,
                         "intended_field": payload.intended_field,
                         "first_choice": payload.intended_field,
+                        "second_choice": second_choice,
                         "political_status": payload.political_status,
                         "marital_status": payload.marital_status,
                         "religious_belief": payload.religious_belief,
@@ -1957,8 +2319,14 @@ class RuntimeManagementStore:
                         "education_experience": payload.education_experience,
                         "practice_experience": payload.practice_experience,
                         "personal_statement_text": payload.personal_statement_text,
+                        "personal_statement_attachment": (payload.personal_statement.resume_attachment_url if payload.personal_statement else None),
                         "supplementary_profile": payload.personal_profile,
                         "self_evaluation": payload.self_evaluation,
+                        "discovery_channel": payload.source_channel_other or payload.source_channel,
+                        "source_channel": payload.source_channel,
+                        "source_channel_other": payload.source_channel_other,
+                        "portal_student_id": student_id,
+                        "applied_at": submitted_at,
                     }
                 )
                 business_key = str(existing_application["business_key"])
@@ -1973,6 +2341,7 @@ class RuntimeManagementStore:
                         highest_degree=payload.highest_degree,
                         intended_field=payload.intended_field,
                         first_choice=payload.intended_field,
+                        second_choice=second_choice,
                         political_status=payload.political_status,
                         marital_status=payload.marital_status,
                         religious_belief=payload.religious_belief,
@@ -1987,8 +2356,11 @@ class RuntimeManagementStore:
                         education_experience=payload.education_experience,
                         practice_experience=payload.practice_experience,
                         personal_statement_text=payload.personal_statement_text,
+                        personal_statement_attachment=(payload.personal_statement.resume_attachment_url if payload.personal_statement else None),
                         supplementary_profile=payload.personal_profile,
                         self_evaluation=payload.self_evaluation,
+                        discovery_channel=payload.source_channel_other or payload.source_channel,
+                        applied_at=submitted_at,
                         material_status="待审核",
                         application_status="报名已提交",
                     ),
@@ -1996,12 +2368,103 @@ class RuntimeManagementStore:
                 )
                 business_key = record.business_key
                 application_status = record.application_status
+                created_application = next(
+                    (
+                        item for item in self._list("recruitment_applications")
+                        if str(item.get("business_key")) == str(record.business_key)
+                    ),
+                    None,
+                )
+                if created_application is not None:
+                    created_application.update(
+                        {
+                            "portal_student_id": student_id,
+                            "source_channel": payload.source_channel,
+                            "source_channel_other": payload.source_channel_other,
+                        }
+                    )
             self._save()
             return PortalApplicationSubmissionResponse(
-                student=self._build_portal_student_record(student),
+                student=self.get_portal_student(student_id),
                 application_business_key=business_key,
                 application_status=application_status,
             )
+
+    def deactivate_registered_portal_student(self, student_id: int) -> RegisteredPortalStudentActionResponse:
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            if self._normalize_portal_account_status(student.get("account_status")) == "停用":
+                return RegisteredPortalStudentActionResponse(message="该注册学生账号已停用", account_status="停用")
+
+            student["account_status"] = "停用"
+            student["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._record_operation("学生管理", "注册学生", str(student_id), "停用账号", f'停用注册学生账号 {student.get("full_name") or ""}')
+            self._save()
+            return RegisteredPortalStudentActionResponse(message="注册学生账号已停用", account_status="停用")
+
+    def activate_registered_portal_student(self, student_id: int) -> RegisteredPortalStudentActionResponse:
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            if self._normalize_portal_account_status(student.get("account_status")) == "启用":
+                return RegisteredPortalStudentActionResponse(message="该注册学生账号已启用", account_status="启用")
+
+            student["account_status"] = "启用"
+            student["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._record_operation("学生管理", "注册学生", str(student_id), "启用账号", f'启用注册学生账号 {student.get("full_name") or ""}')
+            self._save()
+            return RegisteredPortalStudentActionResponse(message="注册学生账号已启用", account_status="启用")
+
+    def reset_registered_portal_student_password(self, student_id: int) -> RegisteredPortalStudentActionResponse:
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("已停用账号不可重置密码")
+
+            temporary_password = self._generate_portal_temporary_password()
+            student["password_hash"] = PASSWORD_CONTEXT.hash(temporary_password)
+            student["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._record_operation("学生管理", "注册学生", str(student_id), "重置密码", f'重置注册学生密码 {student.get("full_name") or ""}')
+            self._save()
+
+        email_sent = False
+        if self._email_service.enabled():
+            self._email_service.send_portal_admin_password_reset(
+                str(student.get("full_name") or ""),
+                str(student.get("email") or ""),
+                temporary_password,
+            )
+            email_sent = True
+
+        return RegisteredPortalStudentActionResponse(
+            message="注册学生密码已重置",
+            account_status=self._normalize_portal_account_status(student.get("account_status")),
+            email_sent=email_sent,
+            temporary_password=temporary_password,
+        )
+
+    def send_registered_portal_student_email(self, student_id: int, payload: RegisteredPortalStudentEmailRequest) -> RegisteredPortalStudentActionResponse:
+        subject = payload.subject.strip()
+        content = payload.content.strip()
+        if not subject:
+            raise ValueError("邮件主题不能为空")
+        if not content:
+            raise ValueError("邮件内容不能为空")
+
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            self._record_operation("学生管理", "注册学生", str(student_id), "发送邮件", f'向注册学生发送邮件 {student.get("full_name") or ""}')
+            self._save()
+
+        email_sent = False
+        if self._email_service.enabled():
+            self._email_service.send_message(to_email=str(student.get("email") or ""), subject=subject, text_body=content)
+            email_sent = True
+
+        return RegisteredPortalStudentActionResponse(
+            message="邮件发送请求已处理",
+            account_status=self._normalize_portal_account_status(student.get("account_status")),
+            email_sent=email_sent,
+        )
 
     def update_recruitment_application(self, application_id: int, payload: RecruitApplicationUpsert) -> RecruitApplicationRecord:
         with self._lock:
@@ -2026,7 +2489,7 @@ class RuntimeManagementStore:
         applications = self._list("recruitment_applications")
         return RecruitStats(
             plan_count=len(plans),
-            open_plan_count=len([item for item in plans if item["is_open"]]),
+            open_plan_count=len(plans),
             application_total=len(applications),
             pending_review_total=len([item for item in applications if item["application_status"] in {"报名已提交", "资格审核通过", "材料评分中", "面试待安排"}]),
             pre_admit_total=len([item for item in applications if item["application_status"] in {"预录取", "同意录取"}]),
@@ -2044,10 +2507,24 @@ class RuntimeManagementStore:
         keyword: str | None = None,
         status: str | None = None,
         advisor_name: str | None = None,
-        team_name: str | None = None,
+        center_name: str | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> StudentManagementResponse:
+        try:
+            items, total = self._postgres_store.list_students_page(
+                keyword=keyword,
+                status=status,
+                advisor_name=advisor_name,
+                center_name=center_name,
+                page=page,
+                page_size=page_size,
+            )
+            records = [StudentRecord(**item) for item in items]
+            return StudentManagementResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query students from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("students"))
         if keyword:
             term = keyword.lower()
@@ -2056,77 +2533,181 @@ class RuntimeManagementStore:
             items = [item for item in items if item["status"] == status]
         if advisor_name:
             items = [item for item in items if item["advisor_name"] == advisor_name]
-        if team_name:
-            items = [item for item in items if item["team_name"] == team_name]
-        records = [StudentRecord(**item) for item in items]
+        if center_name:
+            items = [item for item in items if item["team_name"] == center_name]
+        records = [
+            StudentRecord(
+                id=item["id"],
+                student_no=item["student_no"],
+                full_name=item["full_name"],
+                status=item["status"],
+                advisor_name=item["advisor_name"],
+                center_name=item["team_name"],
+                degree_type=item["degree_type"],
+                enrollment_year=item["enrollment_year"],
+                phone_number=item.get("phone_number"),
+                political_status=item.get("political_status"),
+            )
+            for item in items
+        ]
         paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
         return StudentManagementResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
-    def get_teams(
+    def get_centers(
         self,
         keyword: str | None = None,
-        status: str | None = None,
-        department_name: str | None = None,
-        lead_advisor_name: str | None = None,
+        is_enabled: bool | None = None,
+        director_name: str | None = None,
         page: int = 1,
         page_size: int = 10,
-    ) -> TeamListResponse:
+    ) -> CenterListResponse:
+        try:
+            items, total = self._postgres_store.list_centers_page(
+                keyword=keyword,
+                is_enabled=is_enabled,
+                director_name=director_name,
+                page=page,
+                page_size=page_size,
+            )
+            records = [CenterRecord(**item) for item in items]
+            return CenterListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query centers from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("teams"))
         if keyword:
             items = [
                 item for item in items
                 if self._matches_keyword(
-                    item.get("team_code"),
                     item.get("team_name"),
-                    item.get("department_name"),
-                    item.get("discipline_name"),
                     item.get("lead_advisor_name"),
-                    *(item.get("research_directions") or []),
+                    *(item.get("advisor_names") or []),
                     keyword=keyword,
                 )
             ]
-        if status:
-            items = [item for item in items if item["status"] == status]
-        if department_name:
-            items = [item for item in items if item["department_name"] == department_name]
-        if lead_advisor_name:
-            items = [item for item in items if item["lead_advisor_name"] == lead_advisor_name]
-        records = [self._build_team_record(item) for item in items]
+        if is_enabled is not None:
+            items = [item for item in items if (item.get("status") == "启用") == is_enabled]
+        if director_name:
+            items = [item for item in items if item["lead_advisor_name"] == director_name]
+        records = [self._build_center_record(item) for item in items]
         paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return TeamListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+        return CenterListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+
+    def get_registered_portal_students(
+        self,
+        keyword: str | None = None,
+        application_form_status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> RegisteredPortalStudentListResponse:
+        try:
+            items, total = self._postgres_store.list_registered_portal_students_page(
+                keyword=keyword,
+                application_form_status=application_form_status,
+                page=page,
+                page_size=page_size,
+            )
+            records = [RegisteredPortalStudentRecord(**item) for item in items]
+            return RegisteredPortalStudentListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query registered portal students from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
+        portal_students = list(self._list("portal_students"))
+        applications = list(self._list("recruitment_applications"))
+        plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
+
+        latest_application_map: dict[int, dict[str, Any]] = {}
+        for application in applications:
+            portal_student_id = int(application.get("portal_student_id") or 0)
+            if portal_student_id <= 0:
+                continue
+            previous = latest_application_map.get(portal_student_id)
+            current_sort_key = str(application.get("applied_at") or application.get("created_at") or "")
+            previous_sort_key = str(previous.get("applied_at") or previous.get("created_at") or "") if previous else ""
+            if previous is None or current_sort_key >= previous_sort_key:
+                latest_application_map[portal_student_id] = application
+
+        records = []
+        for student in portal_students:
+            student_id = int(student.get("id") or 0)
+            latest_application = latest_application_map.get(student_id)
+            submitted_at = str(student.get("submitted_at") or latest_application.get("applied_at") or "").strip() if latest_application else str(student.get("submitted_at") or "").strip()
+            application_status = str(latest_application.get("application_status") or "").strip() if latest_application else ""
+            plan_id = student.get("selected_plan_id") or (latest_application.get("plan_id") if latest_application else None)
+            record = RegisteredPortalStudentRecord(
+                id=student_id,
+                full_name=str(student.get("full_name") or ""),
+                phone_number=str(student.get("phone_number") or ""),
+                email=str(student.get("email") or ""),
+                id_number=str(student.get("id_number") or ""),
+                account_status=self._normalize_portal_account_status(student.get("account_status")),
+                application_form_status="已填写报名" if submitted_at else "未填写报名",
+                selected_plan_name=plan_name_map.get(int(plan_id or 0)) if plan_id is not None else None,
+                selected_center_name=str(student.get("selected_team_name") or "") or None,
+                selected_advisor_name=str(student.get("selected_advisor_name") or "") or None,
+                recruitment_application_status=application_status or None,
+                registered_at=str(student.get("created_at") or "") or None,
+                submitted_at=submitted_at or None,
+            )
+            records.append(record)
+
+        if keyword:
+            records = [
+                record for record in records
+                if self._matches_keyword(
+                    record.full_name,
+                    record.phone_number,
+                    record.email,
+                    record.id_number,
+                    record.selected_plan_name,
+                    record.selected_center_name,
+                    record.selected_advisor_name,
+                    keyword=keyword,
+                )
+            ]
+        if application_form_status:
+            records = [record for record in records if record.application_form_status == application_form_status]
+
+        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
+        return RegisteredPortalStudentListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
     def get_student_stats(self) -> StudentStats:
         distribution = Counter(item["status"] for item in self._list("students"))
         teams = self._list("teams")
+        portal_students = self._list("portal_students")
+        portal_submitted_total = len([item for item in portal_students if item.get("submitted_at")])
         return StudentStats(
             total_students=len(self._list("students")),
             active_students=distribution.get("在校", 0) + distribution.get("实习中", 0),
             outbound_students=distribution.get("外出研修", 0),
             thesis_students=distribution.get("学位论文阶段", 0),
             advisor_count=len({item["advisor_name"] for item in self._list("students")}),
-            team_total=len(teams),
-            active_team_total=len([item for item in teams if item.get("status") == "启用"]),
+            center_total=len(teams),
+            enabled_center_total=len([item for item in teams if item.get("status") == "启用"]),
+            registered_portal_total=len(portal_students),
+            portal_submitted_total=portal_submitted_total,
+            portal_unsubmitted_total=max(len(portal_students) - portal_submitted_total, 0),
         )
 
     def create_student(self, payload: StudentUpsert) -> StudentRecord:
         with self._lock:
             self._validate_student_payload(payload)
-            item = payload.model_dump()
+            item = {**payload.model_dump(exclude={"center_name"}), "team_name": payload.center_name}
             item["id"] = self._next_id("students")
             self._list("students").insert(0, item)
             self._record_operation("学生管理", "学生主档", str(item["id"]), "新增", f'新增学生 {item["full_name"]}')
             self._save()
-            return StudentRecord(**item)
+            return StudentRecord(center_name=item["team_name"], **{key: value for key, value in item.items() if key != "team_name"})
 
     def update_student(self, student_id: int, payload: StudentUpsert) -> StudentRecord:
         with self._lock:
             self._validate_student_payload(payload, current_student_id=student_id)
             index, item = self._find_required("students", student_id)
-            updated = {**item, **payload.model_dump(), "id": student_id}
+            updated = {**item, **payload.model_dump(exclude={"center_name"}), "team_name": payload.center_name, "id": student_id}
             self._list("students")[index] = updated
             self._record_operation("学生管理", "学生主档", str(student_id), "编辑", f'更新学生 {updated["full_name"]}')
             self._save()
-            return StudentRecord(**updated)
+            return StudentRecord(center_name=updated["team_name"], **{key: value for key, value in updated.items() if key != "team_name"})
 
     def delete_student(self, student_id: int) -> None:
         with self._lock:
@@ -2135,44 +2716,90 @@ class RuntimeManagementStore:
             self._record_operation("学生管理", "学生主档", str(student_id), "删除", f'删除学生 {item["full_name"]}')
             self._save()
 
-    def create_team(self, payload: TeamUpsert) -> TeamRecord:
+    def create_center(self, payload: CenterUpsert) -> CenterRecord:
         with self._lock:
-            item = self._validate_team_payload(payload)
+            item = self._validate_center_payload(payload)
             item["id"] = self._next_id("teams")
+            item["team_code"] = f"CENTER-{item['id']:03d}"
+            item.setdefault("department_name", "")
+            item.setdefault("discipline_name", "")
+            item.setdefault("research_directions", [])
+            item.setdefault("established_on", item.get("created_on"))
+            item.setdefault("description", None)
             self._list("teams").insert(0, item)
-            self._record_operation("学生管理", "团队主数据", str(item["id"]), "新增团队", f'新增团队 {item["team_name"]}')
-            self._save()
-            return self._build_team_record(item)
+            self._record_operation("学生管理", "研究中心主数据", str(item["id"]), "新增研究中心", f'新增研究中心 {item["team_name"]}')
+            try:
+                self._postgres_store.sync_created_center(
+                    item,
+                    operation_log=self._list("operation_logs")[0] if self._list("operation_logs") else None,
+                    counters={
+                        "teams": int(self._counters.get("teams", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Incremental center create sync failed, fallback to full state save: %s", exc)
+                self._save()
+            return self._build_center_record(item)
 
-    def update_team(self, team_id: int, payload: TeamUpsert) -> TeamRecord:
+    def update_center(self, center_id: int, payload: CenterUpsert) -> CenterRecord:
         with self._lock:
-            index, current = self._find_required("teams", team_id)
-            validated = self._validate_team_payload(payload, current_team_id=team_id)
+            postgres_teams = self._load_teams_from_postgres()
+            if postgres_teams:
+                self.state["teams"] = postgres_teams
+                self._counters["teams"] = max([item.get("id", 0) for item in postgres_teams], default=0)
+            index, current = self._find_required("teams", center_id)
+            validated = self._validate_center_payload(payload, current_center_id=center_id)
+            affected_students: list[dict[str, Any]] = []
             if current["team_name"] != validated["team_name"]:
                 for student in self._list("students"):
                     if student.get("team_name") == current["team_name"]:
                         student["team_name"] = validated["team_name"]
+                        affected_students.append(student)
             if any(student.get("team_name") == validated["team_name"] and student.get("advisor_name") not in validated["advisor_names"] for student in self._list("students")):
-                raise ValueError("Current team members contain advisors outside the selected advisor set")
-            updated = {**current, **validated, "id": team_id}
+                raise ValueError("Current center members contain advisors outside the selected advisor set")
+            updated = {**current, **validated, "id": center_id}
             self._list("teams")[index] = updated
-            self._record_operation("学生管理", "团队主数据", str(team_id), "编辑团队", f'更新团队 {updated["team_name"]}')
-            self._save()
-            return self._build_team_record(updated)
+            self._record_operation("学生管理", "研究中心主数据", str(center_id), "编辑研究中心", f'更新研究中心 {updated["team_name"]}')
+            try:
+                self._postgres_store.sync_updated_center(
+                    updated,
+                    affected_students=affected_students,
+                    operation_log=self._list("operation_logs")[0] if self._list("operation_logs") else None,
+                    counters={
+                        "teams": int(self._counters.get("teams", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Incremental center sync failed, fallback to full state save: %s", exc)
+                self._save()
+            return self._build_center_record(updated)
 
-    def delete_team(self, team_id: int) -> None:
+    def delete_center(self, center_id: int) -> None:
         with self._lock:
-            index, item = self._find_required("teams", team_id)
+            index, item = self._find_required("teams", center_id)
             if any(student.get("team_name") == item["team_name"] for student in self._list("students")):
-                raise ValueError("Team still has assigned students and cannot be deleted")
+                raise ValueError("Center still has assigned students and cannot be deleted")
             self._list("teams").pop(index)
-            self._record_operation("学生管理", "团队主数据", str(team_id), "删除团队", f'删除团队 {item["team_name"]}')
-            self._save()
+            self._record_operation("学生管理", "研究中心主数据", str(center_id), "删除研究中心", f'删除研究中心 {item["team_name"]}')
+            try:
+                self._postgres_store.sync_deleted_center(
+                    center_id,
+                    operation_log=self._list("operation_logs")[0] if self._list("operation_logs") else None,
+                    counters={
+                        "teams": int(self._counters.get("teams", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Incremental center delete sync failed, fallback to full state save: %s", exc)
+                self._save()
 
-    def delete_teams(self, team_ids: list[int]) -> BulkActionResponse:
+    def delete_centers(self, center_ids: list[int]) -> BulkActionResponse:
         success_count = 0
-        for team_id in team_ids:
-            self.delete_team(team_id)
+        for center_id in center_ids:
+            self.delete_center(center_id)
             success_count += 1
         return BulkActionResponse(success_count=success_count)
 
@@ -2638,6 +3265,20 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> SystemUserListResponse:
+        try:
+            items, total = self._postgres_store.list_system_users_page(
+                keyword=keyword,
+                role_code=role_code,
+                account_status=account_status,
+                department_name=department_name,
+                page=page,
+                page_size=page_size,
+            )
+            records = [SystemUserRecord(**item) for item in items]
+            return SystemUserListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query system users from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("system_users"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["username"], item["full_name"], item["department_name"], keyword=keyword)]
@@ -2823,6 +3464,19 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> OperationLogListResponse:
+        try:
+            items, total = self._postgres_store.list_operation_logs_page(
+                keyword=keyword,
+                module_name=module_name,
+                result=result,
+                page=page,
+                page_size=page_size,
+            )
+            records = [OperationLogRecord(**item) for item in items]
+            return OperationLogListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query operation logs from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("operation_logs"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["operator_username"], item["entity_name"], item["summary"], keyword=keyword)]
@@ -2842,6 +3496,19 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> SyncLogListResponse:
+        try:
+            items, total = self._postgres_store.list_sync_logs_page(
+                keyword=keyword,
+                sync_status=sync_status,
+                source_system=source_system,
+                page=page,
+                page_size=page_size,
+            )
+            records = [SyncLogRecord(**item) for item in items]
+            return SyncLogListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query sync logs from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("sync_logs"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["source_system"], item["target_system"], item.get("failure_reason"), keyword=keyword)]
@@ -2882,6 +3549,19 @@ class RuntimeManagementStore:
         principal: Any | None = None,
     ) -> WorkflowTaskListResponse:
         principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": []})
+        try:
+            items, total = self._postgres_store.list_workflow_tasks_page(
+                status=status,
+                module=module,
+                keyword=keyword,
+                page=page,
+                page_size=page_size,
+            )
+            records = [self._build_workflow_task_record(item, principal_roles=principal_summary["roles"]) for item in items]
+            return WorkflowTaskListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query workflow tasks from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("workflow_tasks"))
         if status:
             items = [item for item in items if item["status"] == status]
@@ -2963,12 +3643,21 @@ class RuntimeManagementStore:
             current = self.get_profile(username).model_dump()
             updated = {**current, **payload.model_dump(), "username": username}
             self.state.setdefault("profiles", {})[username] = updated
+            updated_user: dict[str, Any] | None = None
             for index, item in enumerate(self._list("system_users")):
                 if item["username"] == username:
-                    self._list("system_users")[index] = {**item, "full_name": updated["full_name"], "phone_number": updated.get("phone_number")}
+                    updated_user = {**item, "full_name": updated["full_name"], "phone_number": updated.get("phone_number")}
+                    self._list("system_users")[index] = updated_user
                     break
-            self._record_operation("个人空间", "个人资料", username, "编辑", f'更新个人资料 {updated["full_name"]}', operator_username=username)
-            self._save()
+            operation_log = self._record_operation("个人空间", "个人资料", username, "编辑", f'更新个人资料 {updated["full_name"]}', operator_username=username)
+            try:
+                self._postgres_store.update_runtime_profile(username, updated)
+                if updated_user is not None:
+                    self._postgres_store.update_runtime_system_user(int(updated_user["id"]), updated_user)
+                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
+                self._postgres_store.insert_runtime_operation_log(operation_log)
+            except Exception:
+                self._save()
             return UserProfile(**updated)
 
 

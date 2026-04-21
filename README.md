@@ -7,6 +7,8 @@
 - 新增对外学生门户，面向考生提供注册、登录、找回密码、查看招生计划、选择导师团队和在线填写学生档案能力。
 - 学生门户入口已拆分为两个页面：`/portal` 用于注册登录与密码找回，`/portal/application` 用于计划选择与档案填写。
 - 学生档案页已升级为科技感表单界面，包含顶部流程箭头、左侧章节导航、可折叠章节面板、右下角快捷目录与回到顶部入口。
+- 学生门户报名页已完成结构化改造，教育经历、实践经历、英语能力、家庭成员、论文/获奖、个人陈述与附件上传均已接入结构化 DTO、结构化子表和附件归档表。
+- 门户真实端到端链路已完成联调验证：注册、登录、附件上传、提交申请、再次查看与流程发起均已跑通；可直接使用 `backend/scripts/smoke_portal_application.ps1` 做本机烟雾验证。
 - 招生计划新增招生简章图片字段 `brochure_image_url`，管理端招生计划维护页已支持展示该字段，学生端会随所选计划展示不同简章图片。
 - 前端最新构建已通过；当前仍存在 Vite 大 chunk 告警，但不影响使用。
 
@@ -160,8 +162,12 @@ npm run dev
 
 - 新考生可在 `/portal` 完成注册，注册信息为手机号、邮箱、姓名、身份证号和密码。
 - 已注册考生可在 `/portal` 登录，也可在同页通过“找回密码”重设密码。
-- 登录成功后进入 `/portal/application`，先选择一个正在执行的招生计划，再按章节填写档案、选择导师团队并提交申请表。
+- 登录成功后进入 `/portal/application`，先选择一个正在执行的招生计划，再按章节填写结构化申请内容、上传相关附件并提交申请表。
 - 学生申请页右下角已提供“目录”和“回到顶部”快捷入口，适配长表单场景。
+
+本地烟雾联调脚本：
+
+- `backend/scripts/smoke_portal_application.ps1`：用于验证门户注册、登录、计划/团队读取、简历上传、申请提交、再次查看与流程发起。
 
 ### 5.2 登录与会话联调说明
 
@@ -205,6 +211,100 @@ npm run dev
 ```powershell
 .\start-system.ps1 -InstallDependencies
 ```
+
+当前根目录一共提供三种启动模式：
+
+1. 开发模式：`start-system.ps1`
+2. 打包预览模式：`start-system-preview.ps1`
+3. 后端静态托管模式：`start-system-static.ps1`
+
+#### 开发模式
+
+用于日常开发，前端走 `npm run dev`，后端走 `uvicorn --reload`：
+
+```powershell
+.\start-system.ps1
+```
+
+或者：
+
+```powershell
+.\start-system.cmd
+```
+
+特点：
+
+- 前端为 Vite 开发服务器，支持热更新。
+- 后端为 FastAPI 开发模式，代码改动后自动重载。
+- 默认端口：前端 `5173`，后端 `8000`。
+
+#### 打包预览模式
+
+用于验证 `frontend/dist` 的实际运行效果，会先执行前端构建，再启动后端和 `vite preview`：
+
+```powershell
+.\start-system-preview.ps1
+```
+
+或者：
+
+```powershell
+.\start-system-preview.cmd
+```
+
+可选参数：
+
+- `-InstallDependencies`：首次安装依赖。
+- `-SkipFrontendBuild`：跳过前端重新构建，直接预览现有 `dist`。
+- `-BackendPort`：修改后端端口，默认 `8000`。
+- `-FrontendPort`：修改预览端口，默认 `4173`。
+
+示例：
+
+```powershell
+.\start-system-preview.ps1 -SkipFrontendBuild
+.\start-system-preview.ps1 -FrontendPort 4174
+```
+
+特点：
+
+- 前端运行的是打包产物，不再是开发服务器。
+- 无需 Nginx，即可本机验证 `dist`。
+- 默认前端预览地址：`http://127.0.0.1:4173`
+
+#### 后端静态托管模式
+
+用于用单一服务同时提供 API 和前端静态页面。脚本会先构建 `frontend/dist`，再由 FastAPI 直接托管：
+
+```powershell
+.\start-system-static.ps1
+```
+
+或者：
+
+```powershell
+.\start-system-static.cmd
+```
+
+可选参数：
+
+- `-InstallDependencies`：首次安装依赖。
+- `-SkipFrontendBuild`：跳过前端重新构建。
+- `-Port`：修改统一访问端口，默认 `8000`。
+
+示例：
+
+```powershell
+.\start-system-static.ps1 -SkipFrontendBuild
+.\start-system-static.ps1 -Port 8080
+```
+
+特点：
+
+- 前后端共用同一个端口。
+- 应用首页和学生门户页面都由 FastAPI 直接提供静态文件。
+- 默认应用地址：`http://127.0.0.1:8000`
+- OpenAPI 仍可通过：`http://127.0.0.1:8000/docs`
 
 ### 6. 重新生成详细设计文档与图像
 

@@ -26,12 +26,18 @@ class PostgresStateStore:
         "018_recruitment_application_profile.sql",
         "019_portal_student_and_brochure.sql",
         "021_portal_auth_and_profile_fields.sql",
+        "022_portal_application_structured_schema.sql",
+        "023_runtime_team_store.sql",
+        "024_recruitment_plan_description.sql",
+        "025_portal_student_account_status.sql",
+        "026_portal_profile_photo_and_ethnic_dict.sql",
         "050_dict_schema.sql",
     )
 
     DATASET_TABLES: dict[str, str] = {
         "profiles": "dtlms_runtime_profiles",
         "students": "dtlms_runtime_students",
+        "teams": "dtlms_runtime_teams",
         "recruitment_plans": "dtlms_runtime_recruitment_plans",
         "recruitment_applications": "dtlms_runtime_recruitment_applications",
         "training_plans": "dtlms_runtime_training_plans",
@@ -58,6 +64,11 @@ class PostgresStateStore:
         "018_recruitment_application_profile.sql",
         "019_portal_student_and_brochure.sql",
         "021_portal_auth_and_profile_fields.sql",
+        "022_portal_application_structured_schema.sql",
+        "023_runtime_team_store.sql",
+        "024_recruitment_plan_description.sql",
+        "025_portal_student_account_status.sql",
+        "026_portal_profile_photo_and_ethnic_dict.sql",
         "020_views.sql",
         "030_seed_rbac.sql",
         "040_runtime_store.sql",
@@ -198,14 +209,364 @@ class PostgresStateStore:
                 )
             conn.commit()
 
+    def update_runtime_profile(self, username: str, payload: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_runtime_profiles (username, payload, updated_at)
+                    VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                    ON CONFLICT (username) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (str(username), self._json_payload(payload)),
+                )
+            conn.commit()
+
+    def update_runtime_portal_student(self, student_id: int, payload: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_runtime_portal_students (id, payload, updated_at)
+                    VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (int(student_id), self._json_payload(payload)),
+                )
+            conn.commit()
+
+    def update_runtime_counter(self, counter_name: str, counter_value: int) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_runtime_counters (counter_name, counter_value, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (counter_name) DO UPDATE
+                    SET counter_value = EXCLUDED.counter_value,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (str(counter_name), int(counter_value)),
+                )
+            conn.commit()
+
+    def insert_runtime_operation_log(self, payload: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_runtime_operation_logs (id, payload, updated_at)
+                    VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (int(payload["id"]), self._json_payload(payload)),
+                )
+            conn.commit()
+
+    def load_team_state(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        t.id,
+                        t.team_code,
+                        t.team_name,
+                        COALESCE(t.department_name, '') AS department_name,
+                        COALESCE(t.discipline_name, '') AS discipline_name,
+                        COALESCE(lead.full_name, '') AS lead_advisor_name,
+                        COALESCE(advisor_names.advisor_names, ARRAY[]::text[]) AS advisor_names,
+                        t.research_directions,
+                        t.team_status,
+                        COALESCE(TO_CHAR(t.established_on, 'YYYY-MM-DD'), TO_CHAR(t.created_at::date, 'YYYY-MM-DD')) AS established_on,
+                        t.description
+                    FROM dtlms_teams t
+                    LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
+                    LEFT JOIN LATERAL (
+                        SELECT array_agg(DISTINCT advisor.full_name ORDER BY advisor.full_name) AS advisor_names
+                        FROM dtlms_team_advisors ta
+                        JOIN dtlms_advisors advisor ON advisor.id = ta.advisor_id AND advisor.is_deleted = FALSE
+                        WHERE ta.team_id = t.id AND ta.is_deleted = FALSE
+                    ) advisor_names ON TRUE
+                    WHERE t.is_deleted = FALSE
+                    ORDER BY t.id
+                    """
+                )
+                rows = cur.fetchall()
+
+        return [
+            {
+                "id": int(row["id"]),
+                "team_code": row["team_code"],
+                "team_name": row["team_name"],
+                "department_name": row["department_name"],
+                "discipline_name": row["discipline_name"],
+                "lead_advisor_name": row["lead_advisor_name"] or None,
+                "advisor_names": list(row["advisor_names"] or []),
+                "research_directions": self._split_delimited_values(row["research_directions"]),
+                "status": self._team_status_label(row["team_status"]),
+                "established_on": row["established_on"],
+                "description": row["description"],
+            }
+            for row in rows
+        ]
+
+    def sync_updated_center(
+        self,
+        team_payload: dict[str, Any],
+        affected_students: list[dict[str, Any]],
+        operation_log: dict[str, Any] | None,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                for counter_name, counter_value in (counters or {}).items():
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_runtime_counters (counter_name, counter_value)
+                        VALUES (%s, %s)
+                        ON CONFLICT (counter_name) DO UPDATE
+                        SET counter_value = EXCLUDED.counter_value
+                        """,
+                        (counter_name, int(counter_value)),
+                    )
+
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_runtime_teams (id, payload, updated_at)
+                    VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (int(team_payload["id"]), self._json_payload(team_payload)),
+                )
+
+                for student in affected_students:
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_runtime_students (id, payload, updated_at)
+                        VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE
+                        SET payload = EXCLUDED.payload,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (int(student["id"]), self._json_payload(student)),
+                    )
+
+                if operation_log:
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_runtime_operation_logs (id, payload, updated_at)
+                        VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE
+                        SET payload = EXCLUDED.payload,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (int(operation_log["id"]), self._json_payload(operation_log)),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_operation_logs (
+                            id, operator_username, operator_role, module_name, entity_name, entity_id,
+                            action, old_value, new_value, request_ip, result, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE
+                        SET operator_username = EXCLUDED.operator_username,
+                            module_name = EXCLUDED.module_name,
+                            entity_name = EXCLUDED.entity_name,
+                            entity_id = EXCLUDED.entity_id,
+                            action = EXCLUDED.action,
+                            new_value = EXCLUDED.new_value,
+                            request_ip = EXCLUDED.request_ip,
+                            result = EXCLUDED.result,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            int(operation_log["id"]),
+                            operation_log.get("operator_username", "admin"),
+                            "runtime_seed",
+                            operation_log.get("module_name"),
+                            operation_log.get("entity_name"),
+                            operation_log.get("entity_id"),
+                            operation_log.get("action"),
+                            self._json_payload({"summary": operation_log.get("summary")}),
+                            "127.0.0.1",
+                            operation_log.get("result", "success"),
+                            operation_log.get("operated_at"),
+                            operation_log.get("operated_at"),
+                        ),
+                    )
+
+                advisor_map = self._fetch_map(
+                    cur,
+                    "SELECT id, full_name AS key FROM dtlms_advisors WHERE is_deleted = FALSE",
+                )
+                lead_advisor_name = team_payload.get("lead_advisor_name")
+                lead_advisor_id = advisor_map.get(lead_advisor_name) if lead_advisor_name else None
+                established_on = team_payload.get("created_on") or team_payload.get("established_on")
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_teams (
+                        id, team_code, team_name, department_name, discipline_name, lead_advisor_id,
+                        research_directions, team_status, established_on, description, is_deleted
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                    ON CONFLICT (id) DO UPDATE
+                    SET team_code = EXCLUDED.team_code,
+                        team_name = EXCLUDED.team_name,
+                        department_name = EXCLUDED.department_name,
+                        discipline_name = EXCLUDED.discipline_name,
+                        lead_advisor_id = EXCLUDED.lead_advisor_id,
+                        research_directions = EXCLUDED.research_directions,
+                        team_status = EXCLUDED.team_status,
+                        established_on = EXCLUDED.established_on,
+                        description = EXCLUDED.description,
+                        updated_at = CURRENT_TIMESTAMP,
+                        is_deleted = FALSE
+                    """,
+                    (
+                        int(team_payload["id"]),
+                        team_payload.get("team_code"),
+                        team_payload.get("team_name"),
+                        team_payload.get("department_name") or "未分配院系",
+                        team_payload.get("discipline_name"),
+                        lead_advisor_id,
+                        self._normalize_research_directions(team_payload.get("research_directions")),
+                        self._map_team_status(team_payload.get("status", "启用")),
+                        established_on,
+                        team_payload.get("description"),
+                    ),
+                )
+
+                cur.execute("DELETE FROM dtlms_team_advisors WHERE team_id = %s", (int(team_payload["id"]),))
+                advisor_names = self._normalize_name_list(team_payload.get("advisor_names"))
+                if lead_advisor_name and lead_advisor_name not in advisor_names:
+                    advisor_names.insert(0, lead_advisor_name)
+                inserted_advisors: set[int] = set()
+                for advisor_name in advisor_names:
+                    advisor_id = advisor_map.get(advisor_name)
+                    if not advisor_id or advisor_id in inserted_advisors:
+                        continue
+                    inserted_advisors.add(advisor_id)
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_team_advisors (team_id, advisor_id, advisor_role, joined_on, left_on, is_deleted)
+                        VALUES (%s, %s, %s, %s, NULL, FALSE)
+                        """,
+                        (
+                            int(team_payload["id"]),
+                            advisor_id,
+                            "lead" if advisor_name == lead_advisor_name else "member",
+                            established_on,
+                        ),
+                    )
+            conn.commit()
+
+    def sync_created_center(
+        self,
+        team_payload: dict[str, Any],
+        operation_log: dict[str, Any] | None,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.sync_updated_center(
+            team_payload,
+            affected_students=[],
+            operation_log=operation_log,
+            counters=counters,
+        )
+
+    def sync_deleted_center(
+        self,
+        center_id: int,
+        operation_log: dict[str, Any] | None,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                for counter_name, counter_value in (counters or {}).items():
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_runtime_counters (counter_name, counter_value)
+                        VALUES (%s, %s)
+                        ON CONFLICT (counter_name) DO UPDATE
+                        SET counter_value = EXCLUDED.counter_value
+                        """,
+                        (counter_name, int(counter_value)),
+                    )
+
+                cur.execute("DELETE FROM dtlms_runtime_teams WHERE id = %s", (int(center_id),))
+                cur.execute("DELETE FROM dtlms_team_advisors WHERE team_id = %s", (int(center_id),))
+                cur.execute("DELETE FROM dtlms_teams WHERE id = %s", (int(center_id),))
+
+                if operation_log:
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_runtime_operation_logs (id, payload, updated_at)
+                        VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE
+                        SET payload = EXCLUDED.payload,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (int(operation_log["id"]), self._json_payload(operation_log)),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_operation_logs (
+                            id, operator_username, operator_role, module_name, entity_name, entity_id,
+                            action, old_value, new_value, request_ip, result, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE
+                        SET operator_username = EXCLUDED.operator_username,
+                            module_name = EXCLUDED.module_name,
+                            entity_name = EXCLUDED.entity_name,
+                            entity_id = EXCLUDED.entity_id,
+                            action = EXCLUDED.action,
+                            new_value = EXCLUDED.new_value,
+                            request_ip = EXCLUDED.request_ip,
+                            result = EXCLUDED.result,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            int(operation_log["id"]),
+                            operation_log.get("operator_username", "admin"),
+                            "runtime_seed",
+                            operation_log.get("module_name"),
+                            operation_log.get("entity_name"),
+                            operation_log.get("entity_id"),
+                            operation_log.get("action"),
+                            self._json_payload({"summary": operation_log.get("summary")}),
+                            "127.0.0.1",
+                            operation_log.get("result", "success"),
+                            operation_log.get("operated_at"),
+                            operation_log.get("operated_at"),
+                        ),
+                    )
+            conn.commit()
+
     def _seed_relational_tables(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
         self._seed_users_and_roles(cur, state)
         advisor_map = self._seed_advisors(cur, state)
         team_map = self._seed_teams(cur, state, advisor_map)
         student_map = self._seed_students(cur, state, advisor_map, team_map)
-        plan_map = self._seed_recruitment(cur, state)
+        plan_map, field_map, group_ids = self._seed_recruitment(cur, state)
         training_plan_map = self._seed_training(cur, state, student_map, advisor_map)
         self._seed_portal_students(cur, state, plan_map)
+        self._seed_recruitment_applications(cur, state, plan_map, field_map, group_ids)
+        self._seed_portal_application_structures(cur, state)
         thesis_map = self._seed_degree(cur, state, student_map, advisor_map)
         self._seed_operation_logs(cur, state)
         self._seed_sync_logs(cur, state)
@@ -369,7 +730,7 @@ class PostgresStateStore:
                 )
         return student_map
 
-    def _seed_recruitment(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> dict[int, int]:
+    def _seed_recruitment(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> tuple[dict[int, int], dict[str, int], dict[str, Any]]:
         cur.execute(
             "TRUNCATE TABLE dtlms_admission_decisions, dtlms_written_exam_scores, dtlms_interview_scores, "
             "dtlms_interview_schedules, dtlms_interview_groups, dtlms_material_scores, dtlms_reviewer_assignments, "
@@ -392,8 +753,8 @@ class PostgresStateStore:
             cur.execute(
                 """
                 INSERT INTO dtlms_recruitment_plans (
-                    id, plan_code, plan_name, academic_year, semester, start_date, end_date, target_quota, plan_status, brochure_image_url, is_deleted
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                    id, plan_code, plan_name, academic_year, semester, plan_description, start_date, end_date, target_quota, plan_status, brochure_image_url, is_deleted
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 """,
                 (
                     int(item["id"]),
@@ -401,6 +762,7 @@ class PostgresStateStore:
                     item["plan_name"],
                     item["academic_year"],
                     item["semester"],
+                    item.get("plan_description"),
                     f"{item['academic_year']}-03-01 08:00:00+08",
                     f"{item['academic_year']}-10-31 18:00:00+08",
                     int(item["target_quota"]),
@@ -420,12 +782,45 @@ class PostgresStateStore:
                 )
 
         group_ids = self._fetch_map(cur, "SELECT id, (plan_id::text || ':' || group_code) AS key FROM dtlms_interview_groups")
+        return plan_map, field_map, group_ids
+
+    def _seed_recruitment_applications(
+        self,
+        cur: psycopg.Cursor[Any],
+        state: dict[str, Any],
+        plan_map: dict[int, int],
+        field_map: dict[str, int],
+        group_ids: dict[str, Any],
+    ) -> None:
         application_rows = state.get("recruitment_applications", [])
+        portal_students = state.get("portal_students", [])
         for item in application_rows:
+            matched_student = next(
+                (
+                    student for student in portal_students
+                    if int(student.get("id") or 0) == int(item.get("portal_student_id") or 0)
+                ),
+                None,
+            )
+            if matched_student is None:
+                matched_student = next(
+                    (
+                        student for student in portal_students
+                        if int(student.get("selected_plan_id") or 0) == int(item.get("plan_id") or 0)
+                        and (
+                            (student.get("phone_number") and student.get("phone_number") == item.get("phone_number"))
+                            or (student.get("email") and student.get("email") == item.get("email"))
+                            or (student.get("id_number") and student.get("id_number") == item.get("id_number"))
+                        )
+                    ),
+                    None,
+                )
+            draft = self._derive_portal_application_draft(matched_student) if matched_student else None
             application_status = self._map_application_status(item.get("application_status", "报名已提交"))
             application_columns = [
                 "id",
                 "plan_id",
+                "portal_student_id",
                 "business_key",
                 "student_name",
                 "candidate_no",
@@ -458,6 +853,8 @@ class PostgresStateStore:
                 "graduate_major",
                 "intended_advisor_name",
                 "discovery_channel",
+                "source_channel",
+                "source_channel_other",
                 "graduate_school",
                 "overseas_university_name",
                 "overseas_master_university_name",
@@ -480,6 +877,7 @@ class PostgresStateStore:
             application_values = (
                 int(item["id"]),
                 plan_map[int(item["plan_id"])],
+                int(item.get("portal_student_id") or matched_student.get("id") or 0) if matched_student or item.get("portal_student_id") else None,
                 item.get("business_key") or item["candidate_no"],
                 item["student_name"],
                 item["candidate_no"],
@@ -512,6 +910,8 @@ class PostgresStateStore:
                 item.get("graduate_major"),
                 item.get("intended_advisor_name"),
                 item.get("discovery_channel"),
+                item.get("source_channel") or (draft or {}).get("source_channel"),
+                item.get("source_channel_other") or (draft or {}).get("source_channel_other"),
                 item.get("graduate_school"),
                 item.get("overseas_university_name"),
                 item.get("overseas_master_university_name"),
@@ -590,7 +990,6 @@ class PostgresStateStore:
                 "INSERT INTO dtlms_written_exam_scores (application_id, exam_date, exam_score, import_batch_no) VALUES (%s, %s, %s, %s)",
                 (int(item["id"]), "2026-03-20", item.get("final_score"), "SIM-2026-01"),
             )
-        return plan_map
 
     def _seed_portal_students(self, cur: psycopg.Cursor[Any], state: dict[str, Any], plan_map: dict[int, int]) -> None:
         cur.execute("TRUNCATE TABLE dtlms_portal_students RESTART IDENTITY CASCADE")
@@ -604,8 +1003,8 @@ class PostgresStateStore:
                     graduation_school, highest_degree, intended_field, political_status, english_level,
                     family_info, education_experience, practice_experience, personal_profile,
                     recommendation_notes, personal_statement_text, signed_agreement, selected_plan_id,
-                    selected_team_name, selected_advisor_name, self_evaluation, submitted_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    selected_team_name, selected_advisor_name, self_evaluation, submitted_at, account_status, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     int(item["id"]),
@@ -639,8 +1038,231 @@ class PostgresStateStore:
                     item.get("selected_advisor_name"),
                     item.get("self_evaluation"),
                     item.get("submitted_at"),
+                    self._normalize_portal_account_status(item.get("account_status")),
+                    item.get("created_at"),
+                    item.get("updated_at"),
                 ),
             )
+
+    def _seed_portal_application_structures(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
+        application_rows = state.get("recruitment_applications", [])
+        for student in state.get("portal_students", []):
+            profile = self._derive_portal_profile(student)
+            if profile is not None:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_student_profiles (
+                        portal_student_id, full_name_pinyin, gender, birth_date, ethnic_group, native_place,
+                        political_status, marital_status, religious_belief, id_type, mailing_address,
+                        profile_photo_url,
+                        emergency_contact_name, emergency_contact_phone
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        int(student["id"]),
+                        profile.get("full_name_pinyin"),
+                        profile.get("gender"),
+                        profile.get("birth_date"),
+                        profile.get("ethnic_group"),
+                        profile.get("native_place"),
+                        profile.get("political_status"),
+                        profile.get("marital_status"),
+                        profile.get("religious_belief"),
+                        profile.get("id_type"),
+                        profile.get("mailing_address"),
+                        profile.get("profile_photo_url"),
+                        profile.get("emergency_contact_name"),
+                        profile.get("emergency_contact_phone"),
+                    ),
+                )
+
+            draft = self._derive_portal_application_draft(student)
+            matched_application = self._match_portal_application(student, application_rows)
+            if draft is None or matched_application is None:
+                continue
+            application_id = int(matched_application["id"])
+
+            def insert_attachment(owner_type: str, owner_id: int | None, category: str, file_url: str | None) -> None:
+                if not file_url:
+                    return
+                file_name = str(file_url).rstrip("/").split("/")[-1] or f"{category}.dat"
+                file_suffix = Path(file_name).suffix.lower().lstrip(".") or None
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_attachments (
+                        portal_student_id, application_id, owner_type, owner_id, attachment_category,
+                        file_name, file_url, file_type
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (int(student["id"]), application_id, owner_type, owner_id, category, file_name, file_url, file_suffix),
+                )
+
+            for preference in draft.get("preferences", []):
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_preferences (
+                        application_id, preference_order, research_center_name, advisor_name, is_optional
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        application_id,
+                        int(preference.get("preference_order") or 1),
+                        preference.get("research_center_name"),
+                        preference.get("advisor_name"),
+                        bool(preference.get("is_optional")),
+                    ),
+                )
+
+            for education in draft.get("education_experiences", []):
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_education_experiences (
+                        application_id, sort_order, education_stage, start_month, end_month, school_name,
+                        major_name, average_score, gpa, ranking, verifier_name, verifier_phone,
+                        transcript_attachment_url, degree_certificate_attachment_url
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        application_id,
+                        int(education.get("sort_order") or 1),
+                        education.get("education_stage"),
+                        education.get("start_month"),
+                        education.get("end_month"),
+                        education.get("school_name"),
+                        education.get("major_name"),
+                        education.get("average_score"),
+                        education.get("gpa"),
+                        education.get("ranking"),
+                        education.get("verifier_name"),
+                        education.get("verifier_phone"),
+                        education.get("transcript_attachment_url"),
+                        education.get("degree_certificate_attachment_url"),
+                    ),
+                )
+                education_row = cur.fetchone()
+                education_id = int(education_row[0]) if education_row else None
+                insert_attachment("education_experience", education_id, "transcript", education.get("transcript_attachment_url"))
+                insert_attachment("education_experience", education_id, "degree_certificate", education.get("degree_certificate_attachment_url"))
+
+            for practice in draft.get("practice_experiences", []):
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_practice_experiences (
+                        application_id, start_month, end_month, organization_name, position_name,
+                        responsibility_text, verifier_name, verifier_phone
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        application_id,
+                        practice.get("start_month"),
+                        practice.get("end_month"),
+                        practice.get("organization_name"),
+                        practice.get("position_name"),
+                        practice.get("responsibility_text"),
+                        practice.get("verifier_name"),
+                        practice.get("verifier_phone"),
+                    ),
+                )
+
+            for english in draft.get("english_proficiencies", []):
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_english_proficiencies (
+                        application_id, exam_name, score_text, certificate_attachment_url
+                    ) VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        application_id,
+                        english.get("exam_name"),
+                        english.get("score_text") or "",
+                        english.get("certificate_attachment_url"),
+                    ),
+                )
+                english_row = cur.fetchone()
+                english_id = int(english_row[0]) if english_row else None
+                insert_attachment("english_proficiency", english_id, "english_certificate", english.get("certificate_attachment_url"))
+
+            for member in draft.get("family_members", []):
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_family_members (
+                        application_id, member_name, relation_type, employer_name, job_title, contact_phone
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        application_id,
+                        member.get("member_name"),
+                        member.get("relation_type"),
+                        member.get("employer_name"),
+                        member.get("job_title"),
+                        member.get("contact_phone"),
+                    ),
+                )
+
+            for achievement in draft.get("achievement_records", []):
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_achievement_records (
+                        application_id, achievement_type, paper_title, author_order, journal_or_conference,
+                        publish_or_index_month, award_name, awarding_organization, award_level,
+                        award_year, responsibility_text
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        application_id,
+                        achievement.get("achievement_type"),
+                        achievement.get("paper_title"),
+                        achievement.get("author_order"),
+                        achievement.get("journal_or_conference"),
+                        achievement.get("publish_or_index_month"),
+                        achievement.get("award_name"),
+                        achievement.get("awarding_organization"),
+                        achievement.get("award_level"),
+                        achievement.get("award_year"),
+                        achievement.get("responsibility_text"),
+                    ),
+                )
+
+            personal_statement = draft.get("personal_statement") if isinstance(draft.get("personal_statement"), dict) else {}
+            if personal_statement:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_personal_statements (
+                        application_id, personal_statement_text, ai_problem_statement, ai_industry_opinion, resume_attachment_url
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        application_id,
+                        personal_statement.get("personal_statement_text"),
+                        personal_statement.get("ai_problem_statement"),
+                        personal_statement.get("ai_industry_opinion"),
+                        personal_statement.get("resume_attachment_url"),
+                    ),
+                )
+                insert_attachment("personal_statement", application_id, "resume", personal_statement.get("resume_attachment_url"))
+
+            declaration = draft.get("declaration") if isinstance(draft.get("declaration"), dict) else {}
+            if declaration:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_portal_application_declarations (
+                        application_id, has_read_declaration, declaration_text, progress_snapshot
+                    ) VALUES (%s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        application_id,
+                        bool(declaration.get("has_read_declaration")),
+                        declaration.get("declaration_text"),
+                        json.dumps(declaration.get("progress_snapshot")) if declaration.get("progress_snapshot") is not None else None,
+                    ),
+                )
+
+            legacy_personal_statement_attachment = matched_application.get("personal_statement_attachment")
+            if legacy_personal_statement_attachment and legacy_personal_statement_attachment != personal_statement.get("resume_attachment_url"):
+                insert_attachment("portal_application", application_id, "personal_statement", legacy_personal_statement_attachment)
+            insert_attachment("portal_application", application_id, "materials", matched_application.get("material_list_attachment"))
 
     def _seed_training(self, cur: psycopg.Cursor[Any], state: dict[str, Any], student_map: dict[str, int], advisor_map: dict[str, int]) -> dict[int, int]:
         cur.execute(
@@ -751,7 +1373,12 @@ class PostgresStateStore:
 
     def _seed_admission_decisions(self, cur: psycopg.Cursor[Any], state: dict[str, Any], plan_map: dict[int, int]) -> None:
         application_ids = {int(item["id"]): item for item in state.get("recruitment_applications", [])}
+        cur.execute("SELECT id FROM dtlms_recruitment_applications")
+        existing_application_ids = {int(row[0]) for row in cur.fetchall()}
         for application_id, item in application_ids.items():
+            if application_id not in existing_application_ids:
+                logger.warning("Skip admission decision seed because recruitment application %s does not exist", application_id)
+                continue
             decision_status = self._map_decision_status(item.get("application_status", "报名已提交"))
             cur.execute(
                 "INSERT INTO dtlms_admission_decisions (application_id, decision_status, rank_no, final_score, transfer_option, decision_comment) VALUES (%s, %s, %s, %s, %s, %s)",
@@ -1228,6 +1855,828 @@ class PostgresStateStore:
             return {str(row["key"]): row["id"] for row in rows}
         return {str(row[1]): row[0] for row in rows}
 
+    @staticmethod
+    def _parse_json_list(value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        if not value:
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return []
+            if isinstance(parsed, list):
+                return [item for item in parsed if isinstance(item, dict)]
+        return []
+
+    @classmethod
+    def _derive_portal_profile(cls, student: dict[str, Any]) -> dict[str, Any] | None:
+        profile = student.get("profile") if isinstance(student.get("profile"), dict) else {}
+        for key in (
+            "full_name_pinyin",
+            "profile_photo_url",
+            "gender",
+            "birth_date",
+            "ethnic_group",
+            "native_place",
+            "political_status",
+            "marital_status",
+            "religious_belief",
+            "id_type",
+            "mailing_address",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+        ):
+            profile.setdefault(key, student.get(key))
+        return profile if any(value not in (None, "", [], {}) for value in profile.values()) else None
+
+    @classmethod
+    def _derive_portal_application_draft(cls, student: dict[str, Any]) -> dict[str, Any] | None:
+        draft = student.get("application_draft") if isinstance(student.get("application_draft"), dict) else {}
+        preferences = draft.get("preferences") if isinstance(draft.get("preferences"), list) else []
+        if not preferences and student.get("selected_team_name"):
+            preferences = [
+                {
+                    "preference_order": 1,
+                    "research_center_name": student.get("selected_team_name"),
+                    "advisor_name": student.get("selected_advisor_name"),
+                    "is_optional": False,
+                }
+            ]
+        english_proficiencies = draft.get("english_proficiencies") if isinstance(draft.get("english_proficiencies"), list) else []
+        english_level = str(student.get("english_level") or "").strip()
+        if not english_proficiencies and english_level:
+            exam_name, _, score_text = english_level.partition(":")
+            english_proficiencies = [{"exam_name": exam_name.strip() or english_level, "score_text": score_text.strip() or None}]
+        personal_statement = draft.get("personal_statement") if isinstance(draft.get("personal_statement"), dict) else {}
+        if student.get("personal_statement_text") and not personal_statement.get("personal_statement_text"):
+            personal_statement["personal_statement_text"] = student.get("personal_statement_text")
+        declaration = draft.get("declaration") if isinstance(draft.get("declaration"), dict) else {}
+        declaration.setdefault("has_read_declaration", bool(student.get("signed_agreement")))
+        derived = {
+            "selected_plan_id": draft.get("selected_plan_id", student.get("selected_plan_id")),
+            "source_channel": draft.get("source_channel"),
+            "source_channel_other": draft.get("source_channel_other"),
+            "preferences": preferences,
+            "education_experiences": draft.get("education_experiences") or cls._parse_json_list(student.get("education_experience")),
+            "practice_experiences": draft.get("practice_experiences") or cls._parse_json_list(student.get("practice_experience")),
+            "english_proficiencies": english_proficiencies,
+            "family_members": draft.get("family_members") or cls._parse_json_list(student.get("family_info")),
+            "achievement_records": draft.get("achievement_records") or cls._parse_json_list(student.get("recommendation_notes")),
+            "personal_statement": personal_statement,
+            "declaration": declaration,
+            "submitted_at": draft.get("submitted_at", student.get("submitted_at")),
+        }
+        has_content = any(value not in (None, "", [], {}) for key, value in derived.items() if key != "selected_plan_id") or derived.get("selected_plan_id") is not None
+        return derived if has_content else None
+
+    @staticmethod
+    def _match_portal_application(student: dict[str, Any], application_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+        student_id = int(student.get("id") or 0)
+        selected_plan_id = student.get("selected_plan_id")
+        phone_number = student.get("phone_number")
+        email = student.get("email")
+        id_number = student.get("id_number")
+        for item in application_rows:
+            if int(item.get("portal_student_id") or 0) == student_id and (selected_plan_id is None or int(item.get("plan_id") or 0) == int(selected_plan_id)):
+                return item
+        for item in application_rows:
+            if selected_plan_id is not None and int(item.get("plan_id") or 0) != int(selected_plan_id):
+                continue
+            if phone_number and item.get("phone_number") == phone_number:
+                return item
+            if email and item.get("email") == email:
+                return item
+            if id_number and item.get("id_number") == id_number:
+                return item
+        return None
+
+    def get_portal_student_detail(self, student_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        ps.*,
+                        pp.full_name_pinyin,
+                        pp.profile_photo_url,
+                        pp.emergency_contact_name,
+                        pp.emergency_contact_phone
+                    FROM dtlms_portal_students ps
+                    LEFT JOIN dtlms_portal_student_profiles pp ON pp.portal_student_id = ps.id
+                    WHERE ps.id = %s
+                    """,
+                    (int(student_id),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                student = dict(row)
+                profile = self._derive_portal_profile(student)
+                if profile is not None:
+                    student["profile"] = profile
+
+                selected_plan_id = student.get("selected_plan_id")
+                cur.execute(
+                    """
+                    SELECT id, plan_id, source_channel, source_channel_other, intended_advisor_name, applied_at
+                    FROM dtlms_recruitment_applications
+                    WHERE is_deleted = FALSE AND portal_student_id = %s
+                    ORDER BY CASE WHEN plan_id = %s THEN 0 ELSE 1 END,
+                             COALESCE(applied_at, created_at) DESC,
+                             id DESC
+                    LIMIT 1
+                    """,
+                    (int(student_id), int(selected_plan_id) if selected_plan_id is not None else -1),
+                )
+                application = cur.fetchone()
+                if not application:
+                    draft = self._derive_portal_application_draft(student)
+                    if draft is not None:
+                        student["application_draft"] = draft
+                    return student
+
+                application_id = int(application["id"])
+                cur.execute(
+                    """
+                    SELECT preference_order, research_center_name, advisor_name, is_optional
+                    FROM dtlms_portal_application_preferences
+                    WHERE application_id = %s
+                    ORDER BY preference_order ASC, id ASC
+                    """,
+                    (application_id,),
+                )
+                preferences = [dict(item) for item in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT sort_order, education_stage, start_month, end_month, school_name, major_name,
+                           average_score, gpa, ranking, verifier_name, verifier_phone,
+                           transcript_attachment_url, degree_certificate_attachment_url
+                    FROM dtlms_portal_application_education_experiences
+                    WHERE application_id = %s
+                    ORDER BY sort_order ASC, id ASC
+                    """,
+                    (application_id,),
+                )
+                education_experiences = [dict(item) for item in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT start_month, end_month, organization_name, position_name, responsibility_text,
+                           verifier_name, verifier_phone
+                    FROM dtlms_portal_application_practice_experiences
+                    WHERE application_id = %s
+                    ORDER BY id ASC
+                    """,
+                    (application_id,),
+                )
+                practice_experiences = [dict(item) for item in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT exam_name, score_text, certificate_attachment_url
+                    FROM dtlms_portal_application_english_proficiencies
+                    WHERE application_id = %s
+                    ORDER BY id ASC
+                    """,
+                    (application_id,),
+                )
+                english_proficiencies = [dict(item) for item in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT member_name, relation_type, employer_name, job_title, contact_phone
+                    FROM dtlms_portal_application_family_members
+                    WHERE application_id = %s
+                    ORDER BY id ASC
+                    """,
+                    (application_id,),
+                )
+                family_members = [dict(item) for item in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT achievement_type, paper_title, author_order, journal_or_conference,
+                           publish_or_index_month, award_name, awarding_organization,
+                           award_level, award_year, responsibility_text
+                    FROM dtlms_portal_application_achievement_records
+                    WHERE application_id = %s
+                    ORDER BY id ASC
+                    """,
+                    (application_id,),
+                )
+                achievement_records = [dict(item) for item in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT personal_statement_text, ai_problem_statement, ai_industry_opinion, resume_attachment_url
+                    FROM dtlms_portal_application_personal_statements
+                    WHERE application_id = %s
+                    """,
+                    (application_id,),
+                )
+                personal_statement_row = cur.fetchone()
+                cur.execute(
+                    """
+                    SELECT has_read_declaration, declaration_text, progress_snapshot
+                    FROM dtlms_portal_application_declarations
+                    WHERE application_id = %s
+                    """,
+                    (application_id,),
+                )
+                declaration_row = cur.fetchone()
+                student["application_draft"] = {
+                    "selected_plan_id": int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None,
+                    "source_channel": application.get("source_channel"),
+                    "source_channel_other": application.get("source_channel_other"),
+                    "preferences": preferences,
+                    "education_experiences": education_experiences,
+                    "practice_experiences": practice_experiences,
+                    "english_proficiencies": english_proficiencies,
+                    "family_members": family_members,
+                    "achievement_records": achievement_records,
+                    "personal_statement": dict(personal_statement_row) if personal_statement_row else {},
+                    "declaration": dict(declaration_row) if declaration_row else {"has_read_declaration": bool(student.get("signed_agreement"))},
+                    "submitted_at": self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at"),
+                }
+                if preferences:
+                    student["selected_team_name"] = preferences[0].get("research_center_name") or student.get("selected_team_name")
+                    student["selected_advisor_name"] = preferences[0].get("advisor_name") or application.get("intended_advisor_name") or student.get("selected_advisor_name")
+                student["selected_plan_id"] = int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None
+                student["submitted_at"] = self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at")
+                return student
+
+    def list_workflow_tasks_page(
+        self,
+        status: str | None = None,
+        module: str | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1 = 1"]
+        params: list[Any] = []
+
+        if status:
+            where_clauses.append("COALESCE(payload->>'status', '') = %s")
+            params.append(status)
+        if module:
+            where_clauses.append("COALESCE(payload->>'business_module', '') = %s")
+            params.append(module)
+        if keyword and str(keyword).strip():
+            where_clauses.append(
+                """
+                concat_ws(
+                    ' ',
+                    COALESCE(payload->>'workflow_name', ''),
+                    COALESCE(payload->>'business_key', ''),
+                    COALESCE(payload->>'title', ''),
+                    COALESCE(payload->>'applicant_name', ''),
+                    COALESCE(payload->>'current_handler', '')
+                ) ILIKE %s
+                """
+            )
+            params.append(f"%{str(keyword).strip()}%")
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS total FROM dtlms_runtime_workflow_tasks WHERE {where_sql}",
+                    params,
+                )
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                cur.execute(
+                    f"""
+                    SELECT payload
+                    FROM dtlms_runtime_workflow_tasks
+                    WHERE {where_sql}
+                    ORDER BY COALESCE(payload->>'created_at', '') DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    [*params, page_size, offset],
+                )
+                items: list[dict[str, Any]] = []
+                for row in cur.fetchall():
+                    payload = row.get("payload")
+                    if isinstance(payload, dict):
+                        items.append(payload)
+                return items, total
+
+    def list_students_page(
+        self,
+        keyword: str | None = None,
+        status: str | None = None,
+        advisor_name: str | None = None,
+        center_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["s.is_deleted = FALSE"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            where_clauses.append(
+                """
+                (
+                    s.student_no ILIKE %s
+                    OR s.full_name ILIKE %s
+                    OR COALESCE(t.team_name, '') ILIKE %s
+                )
+                """
+            )
+            keyword_like = f"%{str(keyword).strip()}%"
+            params.extend([keyword_like, keyword_like, keyword_like])
+        if status:
+            where_clauses.append("s.current_status = %s")
+            params.append(self._map_student_status(status))
+        if advisor_name:
+            where_clauses.append("COALESCE(a.full_name, '') = %s")
+            params.append(advisor_name)
+        if center_name:
+            where_clauses.append("COALESCE(t.team_name, '') = %s")
+            params.append(center_name)
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                count_sql = f"""
+                    SELECT COUNT(*) AS total
+                    FROM dtlms_students s
+                    LEFT JOIN dtlms_advisors a ON a.id = s.primary_advisor_id
+                    LEFT JOIN dtlms_teams t ON t.id = s.team_id
+                    WHERE {where_sql}
+                """
+                cur.execute(count_sql, params)
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                page_sql = f"""
+                    SELECT
+                        s.id,
+                        s.student_no,
+                        s.full_name,
+                        s.current_status,
+                        COALESCE(a.full_name, '') AS advisor_name,
+                        COALESCE(t.team_name, '') AS team_name,
+                        s.degree_type,
+                        s.enrollment_year,
+                        s.phone_number,
+                        s.political_status
+                    FROM dtlms_students s
+                    LEFT JOIN dtlms_advisors a ON a.id = s.primary_advisor_id
+                    LEFT JOIN dtlms_teams t ON t.id = s.team_id
+                    WHERE {where_sql}
+                    ORDER BY s.id DESC
+                    LIMIT %s OFFSET %s
+                """
+                cur.execute(page_sql, [*params, page_size, offset])
+                return [self._normalize_student_row(dict(row)) for row in cur.fetchall()], total
+
+    def list_registered_portal_students_page(
+        self,
+        keyword: str | None = None,
+        application_form_status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1 = 1"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append(
+                """
+                (
+                    ps.full_name ILIKE %s
+                    OR ps.phone_number ILIKE %s
+                    OR ps.email ILIKE %s
+                    OR ps.id_number ILIKE %s
+                    OR COALESCE(rp.plan_name, '') ILIKE %s
+                    OR COALESCE(ps.selected_advisor_name, '') ILIKE %s
+                    OR COALESCE(ps.selected_team_name, '') ILIKE %s
+                )
+                """
+            )
+            params.extend([keyword_like] * 7)
+
+        normalized_status = str(application_form_status or "").strip()
+        if normalized_status == "已填写报名":
+            where_clauses.append("COALESCE(ps.submitted_at, latest_application.applied_at) IS NOT NULL")
+        elif normalized_status == "未填写报名":
+            where_clauses.append("COALESCE(ps.submitted_at, latest_application.applied_at) IS NULL")
+
+        where_sql = " AND ".join(where_clauses)
+        latest_application_sql = """
+            LEFT JOIN LATERAL (
+                SELECT ra.application_status, ra.applied_at
+                FROM dtlms_recruitment_applications ra
+                WHERE ra.is_deleted = FALSE AND ra.portal_student_id = ps.id
+                ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                LIMIT 1
+            ) latest_application ON TRUE
+        """
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                count_sql = f"""
+                    SELECT COUNT(*) AS total
+                    FROM dtlms_portal_students ps
+                    LEFT JOIN dtlms_recruitment_plans rp ON rp.id = ps.selected_plan_id
+                    {latest_application_sql}
+                    WHERE {where_sql}
+                """
+                cur.execute(count_sql, params)
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                page_sql = f"""
+                    SELECT
+                        ps.id,
+                        ps.full_name,
+                        ps.phone_number,
+                        ps.email,
+                        ps.id_number,
+                        ps.account_status,
+                        rp.plan_name AS selected_plan_name,
+                        ps.selected_team_name,
+                        ps.selected_advisor_name,
+                        ps.created_at,
+                        ps.submitted_at,
+                        latest_application.application_status,
+                        latest_application.applied_at
+                    FROM dtlms_portal_students ps
+                    LEFT JOIN dtlms_recruitment_plans rp ON rp.id = ps.selected_plan_id
+                    {latest_application_sql}
+                    WHERE {where_sql}
+                    ORDER BY ps.created_at DESC, ps.id DESC
+                    LIMIT %s OFFSET %s
+                """
+                cur.execute(page_sql, [*params, page_size, offset])
+                return [self._normalize_registered_portal_student_row(dict(row)) for row in cur.fetchall()], total
+
+    def list_operation_logs_page(
+        self,
+        keyword: str | None = None,
+        module_name: str | None = None,
+        result: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1 = 1"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            where_clauses.append(
+                """
+                (
+                    operator_username ILIKE %s
+                    OR entity_name ILIKE %s
+                    OR COALESCE(new_value->>'summary', '') ILIKE %s
+                )
+                """
+            )
+            keyword_like = f"%{str(keyword).strip()}%"
+            params.extend([keyword_like, keyword_like, keyword_like])
+        if module_name:
+            where_clauses.append("module_name = %s")
+            params.append(module_name)
+        if result:
+            where_clauses.append("result = %s")
+            params.append(result)
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS total FROM dtlms_operation_logs WHERE {where_sql}",
+                    params,
+                )
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                cur.execute(
+                    f"""
+                    SELECT id, created_at, operator_username, module_name, entity_name, entity_id, action, result, new_value
+                    FROM dtlms_operation_logs
+                    WHERE {where_sql}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    [*params, page_size, offset],
+                )
+                return [self._normalize_operation_log_row(dict(row)) for row in cur.fetchall()], total
+
+    def list_recruitment_applications_page(
+        self,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["ra.is_deleted = FALSE"]
+        params: list[Any] = []
+
+        if plan_id is not None:
+            where_clauses.append("ra.plan_id = %s")
+            params.append(int(plan_id))
+        if status:
+            where_clauses.append("ra.application_status = %s")
+            params.append(self._map_application_status(status))
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append(
+                """
+                (
+                    COALESCE(ra.business_key, '') ILIKE %s
+                    OR COALESCE(ra.candidate_no, '') ILIKE %s
+                    OR COALESCE(ra.student_name, '') ILIKE %s
+                    OR COALESCE(ra.graduation_school, '') ILIKE %s
+                    OR COALESCE(ra.graduate_school, '') ILIKE %s
+                    OR COALESCE(rf.field_name, '') ILIKE %s
+                    OR COALESCE(ra.first_choice, '') ILIKE %s
+                    OR COALESCE(ra.second_choice, '') ILIKE %s
+                    OR COALESCE(ra.intended_advisor_name, '') ILIKE %s
+                    OR COALESCE(ra.phone_number, '') ILIKE %s
+                    OR COALESCE(ra.email, '') ILIKE %s
+                )
+                """
+            )
+            params.extend([keyword_like] * 11)
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                count_sql = f"""
+                    SELECT COUNT(*) AS total
+                    FROM dtlms_recruitment_applications ra
+                    LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
+                    WHERE {where_sql}
+                """
+                cur.execute(count_sql, params)
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                page_sql = f"""
+                    SELECT
+                        ra.*,
+                        rf.field_name AS intended_field,
+                        am.material_status,
+                        qr.reviewer_username AS reviewer_name,
+                        ad.final_score
+                    FROM dtlms_recruitment_applications ra
+                    LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
+                    LEFT JOIN LATERAL (
+                        SELECT material_status
+                        FROM dtlms_application_materials
+                        WHERE application_id = ra.id AND is_deleted = FALSE
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT 1
+                    ) am ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT reviewer_username
+                        FROM dtlms_qualification_reviews
+                        WHERE application_id = ra.id
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT 1
+                    ) qr ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT final_score
+                        FROM dtlms_admission_decisions
+                        WHERE application_id = ra.id
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT 1
+                    ) ad ON TRUE
+                    WHERE {where_sql}
+                    ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                    LIMIT %s OFFSET %s
+                """
+                cur.execute(page_sql, [*params, page_size, offset])
+                return [self._normalize_recruitment_application_row(dict(row)) for row in cur.fetchall()], total
+
+    def list_centers_page(
+        self,
+        keyword: str | None = None,
+        is_enabled: bool | None = None,
+        director_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["t.is_deleted = FALSE"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append(
+                """
+                (
+                    t.team_name ILIKE %s
+                    OR COALESCE(lead.full_name, '') ILIKE %s
+                    OR EXISTS (
+                        SELECT 1
+                        FROM dtlms_team_advisors ta_keyword
+                        JOIN dtlms_advisors advisor_keyword ON advisor_keyword.id = ta_keyword.advisor_id AND advisor_keyword.is_deleted = FALSE
+                        WHERE ta_keyword.team_id = t.id
+                          AND ta_keyword.is_deleted = FALSE
+                          AND advisor_keyword.full_name ILIKE %s
+                    )
+                )
+                """
+            )
+            params.extend([keyword_like] * 3)
+        if is_enabled is not None:
+            where_clauses.append("t.team_status = %s" if is_enabled else "t.team_status <> %s")
+            params.append("active")
+        if director_name:
+            where_clauses.append("COALESCE(lead.full_name, '') = %s")
+            params.append(director_name)
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                count_sql = f"""
+                    SELECT COUNT(*) AS total
+                    FROM dtlms_teams t
+                    LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
+                    WHERE {where_sql}
+                """
+                cur.execute(count_sql, params)
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                page_sql = f"""
+                    SELECT
+                        t.id,
+                        t.team_name,
+                        lead.full_name AS director_name,
+                        COALESCE(advisor_names.advisor_names, '') AS advisor_names,
+                        t.team_status,
+                        COALESCE(TO_CHAR(t.established_on, 'YYYY-MM-DD'), TO_CHAR(t.created_at::date, 'YYYY-MM-DD')) AS created_date,
+                        COALESCE(student_stats.member_student_count, 0) AS member_student_count,
+                        COALESCE(student_stats.active_student_count, 0) AS active_student_count
+                    FROM dtlms_teams t
+                    LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(DISTINCT advisor.full_name, '、' ORDER BY advisor.full_name) AS advisor_names
+                        FROM dtlms_team_advisors ta
+                        JOIN dtlms_advisors advisor ON advisor.id = ta.advisor_id AND advisor.is_deleted = FALSE
+                        WHERE ta.team_id = t.id AND ta.is_deleted = FALSE
+                    ) advisor_names ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            COUNT(*) AS member_student_count,
+                            COUNT(*) FILTER (WHERE s.current_status IN ('enrolled', 'internship', 'outbound', 'thesis')) AS active_student_count
+                        FROM dtlms_students s
+                        WHERE s.team_id = t.id AND s.is_deleted = FALSE
+                    ) student_stats ON TRUE
+                    WHERE {where_sql}
+                    ORDER BY t.id DESC
+                    LIMIT %s OFFSET %s
+                """
+                cur.execute(page_sql, [*params, page_size, offset])
+                return [self._normalize_center_row(dict(row)) for row in cur.fetchall()], total
+
+    def list_sync_logs_page(
+        self,
+        keyword: str | None = None,
+        sync_status: str | None = None,
+        source_system: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1 = 1"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append(
+                """
+                (
+                    source_system ILIKE %s
+                    OR target_system ILIKE %s
+                    OR COALESCE(failure_reason, '') ILIKE %s
+                )
+                """
+            )
+            params.extend([keyword_like, keyword_like, keyword_like])
+        if sync_status:
+            where_clauses.append("sync_status = %s")
+            params.append(sync_status)
+        if source_system:
+            where_clauses.append("source_system = %s")
+            params.append(source_system)
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS total FROM dtlms_data_sync_logs WHERE {where_sql}",
+                    params,
+                )
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                cur.execute(
+                    f"""
+                    SELECT id, source_system, target_system, sync_status, record_count, created_at, failure_reason
+                    FROM dtlms_data_sync_logs
+                    WHERE {where_sql}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    [*params, page_size, offset],
+                )
+                return [self._normalize_sync_log_row(dict(row)) for row in cur.fetchall()], total
+
+    def list_system_users_page(
+        self,
+        keyword: str | None = None,
+        role_code: str | None = None,
+        account_status: str | None = None,
+        department_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1 = 1"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append(
+                """
+                (
+                    COALESCE(u.payload->>'username', '') ILIKE %s
+                    OR COALESCE(u.payload->>'full_name', '') ILIKE %s
+                    OR COALESCE(u.payload->>'department_name', '') ILIKE %s
+                )
+                """
+            )
+            params.extend([keyword_like, keyword_like, keyword_like])
+        if role_code:
+            where_clauses.append("COALESCE(u.payload->>'role_code', '') = %s")
+            params.append(role_code)
+        if account_status:
+            where_clauses.append("COALESCE(u.payload->>'account_status', '') = %s")
+            params.append(account_status)
+        if department_name:
+            where_clauses.append("COALESCE(u.payload->>'department_name', '') ILIKE %s")
+            params.append(f"%{department_name}%")
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS total FROM dtlms_runtime_system_users u WHERE {where_sql}",
+                    params,
+                )
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                cur.execute(
+                    f"""
+                    SELECT u.payload AS user_payload, r.payload AS role_payload
+                    FROM dtlms_runtime_system_users u
+                    LEFT JOIN dtlms_runtime_roles r ON COALESCE(r.payload->>'role_code', '') = COALESCE(u.payload->>'role_code', '')
+                    WHERE {where_sql}
+                    ORDER BY u.id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    [*params, page_size, offset],
+                )
+                return [self._normalize_system_user_row(dict(row)) for row in cur.fetchall()], total
+
     def list_dict_types(self, keyword: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -1508,6 +2957,193 @@ class PostgresStateStore:
         return mapping.get(value, "enrolled")
 
     @staticmethod
+    def _student_status_label(value: str | None) -> str:
+        mapping = {
+            "enrolled": "在校",
+            "outbound": "外出研修",
+            "thesis": "学位论文阶段",
+            "internship": "实习中",
+        }
+        return mapping.get(str(value or ""), "在校")
+
+    @classmethod
+    def _normalize_student_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "student_no": str(row.get("student_no") or ""),
+            "full_name": str(row.get("full_name") or ""),
+            "status": cls._student_status_label(row.get("current_status")),
+            "advisor_name": str(row.get("advisor_name") or ""),
+            "center_name": str(row.get("team_name") or ""),
+            "degree_type": str(row.get("degree_type") or ""),
+            "enrollment_year": int(row.get("enrollment_year") or 0),
+            "phone_number": row.get("phone_number"),
+            "political_status": row.get("political_status"),
+        }
+
+    @classmethod
+    def _normalize_registered_portal_student_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        submitted_at = cls._stringify_datetime(row.get("submitted_at") or row.get("applied_at"))
+        return {
+            "id": int(row["id"]),
+            "full_name": str(row.get("full_name") or ""),
+            "phone_number": str(row.get("phone_number") or ""),
+            "email": str(row.get("email") or ""),
+            "id_number": str(row.get("id_number") or ""),
+            "account_status": cls._normalize_portal_account_status(row.get("account_status")),
+            "application_form_status": "已填写报名" if submitted_at else "未填写报名",
+            "selected_plan_name": row.get("selected_plan_name"),
+            "selected_center_name": row.get("selected_team_name"),
+            "selected_advisor_name": row.get("selected_advisor_name"),
+            "recruitment_application_status": cls._application_status_label(row.get("application_status")) if row.get("application_status") else None,
+            "registered_at": cls._stringify_datetime(row.get("created_at")),
+            "submitted_at": submitted_at,
+        }
+
+    @staticmethod
+    def _normalize_portal_account_status(value: Any) -> str:
+        text = str(value or "").strip()
+        if text in {"已注销", "停用"}:
+            return "停用"
+        return "启用"
+
+    @staticmethod
+    def _normalize_operation_log_row(row: dict[str, Any]) -> dict[str, Any]:
+        new_value = row.get("new_value") if isinstance(row.get("new_value"), dict) else {}
+        return {
+            "id": int(row["id"]),
+            "operated_at": str(row.get("created_at") or ""),
+            "operator_username": str(row.get("operator_username") or ""),
+            "module_name": str(row.get("module_name") or ""),
+            "entity_name": str(row.get("entity_name") or ""),
+            "entity_id": str(row.get("entity_id") or ""),
+            "action": str(row.get("action") or ""),
+            "result": str(row.get("result") or ""),
+            "summary": str(new_value.get("summary") or ""),
+        }
+
+    @classmethod
+    def _normalize_recruitment_application_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "plan_id": int(row.get("plan_id") or 0),
+            "business_key": str(row.get("business_key") or ""),
+            "candidate_no": row.get("candidate_no"),
+            "review_round": row.get("review_round"),
+            "student_name": str(row.get("student_name") or ""),
+            "first_choice": row.get("first_choice"),
+            "second_choice": row.get("second_choice"),
+            "gender": row.get("gender"),
+            "political_status": row.get("political_status"),
+            "marital_status": row.get("marital_status"),
+            "religious_belief": row.get("religious_belief"),
+            "native_place": row.get("native_place"),
+            "phone_number": row.get("phone_number"),
+            "email": row.get("email"),
+            "mailing_address": row.get("mailing_address"),
+            "id_type": row.get("id_type"),
+            "id_number": row.get("id_number"),
+            "graduation_school": str(row.get("graduation_school") or ""),
+            "undergraduate_school": row.get("undergraduate_school"),
+            "accept_adjustment": row.get("accept_adjustment"),
+            "undergraduate_average_score": row.get("undergraduate_average_score"),
+            "undergraduate_gpa": row.get("undergraduate_gpa"),
+            "undergraduate_rank": row.get("undergraduate_rank"),
+            "undergraduate_major": row.get("undergraduate_major"),
+            "graduate_average_score": row.get("graduate_average_score"),
+            "graduate_gpa": row.get("graduate_gpa"),
+            "graduate_rank": row.get("graduate_rank"),
+            "graduate_major": row.get("graduate_major"),
+            "highest_degree": str(row.get("highest_degree") or ""),
+            "intended_field": row.get("intended_field"),
+            "intended_advisor_name": row.get("intended_advisor_name"),
+            "discovery_channel": row.get("discovery_channel"),
+            "source_channel": row.get("source_channel"),
+            "source_channel_other": row.get("source_channel_other"),
+            "graduate_school": row.get("graduate_school"),
+            "overseas_university_name": row.get("overseas_university_name"),
+            "overseas_master_university_name": row.get("overseas_master_university_name"),
+            "self_evaluation": row.get("self_evaluation"),
+            "applied_at": cls._stringify_datetime(row.get("applied_at")),
+            "research_problem": row.get("research_problem"),
+            "research_status_analysis": row.get("research_status_analysis"),
+            "research_impact": row.get("research_impact"),
+            "ai_society_impact": row.get("ai_society_impact"),
+            "dissenting_view": row.get("dissenting_view"),
+            "family_info": row.get("family_info"),
+            "education_experience": row.get("education_experience"),
+            "practice_experience": row.get("practice_experience"),
+            "personal_statement_text": row.get("personal_statement_text"),
+            "student_activity_experience": row.get("student_activity_experience"),
+            "personal_statement_attachment": row.get("personal_statement_attachment"),
+            "material_list_attachment": row.get("material_list_attachment"),
+            "supplementary_profile": row.get("supplementary_profile"),
+            "material_status": cls._material_status_label(row.get("material_status")),
+            "application_status": cls._application_status_label(row.get("application_status")),
+            "reviewer_name": row.get("reviewer_name"),
+            "final_score": float(row["final_score"]) if row.get("final_score") is not None else None,
+        }
+
+    @classmethod
+    def _normalize_center_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "center_name": str(row.get("team_name") or ""),
+            "director_name": str(row.get("director_name") or ""),
+            "advisor_names": cls._split_delimited_values(row.get("advisor_names")),
+            "is_enabled": str(row.get("team_status") or "") == "active",
+            "created_date": cls._stringify_datetime(row.get("created_date")),
+            "member_student_count": int(row.get("member_student_count") or 0),
+            "active_student_count": int(row.get("active_student_count") or 0),
+        }
+
+    @classmethod
+    def _normalize_sync_log_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "source_system": str(row.get("source_system") or ""),
+            "target_system": str(row.get("target_system") or ""),
+            "sync_status": str(row.get("sync_status") or ""),
+            "record_count": int(row.get("record_count") or 0),
+            "executed_at": cls._stringify_datetime(row.get("created_at")) or "",
+            "failure_reason": row.get("failure_reason"),
+        }
+
+    @classmethod
+    def _normalize_system_user_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        user_payload = row.get("user_payload") if isinstance(row.get("user_payload"), dict) else {}
+        role_payload = row.get("role_payload") if isinstance(row.get("role_payload"), dict) else {}
+        return {
+            "id": int(user_payload.get("id") or 0),
+            "username": str(user_payload.get("username") or ""),
+            "full_name": str(user_payload.get("full_name") or ""),
+            "role_code": str(user_payload.get("role_code") or ""),
+            "role_name": str(role_payload.get("role_name") or user_payload.get("role_code") or ""),
+            "department_name": str(user_payload.get("department_name") or ""),
+            "phone_number": user_payload.get("phone_number"),
+            "account_status": str(user_payload.get("account_status") or ""),
+            "last_login_at": cls._stringify_datetime(user_payload.get("last_login_at")),
+        }
+
+    @staticmethod
+    def _stringify_datetime(value: Any) -> str | None:
+        if value is None:
+            return None
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _split_delimited_values(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        text = str(value or "").strip()
+        if not text:
+            return []
+        return [item.strip() for item in text.split("、") if item.strip()]
+
+    @staticmethod
     def _map_team_status(value: str) -> str:
         mapping = {
             "启用": "active",
@@ -1516,6 +3152,16 @@ class PostgresStateStore:
             "归档": "archived",
         }
         return mapping.get(value, "active")
+
+    @staticmethod
+    def _team_status_label(value: str | None) -> str:
+        mapping = {
+            "active": "启用",
+            "inactive": "停用",
+            "planning": "筹建",
+            "archived": "归档",
+        }
+        return mapping.get(str(value or ""), "启用")
 
     @staticmethod
     def _map_training_plan_status(value: str) -> str:
@@ -1596,8 +3242,21 @@ class PostgresStateStore:
             "材料评分中": "scoring",
             "面试完成": "interviewed",
             "预录取": "pre_admitted",
+            "同意录取": "admitted",
         }
         return mapping.get(value, "submitted")
+
+    @staticmethod
+    def _application_status_label(value: str | None) -> str:
+        mapping = {
+            "submitted": "报名已提交",
+            "qualified": "资格审核通过",
+            "scoring": "材料评分中",
+            "interviewed": "面试完成",
+            "pre_admitted": "预录取",
+            "admitted": "同意录取",
+        }
+        return mapping.get(str(value or ""), "报名已提交")
 
     @staticmethod
     def _map_material_status(value: str) -> str:
@@ -1606,6 +3265,14 @@ class PostgresStateStore:
             "待补材料": "pending",
         }
         return mapping.get(value, "pending")
+
+    @staticmethod
+    def _material_status_label(value: str | None) -> str:
+        mapping = {
+            "approved": "材料齐全",
+            "pending": "待补材料",
+        }
+        return mapping.get(str(value or ""), "待补材料")
 
     @staticmethod
     def _map_review_status(application_status: str) -> str:

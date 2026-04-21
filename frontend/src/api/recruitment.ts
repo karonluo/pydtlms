@@ -1,4 +1,13 @@
 import type { PagedResponse, PaginationParams, SelectOption } from './common'
+import type {
+  PortalApplicantProfileData,
+  PortalApplicationDeclarationData,
+  PortalApplicationPreferenceItem,
+  PortalEducationExperienceItem,
+  PortalFamilyMemberItem,
+  PortalPersonalStatementData,
+  PortalPracticeExperienceItem,
+} from './portal'
 import http from './http'
 
 
@@ -8,12 +17,9 @@ export type RecruitPlanRecord = {
   academic_term: string
   academic_year: string
   semester: string
-  current_stage: string
-  target_quota: number
   application_count: number
-  interview_group_count: number
-  is_open: boolean
   brochure_image_url?: string | null
+  plan_description?: string | null
 }
 
 
@@ -24,6 +30,7 @@ export type RecruitApplicationRecord = {
   id: number
   plan_id: number
   business_key: string
+  portal_student_id?: number | null
   candidate_no?: string | null
   review_round?: string | null
   student_name: string
@@ -54,6 +61,8 @@ export type RecruitApplicationRecord = {
   intended_field: string
   intended_advisor_name?: string | null
   discovery_channel?: string | null
+  source_channel?: string | null
+  source_channel_other?: string | null
   graduate_school?: string | null
   overseas_university_name?: string | null
   overseas_master_university_name?: string | null
@@ -76,6 +85,13 @@ export type RecruitApplicationRecord = {
   application_status: string
   reviewer_name?: string | null
   final_score?: number | null
+  profile?: PortalApplicantProfileData | null
+  preferences?: PortalApplicationPreferenceItem[]
+  education_experiences?: PortalEducationExperienceItem[]
+  practice_experiences?: PortalPracticeExperienceItem[]
+  family_members?: PortalFamilyMemberItem[]
+  personal_statement?: PortalPersonalStatementData | null
+  declaration?: PortalApplicationDeclarationData | null
 }
 
 
@@ -124,9 +140,8 @@ export type RecruitWorkbench = {
   plans: Array<{
     plan_name: string
     academic_term: string
-    current_stage: string
+    plan_description?: string | null
     application_count: number
-    interview_group_count: number
   }>
   pipeline: Array<{
     stage: string
@@ -168,7 +183,7 @@ export function getRecruitmentWorkbench() {
 }
 
 
-export function listRecruitmentPlans(params?: PaginationParams & { keyword?: string; semester?: string; current_stage?: string }) {
+export function listRecruitmentPlans(params?: PaginationParams & { keyword?: string; semester?: string }) {
   return http.get<RecruitPlanListResponse>('/recruitment/plans', { params })
 }
 

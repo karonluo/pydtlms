@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { clearPortalToken, getPortalProfile } from '../api/portal'
 import { useAuthStore } from '../stores/auth'
 
 import AppLayout from '../layouts/AppLayout.vue'
@@ -16,6 +17,7 @@ const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
 const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
 const StudentPortalApplicationView = () => import('../views/portal/StudentPortalApplicationView.vue')
+const StudentPortalApplicationV2View = () => import('../views/portal/StudentPortalApplicationV2View.vue')
 
 const APP_TITLE = '博士生生命周期管理系统'
 
@@ -25,6 +27,7 @@ const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true, title: '系统登录' } },
     { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
     { path: '/portal/application', component: StudentPortalApplicationView, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
+    { path: '/portal/applicationv2', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表V2' } },
     {
       path: '/',
       component: AppLayout,
@@ -34,7 +37,8 @@ const router = createRouter({
         { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划' } },
         { path: 'students', redirect: '/students/records' },
         { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records' } },
-        { path: 'students/teams', component: StudentsView, meta: { title: '团队管理', section: 'teams' } },
+        { path: 'students/portal-registrations', component: StudentsView, meta: { title: '注册学生', section: 'portal-registrations' } },
+        { path: 'students/centers', component: StudentsView, meta: { title: '研究中心管理', section: 'centers' } },
         { path: 'training', redirect: '/training/plans' },
         { path: 'training/plans', component: TrainingView, meta: { title: '培养方案管理', section: 'plans' } },
         { path: 'training/reports', component: TrainingView, meta: { title: '科研报告管理', section: 'reports' } },
@@ -63,12 +67,24 @@ router.beforeEach(async (to) => {
   const hasAccessToken = Boolean(localStorage.getItem('dtlms-access-token'))
   const hasPortalToken = Boolean(localStorage.getItem('dtlms-portal-access-token'))
 
-  if (to.meta.portalProtected && !hasPortalToken) {
-    return { path: '/portal' }
-  }
-
-  if (to.path === '/portal' && hasPortalToken) {
-    return '/portal/application'
+  if (to.meta.portalProtected || to.path === '/portal') {
+    if (!hasPortalToken) {
+      if (to.meta.portalProtected) {
+        return { path: '/portal' }
+      }
+    } else {
+      try {
+        await getPortalProfile()
+        if (to.path === '/portal') {
+          return '/portal/applicationv2'
+        }
+      } catch {
+        clearPortalToken()
+        if (to.meta.portalProtected) {
+          return { path: '/portal' }
+        }
+      }
+    }
   }
 
 

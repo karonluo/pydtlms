@@ -95,10 +95,10 @@ def build_runtime_seed_state() -> dict[str, Any]:
     ]
 
     recruitment_plans = [
-        {"id": 1, "plan_name": "2026 秋季博士招生", "academic_year": "2026", "semester": "秋", "current_stage": "资格审核", "target_quota": 36, "interview_group_count": 4, "is_open": True, "brochure_image_url": "/portal-brochures/doctoral-fall.svg"},
-        {"id": 2, "plan_name": "2026 工程博士专项", "academic_year": "2026", "semester": "秋", "current_stage": "评分推荐", "target_quota": 28, "interview_group_count": 3, "is_open": True, "brochure_image_url": "/portal-brochures/engineering-track.svg"},
-        {"id": 3, "plan_name": "2026 智能制造联合培养", "academic_year": "2026", "semester": "秋", "current_stage": "面试执行", "target_quota": 18, "interview_group_count": 2, "is_open": True, "brochure_image_url": "/portal-brochures/intelligent-manufacturing.svg"},
-        {"id": 4, "plan_name": "2025 春季补录", "academic_year": "2025", "semester": "春", "current_stage": "预录取", "target_quota": 8, "interview_group_count": 1, "is_open": False, "brochure_image_url": "/portal-brochures/spring-supplement.svg"},
+        {"id": 1, "plan_name": "2026 秋季博士招生", "academic_year": "2026", "semester": "秋", "plan_description": "面向学术型博士申请人，重点关注基础研究能力与科研潜力。", "current_stage": "报名配置", "target_quota": 0, "interview_group_count": 0, "is_open": True, "brochure_image_url": "/portal-brochures/doctoral-fall.svg"},
+        {"id": 2, "plan_name": "2026 工程博士专项", "academic_year": "2026", "semester": "秋", "plan_description": "面向工程实践与产业问题导向申请人，强调场景落地与交叉协同。", "current_stage": "报名配置", "target_quota": 0, "interview_group_count": 0, "is_open": True, "brochure_image_url": "/portal-brochures/engineering-track.svg"},
+        {"id": 3, "plan_name": "2026 智能制造联合培养", "academic_year": "2026", "semester": "秋", "plan_description": "聚焦智能制造方向联合培养，适合具备制造业、自动化、AI 背景的申请人。", "current_stage": "报名配置", "target_quota": 0, "interview_group_count": 0, "is_open": True, "brochure_image_url": "/portal-brochures/intelligent-manufacturing.svg"},
+        {"id": 4, "plan_name": "2025 春季补录", "academic_year": "2025", "semester": "春", "plan_description": "针对上一轮缺口进行补录，适合已具备完整材料并可快速进入复核的申请人。", "current_stage": "报名配置", "target_quota": 0, "interview_group_count": 0, "is_open": True, "brochure_image_url": "/portal-brochures/spring-supplement.svg"},
     ]
 
     application_rows = [

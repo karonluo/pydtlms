@@ -17,6 +17,17 @@ class Settings(BaseSettings):
     docs_url: str = "/docs"
     openapi_url: str = "/openapi.json"
 
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "博士生生命周期管理系统"
+    smtp_use_tls: bool = False
+    smtp_use_ssl: bool = True
+    smtp_timeout_seconds: int = 15
+
     postgres_host: str = "47.117.107.23"
     postgres_port: int = 15431
     postgres_user: str = "postgres"

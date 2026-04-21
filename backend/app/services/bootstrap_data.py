@@ -37,9 +37,9 @@ def build_dashboard_overview() -> DashboardOverview:
 def build_recruitment_workbench() -> RecruitWorkbench:
     return RecruitWorkbench(
         plans=[
-            RecruitPlanSummary(plan_name="2026 学术交流周", academic_term="2026 秋", current_stage="资格审核", application_count=1082, interview_group_count=8),
-            RecruitPlanSummary(plan_name="2026 工程博士专项", academic_term="2026 秋", current_stage="评分推荐", application_count=744, interview_group_count=6),
-            RecruitPlanSummary(plan_name="2026 秋季招生", academic_term="2026 秋", current_stage="预录取", application_count=121, interview_group_count=4),
+            RecruitPlanSummary(plan_name="2026 学术交流周", academic_term="2026 秋", plan_description="面向学术型博士申请人，强调研究方法与学术潜力。", application_count=1082),
+            RecruitPlanSummary(plan_name="2026 工程博士专项", academic_term="2026 秋", plan_description="聚焦产业课题协同与工程落地能力。", application_count=744),
+            RecruitPlanSummary(plan_name="2026 秋季招生", academic_term="2026 秋", plan_description="常规秋季批次，覆盖多个研究方向与导师组。", application_count=121),
         ],
         pipeline=[
             {"stage": "报名列表", "count": 1082, "status": "active"},

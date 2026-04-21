@@ -2,8 +2,9 @@
 param(
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
-    [string]$BackendHost = '127.0.0.1',
-    [string]$FrontendHost = '127.0.0.1',
+    [string]$BackendHost = '0.0.0.0',
+    [string]$FrontendHost = '0.0.0.0',
+    [string]$AccessHost = '',
     [switch]$InstallDependencies
 )
 
@@ -34,6 +35,70 @@ function Test-CommandExists {
     param([string]$CommandName)
 
     return $null -ne (Get-Command $CommandName -ErrorAction SilentlyContinue)
+}
+
+function Get-PreferredAccessHost {
+    param([string]$RequestedHost)
+
+    if ($RequestedHost) {
+        return $RequestedHost
+    }
+
+    $candidate = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.IPAddress -and
+            $_.IPAddress -notin @('127.0.0.1', '0.0.0.0') -and
+            $_.PrefixOrigin -ne 'WellKnown' -and
+            $_.IPAddress -like '192.168.*'
+        } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+
+    if (-not $candidate) {
+        $candidate = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -and
+                $_.IPAddress -notin @('127.0.0.1', '0.0.0.0') -and
+                $_.PrefixOrigin -ne 'WellKnown'
+            } |
+            Select-Object -First 1 -ExpandProperty IPAddress
+    }
+
+    if (-not $candidate) {
+        $candidate = '127.0.0.1'
+    }
+
+    return $candidate
+}
+
+function Resolve-ProbeHost {
+    param([string]$BindHost)
+
+    if ([string]::IsNullOrWhiteSpace($BindHost) -or $BindHost -eq '0.0.0.0' -or $BindHost -eq '::') {
+        return '127.0.0.1'
+    }
+
+    return $BindHost
+}
+
+function Resolve-ApiHost {
+    param(
+        [string]$BindHost,
+        [string]$PreferredHost
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BindHost) -or $BindHost -eq '0.0.0.0' -or $BindHost -eq '::') {
+        return $PreferredHost
+    }
+
+    return $BindHost
+}
+
+function Get-AllowedOriginsValue {
+    param(
+        [string[]]$Origins
+    )
+
+    return (($Origins | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique) -join ',')
 }
 
 function Assert-Prerequisites {
@@ -194,17 +259,29 @@ function Stop-PortProcesses {
 }
 
 function Start-Backend {
-    $command = "& { Set-Location '$ProjectRoot'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Backend'; `n& '$PythonExe' -m uvicorn app.main:app --app-dir backend --host $BackendHost --port $BackendPort --reload }"
+    $command = "& { Set-Location '$ProjectRoot'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Backend'; `n`$env:ALLOWED_ORIGINS = '$AllowedOriginsValue'; `n& '$PythonExe' -m uvicorn app.main:app --app-dir backend --host $BackendHost --port $BackendPort --reload }"
     return Start-Process -FilePath $TerminalExe -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', $command) -PassThru
 }
 
 function Start-Frontend {
-    $command = "& { Set-Location '$FrontendDir'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Frontend'; `nnpm run dev -- --host $FrontendHost --port $FrontendPort }"
+    $command = "& { Set-Location '$FrontendDir'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Frontend'; `n`$env:VITE_API_BASE_URL = '/api/v1'; `n`$env:VITE_API_PROXY_TARGET = 'http://$BackendAccessHost`:$BackendPort'; `nnpm run dev -- --host $FrontendHost --port $FrontendPort }"
     return Start-Process -FilePath $TerminalExe -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', $command) -PassThru
 }
 
 Assert-Prerequisites
 Ensure-Dependencies
+
+$ResolvedAccessHost = Get-PreferredAccessHost -RequestedHost $AccessHost
+$BackendProbeHost = Resolve-ProbeHost -BindHost $BackendHost
+$FrontendProbeHost = Resolve-ProbeHost -BindHost $FrontendHost
+$BackendAccessHost = Resolve-ApiHost -BindHost $BackendHost -PreferredHost $ResolvedAccessHost
+$FrontendAccessHost = Resolve-ApiHost -BindHost $FrontendHost -PreferredHost $ResolvedAccessHost
+$FrontendApiBaseUrl = "http://$BackendAccessHost`:$BackendPort/api/v1"
+$AllowedOriginsValue = Get-AllowedOriginsValue -Origins @(
+    "http://127.0.0.1:$FrontendPort",
+    "http://localhost:$FrontendPort",
+    "http://$FrontendAccessHost`:$FrontendPort"
+)
 
 Write-Step '检查并清理端口占用。'
 Stop-PortProcesses -Port $BackendPort
@@ -213,8 +290,8 @@ Stop-PortProcesses -Port $FrontendPort
 Write-Step '启动后端服务。'
 $backendProcess = Start-Backend
 
-if (Wait-PortState -TargetHost $BackendHost -Port $BackendPort -DesiredState Listening -TimeoutSeconds 30) {
-    Write-Step "后端已启动: http://$BackendHost`:$BackendPort/docs"
+if (Wait-PortState -TargetHost $BackendProbeHost -Port $BackendPort -DesiredState Listening -TimeoutSeconds 30) {
+    Write-Step "后端已启动: http://127.0.0.1`:$BackendPort/docs"
 }
 else {
     Write-Warning "后端启动超时，请查看新打开的后端终端窗口。进程 ID: $($backendProcess.Id)"
@@ -223,8 +300,8 @@ else {
 Write-Step '启动前端服务。'
 $frontendProcess = Start-Frontend
 
-if (Wait-PortState -TargetHost $FrontendHost -Port $FrontendPort -DesiredState Listening -TimeoutSeconds 30) {
-    Write-Step "前端已启动: http://$FrontendHost`:$FrontendPort"
+if (Wait-PortState -TargetHost $FrontendProbeHost -Port $FrontendPort -DesiredState Listening -TimeoutSeconds 30) {
+    Write-Step "前端已启动: http://127.0.0.1`:$FrontendPort"
 }
 else {
     Write-Warning "前端启动超时，请查看新打开的前端终端窗口。进程 ID: $($frontendProcess.Id)"
@@ -232,5 +309,9 @@ else {
 
 Write-Host ''
 Write-Host '启动完成。' -ForegroundColor Green
-Write-Host "前端地址: http://$FrontendHost`:$FrontendPort" -ForegroundColor Green
-Write-Host "后端地址: http://$BackendHost`:$BackendPort/docs" -ForegroundColor Green
+Write-Host "前端地址(本机): http://127.0.0.1`:$FrontendPort" -ForegroundColor Green
+Write-Host "前端地址(局域网): http://$FrontendAccessHost`:$FrontendPort" -ForegroundColor Green
+Write-Host "后端地址(本机): http://127.0.0.1`:$BackendPort/docs" -ForegroundColor Green
+Write-Host "后端地址(局域网): http://$BackendAccessHost`:$BackendPort/docs" -ForegroundColor Green
+Write-Host "前端 API 基地址: /api/v1 (通过 Vite 代理到 http://$BackendAccessHost`:$BackendPort)" -ForegroundColor Green
+Write-Host "后端允许的前端源: $AllowedOriginsValue" -ForegroundColor Green

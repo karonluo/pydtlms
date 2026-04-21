@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS dtlms_runtime_teams (
+    id BIGINT PRIMARY KEY,
+    payload JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

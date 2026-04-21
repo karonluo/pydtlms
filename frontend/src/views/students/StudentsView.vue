@@ -1,31 +1,40 @@
 <script setup lang="ts">
+import axios from 'axios'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute } from 'vue-router'
-import TableRowActions from '../../components/table/TableRowActions.vue'
-import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
-import { useServerPagination } from '../../composables/useServerPagination'
 
+import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
+import { useServerPagination } from '../../composables/useServerPagination'
+import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 import {
-  batchDeleteTeams,
+  activateRegisteredPortalStudent,
+  batchDeleteCenters,
+  createCenter,
   createStudent,
-  createTeam,
+  deactivateRegisteredPortalStudent,
+  deleteCenter,
   deleteStudent,
-  deleteTeam,
   getStudentOptions,
   getStudentStats,
+  listCenters,
+  listRegisteredPortalStudents,
   listStudents,
-  listTeams,
+  resetRegisteredPortalStudentPassword,
+  sendRegisteredPortalStudentEmail,
+  updateCenter,
   updateStudent,
-  updateTeam,
+  type RegisteredPortalStudentActionResponse,
+  type CenterRecord,
+  type CenterUpsert,
+  type RegisteredPortalStudentEmailRequest,
+  type RegisteredPortalStudentRecord,
   type SelectOption,
   type StudentOptions,
   type StudentRecord,
   type StudentStats,
   type StudentUpsert,
-  type TeamRecord,
-  type TeamUpsert,
 } from '../../api/students'
 
 const route = useRoute()
@@ -33,11 +42,13 @@ const loading = ref(false)
 const bootstrapping = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
+const portalEmailDialogVisible = ref(false)
+const portalEmailSubmitting = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
-const selectedTeamIds = ref<number[]>([])
+const selectedCenterIds = ref<number[]>([])
 const studentStatusColors = ref<DictColorMap>({})
-const teamStatusColors = ref<DictColorMap>({})
+const portalEmailTarget = ref<RegisteredPortalStudentRecord | null>(null)
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -45,90 +56,109 @@ const stats = ref<StudentStats>({
   outbound_students: 0,
   thesis_students: 0,
   advisor_count: 0,
-  team_total: 0,
-  active_team_total: 0,
+  center_total: 0,
+  enabled_center_total: 0,
+  registered_portal_total: 0,
+  portal_submitted_total: 0,
+  portal_unsubmitted_total: 0,
 })
 const options = ref<StudentOptions>({
   status_options: [],
   degree_options: [],
   advisor_options: [],
-  team_options: [],
-  team_status_options: [],
+  center_options: [],
   political_status_options: [],
-  department_options: [],
-  discipline_options: [],
-  team_advisor_map: [],
+  center_advisor_map: [],
 })
 const students = ref<StudentRecord[]>([])
-const teams = ref<TeamRecord[]>([])
+const centers = ref<CenterRecord[]>([])
+const registeredPortalStudents = ref<RegisteredPortalStudentRecord[]>([])
 
 const studentFilters = reactive({
   keyword: '',
   status: '',
   advisor_name: '',
-  team_name: '',
+  center_name: '',
 })
-const teamFilters = reactive({
+const centerFilters = reactive({
   keyword: '',
-  status: '',
-  department_name: '',
-  lead_advisor_name: '',
+  is_enabled: '',
+  director_name: '',
+})
+const registeredPortalFilters = reactive({
+  keyword: '',
+  application_form_status: '',
+})
+const portalEmailForm = reactive<RegisteredPortalStudentEmailRequest>({
+  subject: '',
+  content: '',
 })
 
 const studentFormRef = ref<FormInstance>()
-const teamFormRef = ref<FormInstance>()
+const centerFormRef = ref<FormInstance>()
 const studentForm = reactive<StudentUpsert>({
   student_no: '',
   full_name: '',
   status: '在校',
   advisor_name: '',
-  team_name: '',
+  center_name: '',
   degree_type: '工程博士',
   enrollment_year: new Date().getFullYear(),
   phone_number: '',
   political_status: '',
 })
-const teamForm = reactive<TeamUpsert>({
-  team_code: '',
-  team_name: '',
-  department_name: '',
-  discipline_name: '',
-  lead_advisor_name: '',
+const centerForm = reactive<CenterUpsert>({
+  center_name: '',
+  director_name: '',
   advisor_names: [],
-  research_directions: [],
-  status: '启用',
-  established_on: '',
-  description: '',
+  is_enabled: true,
+  created_date: new Date().toISOString().slice(0, 10),
 })
+
+const centerEnabledOptions = [
+  { label: '启用', value: 'true' },
+  { label: '停用', value: 'false' },
+]
+const portalApplicationFormStatusOptions = [
+  { label: '已填写报名', value: '已填写报名' },
+  { label: '未填写报名', value: '未填写报名' },
+]
 
 const studentRules: FormRules<StudentUpsert> = {
   student_no: [{ required: true, message: '请输入学号', trigger: 'blur' }],
   full_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
   advisor_name: [{ required: true, message: '请选择导师', trigger: 'change' }],
-  team_name: [{ required: true, message: '请选择团队', trigger: 'change' }],
+  center_name: [{ required: true, message: '请选择中心', trigger: 'change' }],
   degree_type: [{ required: true, message: '请选择学位类型', trigger: 'change' }],
   enrollment_year: [{ required: true, message: '请输入入学年份', trigger: 'change' }],
 }
-const teamRules: FormRules<TeamUpsert> = {
-  team_code: [{ required: true, message: '请输入团队编码', trigger: 'blur' }],
-  team_name: [{ required: true, message: '请输入团队名称', trigger: 'blur' }],
-  department_name: [{ required: true, message: '请输入所属院系', trigger: 'blur' }],
-  discipline_name: [{ required: true, message: '请输入所属学科', trigger: 'blur' }],
-  lead_advisor_name: [{ required: true, message: '请选择负责人导师', trigger: 'change' }],
-  advisor_names: [{ required: true, message: '请选择团队导师', trigger: 'change', type: 'array' }],
-  status: [{ required: true, message: '请选择团队状态', trigger: 'change' }],
+const centerRules: FormRules<CenterUpsert> = {
+  center_name: [{ required: true, message: '请输入中心名称', trigger: 'blur' }],
+  director_name: [{ required: true, message: '请选择负责人', trigger: 'change' }],
+  advisor_names: [{ required: true, message: '请选择导师团队', trigger: 'change', type: 'array' }],
 }
 
 const activeSection = computed(() => String(route.meta.section || 'records'))
 const isRecordSection = computed(() => activeSection.value === 'records')
+const isCenterSection = computed(() => activeSection.value === 'centers')
+const isRegisteredPortalSection = computed(() => activeSection.value === 'portal-registrations')
+const canMutateSection = computed(() => !isRegisteredPortalSection.value)
 const sectionConfig = computed(() => {
-  if (activeSection.value === 'teams') {
+  if (activeSection.value === 'portal-registrations') {
     return {
-      title: '团队管理',
-      tag: '团队主数据',
-      createLabel: '新增团队',
-      total: teamPager.pagination.total,
+      title: '注册学生管理',
+      tag: '门户注册学生',
+      createLabel: '',
+      total: registeredStudentPager.pagination.total,
+    }
+  }
+  if (activeSection.value === 'centers') {
+    return {
+      title: '研究中心管理',
+      tag: '研究中心主数据',
+      createLabel: '新增研究中心',
+      total: centerPager.pagination.total,
     }
   }
   return {
@@ -139,10 +169,18 @@ const sectionConfig = computed(() => {
   }
 })
 const statCards = computed(() => {
-  if (activeSection.value === 'teams') {
+  if (activeSection.value === 'portal-registrations') {
     return [
-      { label: '团队总量', count: stats.value.team_total, tone: 'healthy' },
-      { label: '启用团队', count: stats.value.active_team_total, tone: 'attention' },
+      { label: '注册学生总量', count: stats.value.registered_portal_total, tone: 'healthy' },
+      { label: '已填写报名', count: stats.value.portal_submitted_total, tone: 'attention' },
+      { label: '未填写报名', count: stats.value.portal_unsubmitted_total, tone: 'neutral' },
+      { label: '研究中心总量', count: stats.value.center_total, tone: 'warning' },
+    ]
+  }
+  if (activeSection.value === 'centers') {
+    return [
+      { label: '研究中心总量', count: stats.value.center_total, tone: 'healthy' },
+      { label: '启用研究中心', count: stats.value.enabled_center_total, tone: 'attention' },
       { label: '导师总量', count: stats.value.advisor_count, tone: 'neutral' },
       { label: '在读学生', count: stats.value.active_students, tone: 'warning' },
     ]
@@ -154,49 +192,37 @@ const statCards = computed(() => {
     { label: '论文阶段', count: stats.value.thesis_students, tone: 'warning' },
   ]
 })
-const teamAdvisorMap = computed(() => {
+const centerAdvisorMap = computed(() => {
   const mapping = new Map<string, SelectOption[]>()
-  options.value.team_advisor_map.forEach((item) => mapping.set(item.team_name, item.advisors))
+  options.value.center_advisor_map.forEach((item) => mapping.set(item.center_name, item.advisors))
   return mapping
 })
 const advisorOptions = computed(() => {
-  if (!studentForm.team_name) {
+  if (!studentForm.center_name) {
     return options.value.advisor_options
   }
-  return teamAdvisorMap.value.get(studentForm.team_name) || []
+  return centerAdvisorMap.value.get(studentForm.center_name) || []
 })
-const departmentOptions = computed(() => {
-  return options.value.department_options
-})
-const disciplineOptions = computed(() => options.value.discipline_options)
-const teamResearchDirectionText = computed(() => teamForm.research_directions.join('、'))
 const studentPager = useServerPagination()
-const teamPager = useServerPagination()
-
-function splitTextValues(value: string) {
-  return Array.from(new Set(value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean)))
-}
+const centerPager = useServerPagination()
+const registeredStudentPager = useServerPagination()
 
 function normalizeStudentPayload(payload: StudentUpsert): StudentUpsert {
   return {
     ...payload,
+    center_name: payload.center_name.trim(),
     phone_number: payload.phone_number?.trim() || '',
     political_status: payload.political_status?.trim() || '',
   }
 }
 
-function normalizeTeamPayload(payload: TeamUpsert): TeamUpsert {
+function normalizeCenterPayload(payload: CenterUpsert): CenterUpsert {
   return {
     ...payload,
-    team_code: payload.team_code.trim(),
-    team_name: payload.team_name.trim(),
-    department_name: payload.department_name.trim(),
-    discipline_name: payload.discipline_name.trim(),
-    lead_advisor_name: payload.lead_advisor_name.trim(),
+    center_name: payload.center_name.trim(),
+    director_name: payload.director_name.trim(),
     advisor_names: Array.from(new Set(payload.advisor_names.filter(Boolean))),
-    research_directions: Array.from(new Set(payload.research_directions.filter(Boolean))),
-    established_on: payload.established_on || '',
-    description: payload.description?.trim() || '',
+    created_date: payload.created_date || new Date().toISOString().slice(0, 10),
   }
 }
 
@@ -209,7 +235,6 @@ async function loadOptions() {
   const response = await getStudentOptions()
   options.value = response.data
   studentStatusColors.value = buildDictColorMap(response.data.status_options)
-  teamStatusColors.value = buildDictColorMap(response.data.team_status_options)
 }
 
 async function loadRecords() {
@@ -217,7 +242,7 @@ async function loadRecords() {
     keyword: studentFilters.keyword || undefined,
     status: studentFilters.status || undefined,
     advisor_name: studentFilters.advisor_name || undefined,
-    team_name: studentFilters.team_name || undefined,
+    center_name: studentFilters.center_name || undefined,
     page: studentPager.pagination.currentPage,
     page_size: studentPager.pagination.pageSize,
   })
@@ -225,24 +250,38 @@ async function loadRecords() {
   studentPager.sync(response.data.total)
 }
 
-async function loadTeams() {
-  const response = await listTeams({
-    keyword: teamFilters.keyword || undefined,
-    status: teamFilters.status || undefined,
-    department_name: teamFilters.department_name || undefined,
-    lead_advisor_name: teamFilters.lead_advisor_name || undefined,
-    page: teamPager.pagination.currentPage,
-    page_size: teamPager.pagination.pageSize,
+async function loadCenters() {
+  const response = await listCenters({
+    keyword: centerFilters.keyword || undefined,
+    is_enabled: centerFilters.is_enabled ? centerFilters.is_enabled === 'true' : undefined,
+    director_name: centerFilters.director_name || undefined,
+    page: centerPager.pagination.currentPage,
+    page_size: centerPager.pagination.pageSize,
   })
-  teams.value = response.data.items
-  teamPager.sync(response.data.total)
+  centers.value = response.data.items
+  centerPager.sync(response.data.total)
+}
+
+async function loadRegisteredPortalStudents() {
+  const response = await listRegisteredPortalStudents({
+    keyword: registeredPortalFilters.keyword || undefined,
+    application_form_status: registeredPortalFilters.application_form_status || undefined,
+    page: registeredStudentPager.pagination.currentPage,
+    page_size: registeredStudentPager.pagination.pageSize,
+  })
+  registeredPortalStudents.value = response.data.items
+  registeredStudentPager.sync(response.data.total)
 }
 
 async function loadSectionData() {
   loading.value = true
   try {
-    if (activeSection.value === 'teams') {
-      await loadTeams()
+    if (activeSection.value === 'portal-registrations') {
+      await loadRegisteredPortalStudents()
+      return
+    }
+    if (activeSection.value === 'centers') {
+      await loadCenters()
       return
     }
     await loadRecords()
@@ -271,7 +310,7 @@ function resetStudentForm() {
     full_name: '',
     status: '在校',
     advisor_name: '',
-    team_name: '',
+    center_name: '',
     degree_type: '工程博士',
     enrollment_year: new Date().getFullYear(),
     phone_number: '',
@@ -280,27 +319,25 @@ function resetStudentForm() {
   studentFormRef.value?.clearValidate()
 }
 
-function resetTeamForm() {
+function resetCenterForm() {
   currentId.value = null
-  Object.assign(teamForm, {
-    team_code: '',
-    team_name: '',
-    department_name: '',
-    discipline_name: '',
-    lead_advisor_name: '',
+  Object.assign(centerForm, {
+    center_name: '',
+    director_name: '',
     advisor_names: [],
-    research_directions: [],
-    status: '启用',
-    established_on: '',
-    description: '',
+    is_enabled: true,
+    created_date: new Date().toISOString().slice(0, 10),
   })
-  teamFormRef.value?.clearValidate()
+  centerFormRef.value?.clearValidate()
 }
 
 function openCreateDialog() {
+  if (!canMutateSection.value) {
+    return
+  }
   dialogMode.value = 'create'
-  if (activeSection.value === 'teams') {
-    resetTeamForm()
+  if (activeSection.value === 'centers') {
+    resetCenterForm()
   } else {
     resetStudentForm()
   }
@@ -315,7 +352,7 @@ function openStudentEditDialog(row: StudentRecord) {
     full_name: row.full_name,
     status: row.status,
     advisor_name: row.advisor_name,
-    team_name: row.team_name,
+    center_name: row.center_name,
     degree_type: row.degree_type,
     enrollment_year: row.enrollment_year,
     phone_number: row.phone_number || '',
@@ -324,20 +361,15 @@ function openStudentEditDialog(row: StudentRecord) {
   dialogVisible.value = true
 }
 
-function openTeamEditDialog(row: TeamRecord) {
+function openCenterEditDialog(row: CenterRecord) {
   dialogMode.value = 'edit'
   currentId.value = row.id
-  Object.assign(teamForm, {
-    team_code: row.team_code,
-    team_name: row.team_name,
-    department_name: row.department_name,
-    discipline_name: row.discipline_name,
-    lead_advisor_name: row.lead_advisor_name,
+  Object.assign(centerForm, {
+    center_name: row.center_name,
+    director_name: row.director_name,
     advisor_names: [...row.advisor_names],
-    research_directions: [...row.research_directions],
-    status: row.status,
-    established_on: row.established_on || '',
-    description: row.description || '',
+    is_enabled: row.is_enabled,
+    created_date: row.created_date || new Date().toISOString().slice(0, 10),
   })
   dialogVisible.value = true
 }
@@ -368,8 +400,8 @@ async function submitStudentForm() {
   }
 }
 
-async function submitTeamForm() {
-  const formInstance = teamFormRef.value
+async function submitCenterForm() {
+  const formInstance = centerFormRef.value
   if (!formInstance) {
     return
   }
@@ -379,24 +411,27 @@ async function submitTeamForm() {
   }
   submitting.value = true
   try {
-    const payload = normalizeTeamPayload(teamForm)
+    const payload = normalizeCenterPayload(centerForm)
     if (dialogMode.value === 'create') {
-      await createTeam(payload)
-      ElMessage.success('团队已新增')
+      await createCenter(payload)
+      ElMessage.success('研究中心已新增')
     } else if (currentId.value !== null) {
-      await updateTeam(currentId.value, payload)
-      ElMessage.success('团队信息已更新')
+      await updateCenter(currentId.value, payload)
+      ElMessage.success('研究中心信息已更新')
     }
     dialogVisible.value = false
     await refreshAfterMutation()
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '研究中心保存失败') : '研究中心保存失败'
+    ElMessage.error(detail)
   } finally {
     submitting.value = false
   }
 }
 
 async function submitDialog() {
-  if (activeSection.value === 'teams') {
-    await submitTeamForm()
+  if (isCenterSection.value) {
+    await submitCenterForm()
     return
   }
   await submitStudentForm()
@@ -409,28 +444,38 @@ async function handleDeleteStudent(row: StudentRecord) {
   await refreshAfterMutation()
 }
 
-async function handleDeleteTeam(row: TeamRecord) {
-  await ElMessageBox.confirm(`确定删除团队 ${row.team_name} 吗？`, '删除确认', { type: 'warning' })
-  await deleteTeam(row.id)
-  ElMessage.success('团队已删除')
-  await refreshAfterMutation()
+async function handleDeleteCenter(row: CenterRecord) {
+  try {
+    await ElMessageBox.confirm(`确定删除研究中心 ${row.center_name} 吗？`, '删除确认', { type: 'warning' })
+    await deleteCenter(row.id)
+    ElMessage.success('研究中心已删除')
+    await refreshAfterMutation()
+  } catch (error) {
+    if (error === 'cancel') {
+      return
+    }
+    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '研究中心删除失败') : '研究中心删除失败'
+    ElMessage.error(detail)
+  }
 }
 
-async function handleBatchDeleteTeams() {
-  if (!selectedTeamIds.value.length) {
-    ElMessage.warning('请先选择团队')
+async function handleBatchDeleteCenters() {
+  if (!selectedCenterIds.value.length) {
+    ElMessage.warning('请先选择研究中心')
     return
   }
-  await ElMessageBox.confirm(`确定批量删除已选 ${selectedTeamIds.value.length} 个团队吗？`, '批量删除确认', { type: 'warning' })
-  const response = await batchDeleteTeams(selectedTeamIds.value)
-  ElMessage.success(`已删除 ${response.data.success_count} 个团队`)
-  selectedTeamIds.value = []
+  await ElMessageBox.confirm(`确定批量删除已选 ${selectedCenterIds.value.length} 个研究中心吗？`, '批量删除确认', { type: 'warning' })
+  const response = await batchDeleteCenters(selectedCenterIds.value)
+  ElMessage.success(`已删除 ${response.data.success_count} 个研究中心`)
+  selectedCenterIds.value = []
   await refreshAfterMutation()
 }
 
 async function handleSearch() {
-  if (activeSection.value === 'teams') {
-    teamPager.reset()
+  if (isRegisteredPortalSection.value) {
+    registeredStudentPager.reset()
+  } else if (isCenterSection.value) {
+    centerPager.reset()
   } else {
     studentPager.reset()
   }
@@ -438,11 +483,13 @@ async function handleSearch() {
 }
 
 async function handleReset() {
-  Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', team_name: '' })
-  Object.assign(teamFilters, { keyword: '', status: '', department_name: '', lead_advisor_name: '' })
-  selectedTeamIds.value = []
+  Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
+  Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
+  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '' })
+  selectedCenterIds.value = []
   studentPager.reset()
-  teamPager.reset()
+  centerPager.reset()
+  registeredStudentPager.reset()
   await loadSectionData()
 }
 
@@ -456,36 +503,46 @@ async function handleStudentPageSizeChange(size: number) {
   await loadSectionData()
 }
 
-async function handleTeamPageChange(page: number) {
-  teamPager.handleCurrentChange(page)
+async function handleCenterPageChange(page: number) {
+  centerPager.handleCurrentChange(page)
   await loadSectionData()
 }
 
-async function handleTeamPageSizeChange(size: number) {
-  teamPager.handleSizeChange(size)
+async function handleCenterPageSizeChange(size: number) {
+  centerPager.handleSizeChange(size)
   await loadSectionData()
 }
 
-function handleTeamSelectionChange(selection: TeamRecord[]) {
-  selectedTeamIds.value = selection.map((item) => item.id)
+async function handleRegisteredStudentPageChange(page: number) {
+  registeredStudentPager.handleCurrentChange(page)
+  await loadSectionData()
 }
 
-function handleStudentTeamChange(value: string) {
-  const availableAdvisors = teamAdvisorMap.value.get(value) || []
+async function handleRegisteredStudentPageSizeChange(size: number) {
+  registeredStudentPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+function handleCenterSelectionChange(selection: CenterRecord[]) {
+  selectedCenterIds.value = selection.map((item) => item.id)
+}
+
+function handleStudentCenterChange(value: string) {
+  const availableAdvisors = centerAdvisorMap.value.get(value) || []
   if (!availableAdvisors.some((item) => item.value === studentForm.advisor_name)) {
     studentForm.advisor_name = ''
   }
 }
 
-function handleTeamLeadAdvisorChange(value: string) {
-  if (!teamForm.advisor_names.includes(value)) {
-    teamForm.advisor_names = Array.from(new Set([...teamForm.advisor_names, value]))
+function handleCenterDirectorChange(value: string) {
+  if (!centerForm.advisor_names.includes(value)) {
+    centerForm.advisor_names = Array.from(new Set([...centerForm.advisor_names, value]))
   }
 }
 
-function syncTeamLeadAdvisor() {
-  if (!teamForm.advisor_names.includes(teamForm.lead_advisor_name)) {
-    teamForm.lead_advisor_name = teamForm.advisor_names[0] || ''
+function syncCenterDirector() {
+  if (!centerForm.advisor_names.includes(centerForm.director_name)) {
+    centerForm.director_name = centerForm.advisor_names[0] || ''
   }
 }
 
@@ -493,16 +550,149 @@ function statusTagType(status: string) {
   return resolveDictTagType(status, studentStatusColors.value)
 }
 
-function teamStatusTagType(status: string) {
-  return resolveDictTagType(status, teamStatusColors.value)
+function portalApplicationFormStatusTagType(status: string) {
+  if (status === '已填写报名') {
+    return 'success'
+  }
+  return 'info'
 }
 
-watch(() => studentForm.team_name, handleStudentTeamChange)
-watch(() => teamForm.lead_advisor_name, handleTeamLeadAdvisorChange)
-watch(() => teamForm.advisor_names, syncTeamLeadAdvisor)
+function portalRecruitmentStatusTagType(status: string | null | undefined) {
+  if (!status) {
+    return 'info'
+  }
+  if (status === '报名已提交' || status === '资格审核通过' || status === '材料评分中' || status === '面试完成') {
+    return 'warning'
+  }
+  if (status === '预录取' || status === '同意录取') {
+    return 'success'
+  }
+  return 'info'
+}
+
+function portalAccountStatusTagType(status: string) {
+  return status === '启用' ? 'success' : 'danger'
+}
+
+function buildRegisteredStudentActionMessage(response: RegisteredPortalStudentActionResponse, sentText: string, skippedText: string) {
+  if (response.email_sent === true) {
+    return `${response.message}\n\n${sentText}`
+  }
+  if (response.email_sent === false) {
+    return `${response.message}\n\n${skippedText}`
+  }
+  return response.message
+}
+
+function resetPortalEmailForm() {
+  portalEmailTarget.value = null
+  portalEmailForm.subject = ''
+  portalEmailForm.content = ''
+}
+
+async function handleDeactivateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
+  if (row.account_status === '停用') {
+    await ElMessageBox.alert('该注册学生账号已停用。', '提示', { type: 'info' })
+    return
+  }
+  await ElMessageBox.confirm(`确定停用 ${row.full_name} 的门户账号吗？停用后将无法登录和提交报名。`, '停用确认', { type: 'warning' })
+  const response = await deactivateRegisteredPortalStudent(row.id)
+  await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
+  await refreshAfterMutation()
+}
+
+async function handleActivateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
+  if (row.account_status === '启用') {
+    await ElMessageBox.alert('该注册学生账号已启用。', '提示', { type: 'info' })
+    return
+  }
+  await ElMessageBox.confirm(`确定重新启用 ${row.full_name} 的门户账号吗？启用后可恢复登录和报名操作。`, '启用确认', { type: 'warning' })
+  const response = await activateRegisteredPortalStudent(row.id)
+  await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
+  await refreshAfterMutation()
+}
+
+async function handleResetRegisteredPortalStudentPassword(row: RegisteredPortalStudentRecord) {
+  if (row.account_status !== '启用') {
+    await ElMessageBox.alert('已停用账号不可重置密码。', '提示', { type: 'warning' })
+    return
+  }
+  await ElMessageBox.confirm(`确定重置 ${row.full_name} 的门户密码吗？系统将生成临时密码。`, '重置密码确认', { type: 'warning' })
+  const response = await resetRegisteredPortalStudentPassword(row.id)
+  const detailLines = [buildRegisteredStudentActionMessage(response.data, '重置密码邮件已发送。', '当前未配置邮件服务，本次未发送邮件。')]
+  if (response.data.temporary_password) {
+    detailLines.push(`临时密码：${response.data.temporary_password}`)
+  }
+  await ElMessageBox.alert(detailLines.join('\n\n'), '重置密码成功', { type: 'success' })
+  await refreshAfterMutation()
+}
+
+function openRegisteredPortalStudentEmailDialog(row: RegisteredPortalStudentRecord) {
+  portalEmailTarget.value = row
+  portalEmailForm.subject = '博士生招生门户通知'
+  portalEmailForm.content = ''
+  portalEmailDialogVisible.value = true
+}
+
+function registeredPortalMainActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
+  return [
+    {
+      key: row.account_status === '启用' ? 'deactivate' : 'activate',
+      label: row.account_status === '启用' ? '停用账号' : '启用账号',
+      type: row.account_status === '启用' ? 'danger' : 'success',
+      onClick: row.account_status === '启用' ? handleDeactivateRegisteredPortalStudent : handleActivateRegisteredPortalStudent,
+    },
+  ]
+}
+
+function registeredPortalMoreActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
+  return [
+    { key: 'reset-password', label: '重置密码', type: 'primary', disabled: row.account_status !== '启用', onClick: handleResetRegisteredPortalStudentPassword },
+    { key: 'send-email', label: '发送邮件', type: 'success', onClick: openRegisteredPortalStudentEmailDialog },
+  ]
+}
+
+async function submitPortalEmailDialog() {
+  if (!portalEmailTarget.value) {
+    return
+  }
+  const subject = portalEmailForm.subject.trim()
+  const content = portalEmailForm.content.trim()
+  if (!subject) {
+    await ElMessageBox.alert('请输入邮件主题。', '提示', { type: 'warning' })
+    return
+  }
+  if (!content) {
+    await ElMessageBox.alert('请输入邮件内容。', '提示', { type: 'warning' })
+    return
+  }
+  portalEmailSubmitting.value = true
+  try {
+    const response = await sendRegisteredPortalStudentEmail(portalEmailTarget.value.id, { subject, content })
+    portalEmailDialogVisible.value = false
+    await ElMessageBox.alert(
+      buildRegisteredStudentActionMessage(response.data, '邮件已发送。', '当前未配置邮件服务，本次未发送邮件。'),
+      '发送结果',
+      { type: response.data.email_sent === false ? 'warning' : 'success' },
+    )
+    resetPortalEmailForm()
+  } finally {
+    portalEmailSubmitting.value = false
+  }
+}
+
+watch(() => studentForm.center_name, handleStudentCenterChange)
+watch(() => centerForm.director_name, handleCenterDirectorChange)
+watch(() => centerForm.advisor_names, syncCenterDirector)
+watch(() => portalEmailDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalEmailForm()
+  }
+})
 watch(() => activeSection.value, () => {
   dialogVisible.value = false
-  selectedTeamIds.value = []
+  portalEmailDialogVisible.value = false
+  selectedCenterIds.value = []
   void loadSectionData()
 })
 
@@ -528,22 +718,22 @@ onMounted(() => {
         </div>
         <div class="header-actions">
           <el-button
-            v-if="activeSection === 'teams'"
+            v-if="activeSection === 'centers'"
             plain
             type="danger"
-            :disabled="!selectedTeamIds.length"
-            @click="handleBatchDeleteTeams"
+            :disabled="!selectedCenterIds.length"
+            @click="handleBatchDeleteCenters"
           >
-            批量删除团队
+            批量删除研究中心
           </el-button>
           <span class="summary-text">共 {{ sectionConfig.total }} 条记录</span>
-          <el-button type="primary" round @click="openCreateDialog">{{ sectionConfig.createLabel }}</el-button>
+          <el-button v-if="canMutateSection" type="primary" round @click="openCreateDialog">{{ sectionConfig.createLabel }}</el-button>
         </div>
       </div>
 
       <el-form v-if="isRecordSection" class="filter-form" :inline="true">
         <el-form-item label="关键字">
-          <el-input v-model="studentFilters.keyword" placeholder="学号 / 姓名 / 团队" clearable />
+          <el-input v-model="studentFilters.keyword" placeholder="学号 / 姓名 / 研究中心" clearable />
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="studentFilters.status" placeholder="全部状态" clearable style="width: 168px">
@@ -555,9 +745,29 @@ onMounted(() => {
             <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="团队">
-          <el-select v-model="studentFilters.team_name" placeholder="全部团队" clearable filterable style="width: 180px">
-            <el-option v-for="item in options.team_options" :key="item.value" :label="item.label" :value="item.value" />
+        <el-form-item label="研究中心">
+          <el-select v-model="studentFilters.center_name" placeholder="全部研究中心" clearable filterable style="width: 180px">
+            <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-form v-else-if="isCenterSection" class="filter-form" :inline="true">
+        <el-form-item label="关键字">
+          <el-input v-model="centerFilters.keyword" placeholder="研究中心名称 / 负责人 / 导师团队" clearable />
+        </el-form-item>
+        <el-form-item label="是否启用">
+          <el-select v-model="centerFilters.is_enabled" placeholder="全部状态" clearable style="width: 160px">
+            <el-option v-for="item in centerEnabledOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="负责人">
+          <el-select v-model="centerFilters.director_name" placeholder="全部负责人" clearable filterable style="width: 180px">
+            <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -568,21 +778,11 @@ onMounted(() => {
 
       <el-form v-else class="filter-form" :inline="true">
         <el-form-item label="关键字">
-          <el-input v-model="teamFilters.keyword" placeholder="团队编码 / 名称 / 方向" clearable />
+          <el-input v-model="registeredPortalFilters.keyword" placeholder="姓名 / 手机号 / 邮箱 / 招生计划" clearable />
         </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="teamFilters.status" placeholder="全部状态" clearable style="width: 160px">
-            <el-option v-for="item in options.team_status_options" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="院系">
-          <el-select v-model="teamFilters.department_name" placeholder="全部院系" clearable filterable style="width: 180px">
-            <el-option v-for="item in departmentOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="负责人导师">
-          <el-select v-model="teamFilters.lead_advisor_name" placeholder="全部导师" clearable filterable style="width: 180px">
-            <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+        <el-form-item label="报名状态">
+          <el-select v-model="registeredPortalFilters.application_form_status" placeholder="全部状态" clearable style="width: 180px">
+            <el-option v-for="item in portalApplicationFormStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -597,7 +797,7 @@ onMounted(() => {
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
           <el-table-column prop="degree_type" label="学位类型" width="112" show-overflow-tooltip />
           <el-table-column prop="advisor_name" label="导师" width="96" show-overflow-tooltip />
-          <el-table-column prop="team_name" label="所属团队" min-width="130" show-overflow-tooltip />
+          <el-table-column prop="center_name" label="所属研究中心" min-width="130" show-overflow-tooltip />
           <el-table-column prop="enrollment_year" label="入学年份" width="96" />
           <el-table-column label="当前状态" width="112">
             <template #default="scope">
@@ -613,41 +813,64 @@ onMounted(() => {
           </el-table-column>
         </el-table>
 
-        <el-table v-else :data="teams" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleTeamSelectionChange">
+        <el-table v-else-if="isCenterSection" :data="centers" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleCenterSelectionChange">
           <el-table-column type="selection" width="44" />
-          <el-table-column prop="team_code" label="团队编码" width="128" show-overflow-tooltip />
-          <el-table-column label="团队信息" min-width="220">
+          <el-table-column prop="center_name" label="研究中心名称" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="director_name" label="负责人" width="120" show-overflow-tooltip />
+          <el-table-column label="导师团队" min-width="220" show-overflow-tooltip>
             <template #default="scope">
-              <div class="cell-stack">
-                <strong>{{ scope.row.team_name }}</strong>
-                <span>{{ scope.row.department_name }} / {{ scope.row.discipline_name }}</span>
-              </div>
+              <span :title="scope.row.advisor_names.join('、')">{{ scope.row.advisor_names.join('、') || '未配置' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="导师配置" min-width="210">
+          <el-table-column label="是否启用" width="110" align="center">
             <template #default="scope">
-              <div class="cell-stack">
-                <strong>{{ scope.row.lead_advisor_name || '未指定' }}</strong>
-                <span :title="scope.row.advisor_names.join('、')">{{ scope.row.advisor_names.join('、') || '未配置团队导师' }}</span>
-              </div>
+              <el-tag :type="scope.row.is_enabled ? 'success' : 'info'">{{ scope.row.is_enabled ? '启用' : '停用' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="研究方向" min-width="170" show-overflow-tooltip>
-            <template #default="scope">
-              <span :title="scope.row.research_directions.join('、')">{{ scope.row.research_directions.join('、') || '未配置' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态 / 学生" width="126" align="center">
+          <el-table-column prop="created_date" label="创建日期" width="120" />
+          <el-table-column label="学生数" width="120" align="center">
             <template #default="scope">
               <div class="stat-stack">
-                <el-tag :type="teamStatusTagType(scope.row.status)">{{ scope.row.status }}</el-tag>
-                <span>{{ scope.row.active_student_count }}/{{ scope.row.member_student_count }}</span>
+                <strong>{{ scope.row.member_student_count }}</strong>
+                <span>活跃 {{ scope.row.active_student_count }}</span>
               </div>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="118" align="left">
             <template #default="scope">
-              <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openTeamEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteTeam }]" />
+              <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openCenterEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteCenter }]" />
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed">
+          <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
+          <el-table-column prop="phone_number" label="手机号" width="128" show-overflow-tooltip />
+          <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+          <el-table-column label="账号状态" width="96" align="center">
+            <template #default="scope">
+              <el-tag :type="portalAccountStatusTagType(scope.row.account_status)">{{ scope.row.account_status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="报名状态" width="110" align="center">
+            <template #default="scope">
+              <el-tag :type="portalApplicationFormStatusTagType(scope.row.application_form_status)">{{ scope.row.application_form_status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="selected_plan_name" label="招生计划" min-width="160" show-overflow-tooltip />
+          <el-table-column label="申请流转状态" width="130" align="center">
+            <template #default="scope">
+              <el-tag :type="portalRecruitmentStatusTagType(scope.row.recruitment_application_status)">{{ scope.row.recruitment_application_status || '未提交' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="registered_at" label="注册时间" width="160" show-overflow-tooltip />
+          <el-table-column label="操作" width="170" align="left">
+            <template #default="scope">
+              <TableRowActions
+                :row="scope.row"
+                :main-actions="registeredPortalMainActions(scope.row)"
+                :more-actions="registeredPortalMoreActions(scope.row)"
+              />
             </template>
           </el-table-column>
         </el-table>
@@ -664,20 +887,31 @@ onMounted(() => {
             @size-change="handleStudentPageSizeChange"
           />
           <el-pagination
-            v-else
-            :current-page="teamPager.pagination.currentPage"
-            :page-size="teamPager.pagination.pageSize"
+            v-else-if="isCenterSection"
+            :current-page="centerPager.pagination.currentPage"
+            :page-size="centerPager.pagination.pageSize"
             :page-sizes="[10, 20, 50, 100]"
-            :total="teamPager.pagination.total"
+            :total="centerPager.pagination.total"
             layout="total, sizes, prev, pager, next, jumper"
-            @current-change="handleTeamPageChange"
-            @size-change="handleTeamPageSizeChange"
+            @current-change="handleCenterPageChange"
+            @size-change="handleCenterPageSizeChange"
+          />
+          <el-pagination
+            v-else
+            :current-page="registeredStudentPager.pagination.currentPage"
+            :page-size="registeredStudentPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="registeredStudentPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleRegisteredStudentPageChange"
+            @size-change="handleRegisteredStudentPageSizeChange"
           />
         </div>
       </div>
     </article>
 
     <el-dialog
+      v-if="canMutateSection"
       v-model="dialogVisible"
       :title="dialogMode === 'create' ? sectionConfig.createLabel : `编辑${sectionConfig.title.replace('管理', '')}`"
       width="760px"
@@ -708,13 +942,13 @@ onMounted(() => {
               <el-option v-for="item in options.degree_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="所属团队" prop="team_name">
-            <el-select v-model="studentForm.team_name" placeholder="请选择团队" filterable>
-              <el-option v-for="item in options.team_options" :key="item.value" :label="item.label" :value="item.value" />
+          <el-form-item label="所属研究中心" prop="center_name">
+            <el-select v-model="studentForm.center_name" placeholder="请选择研究中心" filterable>
+              <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="导师" prop="advisor_name">
-            <el-select v-model="studentForm.advisor_name" placeholder="请选择导师" filterable :disabled="!studentForm.team_name">
+            <el-select v-model="studentForm.advisor_name" placeholder="请选择导师" filterable :disabled="!studentForm.center_name">
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
@@ -733,57 +967,32 @@ onMounted(() => {
       </el-form>
 
       <el-form
-        v-else
-        ref="teamFormRef"
-        :model="teamForm"
-        :rules="teamRules"
-        label-width="110px"
+        v-else-if="isCenterSection"
+        ref="centerFormRef"
+        :model="centerForm"
+        :rules="centerRules"
+        label-width="96px"
         class="dialog-form"
       >
         <div class="dialog-grid">
-          <el-form-item label="团队编码" prop="team_code">
-            <el-input v-model="teamForm.team_code" placeholder="例如 TEAM-IM-001" />
+          <el-form-item label="中心名称" prop="center_name">
+            <el-input v-model="centerForm.center_name" placeholder="请输入中心名称" />
           </el-form-item>
-          <el-form-item label="团队名称" prop="team_name">
-            <el-input v-model="teamForm.team_name" placeholder="请输入团队名称" />
-          </el-form-item>
-          <el-form-item label="所属院系" prop="department_name">
-            <el-select v-model="teamForm.department_name" filterable allow-create default-first-option placeholder="请选择所属院系">
-              <el-option v-for="item in departmentOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="所属学科" prop="discipline_name">
-            <el-select v-model="teamForm.discipline_name" filterable allow-create default-first-option placeholder="请选择所属学科">
-              <el-option v-for="item in disciplineOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="负责人导师" prop="lead_advisor_name">
-            <el-select v-model="teamForm.lead_advisor_name" placeholder="请选择负责人导师" filterable>
+          <el-form-item label="负责人" prop="director_name">
+            <el-select v-model="centerForm.director_name" placeholder="请选择负责人" filterable>
               <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="团队状态" prop="status">
-            <el-select v-model="teamForm.status" placeholder="请选择团队状态">
-              <el-option v-for="item in options.team_status_options" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="团队导师" prop="advisor_names" class="dialog-grid--full">
-            <el-select v-model="teamForm.advisor_names" multiple filterable placeholder="请选择团队导师">
+          <el-form-item label="导师团队" prop="advisor_names" class="dialog-grid--full">
+            <el-select v-model="centerForm.advisor_names" multiple filterable placeholder="请选择导师团队">
               <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="研究方向" class="dialog-grid--full">
-            <el-input
-              :model-value="teamResearchDirectionText"
-              placeholder="请输入研究方向，使用逗号或顿号分隔"
-              @update:model-value="teamForm.research_directions = splitTextValues($event)"
-            />
+          <el-form-item label="是否启用">
+            <el-switch v-model="centerForm.is_enabled" inline-prompt active-text="启用" inactive-text="停用" />
           </el-form-item>
-          <el-form-item label="成立日期">
-            <el-date-picker v-model="teamForm.established_on" type="date" value-format="YYYY-MM-DD" placeholder="请选择成立日期" />
-          </el-form-item>
-          <el-form-item label="团队说明" class="dialog-grid--full">
-            <el-input v-model="teamForm.description" type="textarea" :rows="4" placeholder="请输入团队说明" />
+          <el-form-item label="创建日期">
+            <el-date-picker v-model="centerForm.created_date" type="date" value-format="YYYY-MM-DD" placeholder="请选择创建日期" />
           </el-form-item>
         </div>
       </el-form>
@@ -791,6 +1000,26 @@ onMounted(() => {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitDialog">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="portalEmailDialogVisible" title="发送邮件" width="640px" destroy-on-close>
+      <el-form label-width="88px" class="dialog-form">
+        <div class="dialog-grid">
+          <el-form-item label="收件人" class="dialog-grid--full">
+            <el-input :model-value="portalEmailTarget?.email || ''" disabled />
+          </el-form-item>
+          <el-form-item label="主题" class="dialog-grid--full">
+            <el-input v-model="portalEmailForm.subject" maxlength="120" show-word-limit placeholder="请输入邮件主题" />
+          </el-form-item>
+          <el-form-item label="内容" class="dialog-grid--full">
+            <el-input v-model="portalEmailForm.content" type="textarea" :rows="8" placeholder="请输入邮件正文内容" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="portalEmailDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalEmailSubmitting" @click="submitPortalEmailDialog">发送</el-button>
       </template>
     </el-dialog>
   </section>

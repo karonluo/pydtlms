@@ -31,7 +31,7 @@ export function loginRequest(payload: LoginPayload) {
   body.set('username', payload.username)
   body.set('password', payload.password)
   body.set('grant_type', 'password')
-  return axios.post(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'}/auth/token`, body, {
+  return axios.post(`${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/auth/token`, body, {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   })
 }

@@ -62,12 +62,11 @@ def recruitment_options(principal: Principal = Depends(require_permissions("recr
 def recruitment_plans(
     keyword: str | None = Query(default=None),
     semester: str | None = Query(default=None),
-    current_stage: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("recruitment:read")),
 ) -> RecruitPlanListResponse:
-    return get_recruitment_plan_list(keyword=keyword, semester=semester, current_stage=current_stage, page=page, page_size=page_size)
+    return get_recruitment_plan_list(keyword=keyword, semester=semester, page=page, page_size=page_size)
 
 
 @router.post("/plans", response_model=RecruitPlanRecord, status_code=status.HTTP_201_CREATED)
