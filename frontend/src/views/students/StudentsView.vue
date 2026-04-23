@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router'
 import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
 import { useServerPagination } from '../../composables/useServerPagination'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
 import {
   activateRegisteredPortalStudent,
   batchDeleteCenters,
@@ -44,11 +45,18 @@ const submitting = ref(false)
 const dialogVisible = ref(false)
 const portalEmailDialogVisible = ref(false)
 const portalEmailSubmitting = ref(false)
+const portalEmailResultDialogVisible = ref(false)
+const resetPasswordDialogVisible = ref(false)
+const resetPasswordSubmitting = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedCenterIds = ref<number[]>([])
 const studentStatusColors = ref<DictColorMap>({})
 const portalEmailTarget = ref<RegisteredPortalStudentRecord | null>(null)
+const portalEmailResult = ref<RegisteredPortalStudentActionResponse | null>(null)
+const portalEmailResultContext = ref<{ recipient: string; subject: string } | null>(null)
+const resetPasswordTarget = ref<RegisteredPortalStudentRecord | null>(null)
+const resetPasswordResult = ref<RegisteredPortalStudentActionResponse | null>(null)
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -202,6 +210,16 @@ const advisorOptions = computed(() => {
     return options.value.advisor_options
   }
   return centerAdvisorMap.value.get(studentForm.center_name) || []
+})
+const resetPasswordResultMessage = computed(() => {
+  if (!resetPasswordResult.value) {
+    return ''
+  }
+  return buildRegisteredStudentActionMessage(
+    resetPasswordResult.value,
+    '重置密码邮件已发送。',
+    '当前未配置邮件服务，本次未发送邮件。',
+  )
 })
 const studentPager = useServerPagination()
 const centerPager = useServerPagination()
@@ -382,6 +400,14 @@ async function submitStudentForm() {
   const isValid = await formInstance.validate().catch(() => false)
   if (!isValid) {
     return
+  }
+  const phoneValidationMessage = getPhoneValidationMessage(studentForm.phone_number || '')
+  if (phoneValidationMessage) {
+    ElMessage.warning(phoneValidationMessage)
+    return
+  }
+  if (studentForm.phone_number) {
+    studentForm.phone_number = normalizePhoneNumber(studentForm.phone_number)
   }
   submitting.value = true
   try {
@@ -584,10 +610,31 @@ function buildRegisteredStudentActionMessage(response: RegisteredPortalStudentAc
   return response.message
 }
 
+const portalEmailResultMessage = computed(() => {
+  if (!portalEmailResult.value) {
+    return ''
+  }
+  return buildRegisteredStudentActionMessage(
+    portalEmailResult.value,
+    '邮件已发送。',
+    '当前未配置邮件服务，本次未发送邮件。',
+  )
+})
+
 function resetPortalEmailForm() {
   portalEmailTarget.value = null
   portalEmailForm.subject = ''
   portalEmailForm.content = ''
+}
+
+function resetPortalEmailResultDialog() {
+  portalEmailResult.value = null
+  portalEmailResultContext.value = null
+}
+
+function resetResetPasswordDialog() {
+  resetPasswordTarget.value = null
+  resetPasswordResult.value = null
 }
 
 async function handleDeactivateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
@@ -614,17 +661,26 @@ async function handleActivateRegisteredPortalStudent(row: RegisteredPortalStuden
 
 async function handleResetRegisteredPortalStudentPassword(row: RegisteredPortalStudentRecord) {
   if (row.account_status !== '启用') {
-    await ElMessageBox.alert('已停用账号不可重置密码。', '提示', { type: 'warning' })
+    ElMessage.warning('已停用账号不可重置密码。')
     return
   }
-  await ElMessageBox.confirm(`确定重置 ${row.full_name} 的门户密码吗？系统将生成临时密码。`, '重置密码确认', { type: 'warning' })
-  const response = await resetRegisteredPortalStudentPassword(row.id)
-  const detailLines = [buildRegisteredStudentActionMessage(response.data, '重置密码邮件已发送。', '当前未配置邮件服务，本次未发送邮件。')]
-  if (response.data.temporary_password) {
-    detailLines.push(`临时密码：${response.data.temporary_password}`)
+  resetPasswordTarget.value = row
+  resetPasswordResult.value = null
+  resetPasswordDialogVisible.value = true
+}
+
+async function submitResetPasswordDialog() {
+  if (!resetPasswordTarget.value) {
+    return
   }
-  await ElMessageBox.alert(detailLines.join('\n\n'), '重置密码成功', { type: 'success' })
-  await refreshAfterMutation()
+  resetPasswordSubmitting.value = true
+  try {
+    const response = await resetRegisteredPortalStudentPassword(resetPasswordTarget.value.id)
+    resetPasswordResult.value = response.data
+    await refreshAfterMutation()
+  } finally {
+    resetPasswordSubmitting.value = false
+  }
 }
 
 function openRegisteredPortalStudentEmailDialog(row: RegisteredPortalStudentRecord) {
@@ -658,6 +714,7 @@ async function submitPortalEmailDialog() {
   }
   const subject = portalEmailForm.subject.trim()
   const content = portalEmailForm.content.trim()
+  const recipient = portalEmailTarget.value.email || ''
   if (!subject) {
     await ElMessageBox.alert('请输入邮件主题。', '提示', { type: 'warning' })
     return
@@ -669,13 +726,13 @@ async function submitPortalEmailDialog() {
   portalEmailSubmitting.value = true
   try {
     const response = await sendRegisteredPortalStudentEmail(portalEmailTarget.value.id, { subject, content })
+    portalEmailResultContext.value = {
+      recipient,
+      subject,
+    }
+    portalEmailResult.value = response.data
     portalEmailDialogVisible.value = false
-    await ElMessageBox.alert(
-      buildRegisteredStudentActionMessage(response.data, '邮件已发送。', '当前未配置邮件服务，本次未发送邮件。'),
-      '发送结果',
-      { type: response.data.email_sent === false ? 'warning' : 'success' },
-    )
-    resetPortalEmailForm()
+    portalEmailResultDialogVisible.value = true
   } finally {
     portalEmailSubmitting.value = false
   }
@@ -689,9 +746,21 @@ watch(() => portalEmailDialogVisible.value, (visible) => {
     resetPortalEmailForm()
   }
 })
+watch(() => portalEmailResultDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalEmailResultDialog()
+  }
+})
+watch(() => resetPasswordDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetResetPasswordDialog()
+  }
+})
 watch(() => activeSection.value, () => {
   dialogVisible.value = false
   portalEmailDialogVisible.value = false
+  portalEmailResultDialogVisible.value = false
+  resetPasswordDialogVisible.value = false
   selectedCenterIds.value = []
   void loadSectionData()
 })
@@ -942,7 +1011,7 @@ onMounted(() => {
               <el-option v-for="item in options.degree_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="所属研究中心" prop="center_name">
+          <el-form-item label="研究中心" prop="center_name">
             <el-select v-model="studentForm.center_name" placeholder="请选择研究中心" filterable>
               <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
@@ -1020,6 +1089,68 @@ onMounted(() => {
       <template #footer>
         <el-button @click="portalEmailDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="portalEmailSubmitting" @click="submitPortalEmailDialog">发送</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="portalEmailResultDialogVisible" title="发送结果" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="portalEmailResultContext && portalEmailResult">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">收件人</span>
+              <strong>{{ portalEmailResultContext?.recipient }}</strong>
+            </div>
+            <div style="grid-column: span 2;">
+              <span class="reset-password-summary__label">主题</span>
+              <strong>{{ portalEmailResultContext?.subject }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ portalEmailResultMessage }}</p>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="portalEmailResultDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="resetPasswordDialogVisible" :title="resetPasswordResult ? '重置密码成功' : '重置密码确认'" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="resetPasswordTarget && !resetPasswordResult">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">学生姓名</span>
+              <strong>{{ resetPasswordTarget.full_name }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">注册邮箱</span>
+              <strong>{{ resetPasswordTarget.email }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">账号状态</span>
+              <strong>{{ resetPasswordTarget.account_status }}</strong>
+            </div>
+          </div>
+          <p class="reset-password-hint">
+            确认后系统将立即为该门户账号生成新的临时密码，并在邮件服务可用时发送重置通知邮件。
+          </p>
+        </template>
+        <template v-else-if="resetPasswordResult">
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ resetPasswordResultMessage }}</p>
+            <div v-if="resetPasswordResult.temporary_password" class="reset-password-result__password">
+              <span>临时密码</span>
+              <strong>{{ resetPasswordResult.temporary_password }}</strong>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="resetPasswordDialogVisible = false">{{ resetPasswordResult ? '关闭' : '取消' }}</el-button>
+        <el-button v-if="!resetPasswordResult" type="primary" :loading="resetPasswordSubmitting" @click="submitResetPasswordDialog">
+          确认重置
+        </el-button>
       </template>
     </el-dialog>
   </section>
@@ -1196,6 +1327,66 @@ onMounted(() => {
   grid-column: 1 / -1;
 }
 
+.reset-password-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.reset-password-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reset-password-summary__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.reset-password-summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.reset-password-hint,
+.reset-password-result__message {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.reset-password-result {
+  display: grid;
+  gap: 14px;
+}
+
+.reset-password-result__password {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.reset-password-result__password span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.reset-password-result__password strong {
+  color: #1d4ed8;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 1120px) {
   .content-stack {
     height: auto;
@@ -1206,6 +1397,10 @@ onMounted(() => {
   }
 
   .dialog-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reset-password-summary {
     grid-template-columns: minmax(0, 1fr);
   }
 }

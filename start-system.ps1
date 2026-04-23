@@ -5,17 +5,28 @@ param(
     [string]$BackendHost = '0.0.0.0',
     [string]$FrontendHost = '0.0.0.0',
     [string]$AccessHost = '',
-    [switch]$InstallDependencies
+    [switch]$InstallDependencies,
+    [switch]$Frontend,
+    [switch]$EnableBackendFrontendProxy,
+    [switch]$UseStaticFrontend
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($Frontend) {
+    $UseStaticFrontend = $false
+}
+elseif (-not $PSBoundParameters.ContainsKey('UseStaticFrontend')) {
+    $UseStaticFrontend = $true
+}
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PythonExe = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $FrontendDir = Join-Path $ProjectRoot 'frontend'
 $BackendDir = Join-Path $ProjectRoot 'backend'
 $FrontendNodeModules = Join-Path $FrontendDir 'node_modules'
+$FrontendDistDir = Join-Path $FrontendDir 'dist'
 
 $PreferredShell = Get-Command pwsh -ErrorAction SilentlyContinue
 if ($PreferredShell) {
@@ -148,6 +159,25 @@ function Ensure-Dependencies {
     }
 }
 
+function Ensure-StaticFrontendBuild {
+    if (-not $UseStaticFrontend) {
+        return
+    }
+
+    Write-Step '构建前端静态资源。'
+    Push-Location $FrontendDir
+    try {
+        npm run build
+    }
+    finally {
+        Pop-Location
+    }
+
+    if (-not (Test-Path $FrontendDistDir)) {
+        throw '前端静态资源构建失败，未生成 frontend/dist。'
+    }
+}
+
 function Get-PortProcesses {
     param([int]$Port)
 
@@ -170,6 +200,55 @@ function Get-PortProcesses {
     }
 
     return @($processes)
+}
+
+function Get-ManagedLauncherProcesses {
+    param(
+        [ValidateSet('Backend', 'Frontend')]
+        [string]$Kind,
+        [int]$Port
+    )
+
+    $pattern = if ($Kind -eq 'Backend') {
+        "uvicorn.+--port $Port"
+    }
+    else {
+        "npm run dev.+--port $Port"
+    }
+
+    $processes = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -match 'pwsh|powershell' -and
+            $_.CommandLine -match $pattern
+        }
+
+    return @($processes)
+}
+
+function Get-ProcessDescendants {
+    param([int]$ProcessId)
+
+    $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $descendants = @()
+    $pending = @($ProcessId)
+
+    while ($pending.Count -gt 0) {
+        $currentProcessId = [int]$pending[0]
+        if ($pending.Count -eq 1) {
+            $pending = @()
+        }
+        else {
+            $pending = @($pending[1..($pending.Count - 1)])
+        }
+
+        $children = @($allProcesses | Where-Object { [int]$_.ParentProcessId -eq $currentProcessId })
+        foreach ($child in $children) {
+            $descendants += $child
+            $pending += [int]$child.ProcessId
+        }
+    }
+
+    return @($descendants)
 }
 
 function Test-PortListening {
@@ -246,7 +325,7 @@ function Stop-PortProcesses {
             }
 
             Write-Step "端口 $Port 被进程 $($process.ProcessName) ($($process.Id)) 占用，正在终止。"
-            Stop-Process -Id $process.Id -Force
+            taskkill /PID $process.Id /T /F | Out-Null
             $handledProcessIds[$process.Id] = $true
         }
 
@@ -258,22 +337,47 @@ function Stop-PortProcesses {
     }
 }
 
+function Stop-ManagedLauncherProcesses {
+    param(
+        [ValidateSet('Backend', 'Frontend')]
+        [string]$Kind,
+        [int]$Port
+    )
+
+    $processes = @(Get-ManagedLauncherProcesses -Kind $Kind -Port $Port)
+    foreach ($process in $processes) {
+        $descendants = @(Get-ProcessDescendants -ProcessId $process.ProcessId | Sort-Object ProcessId -Descending)
+        foreach ($childProcess in $descendants) {
+            Write-Step "检测到旧的$Kind 子进程 $($childProcess.Name) ($($childProcess.ProcessId))，正在终止。"
+            taskkill /PID $childProcess.ProcessId /T /F | Out-Null
+        }
+
+        Write-Step "检测到旧的$Kind 启动终端进程 $($process.Name) ($($process.ProcessId))，正在终止。"
+        taskkill /PID $process.ProcessId /T /F | Out-Null
+    }
+}
+
 function Start-Backend {
-    $command = "& { Set-Location '$ProjectRoot'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Backend'; `n`$env:ALLOWED_ORIGINS = '$AllowedOriginsValue'; `n& '$PythonExe' -m uvicorn app.main:app --app-dir backend --host $BackendHost --port $BackendPort --reload }"
+    $frontendProxyEnabledValue = if ($EnableBackendFrontendProxy) { 'true' } else { 'false' }
+    $backendEntryPoint = if ($UseStaticFrontend) { 'app.main_static:app' } else { 'app.main:app' }
+    $reloadArg = if ($UseStaticFrontend) { '' } else { ' --reload' }
+    $command = "& { Set-Location '$ProjectRoot'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Backend'; `n`$env:ALLOWED_ORIGINS = '$AllowedOriginsValue'; `n`$env:FRONTEND_DEV_PROXY_ENABLED = '$frontendProxyEnabledValue'; `n`$env:FRONTEND_DEV_PROXY_TARGET = 'http://127.0.0.1`:$FrontendPort'; `n& '$PythonExe' -m uvicorn $backendEntryPoint --app-dir backend --host $BackendHost --port $BackendPort$reloadArg }"
     return Start-Process -FilePath $TerminalExe -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', $command) -PassThru
 }
 
 function Start-Frontend {
-    $command = "& { Set-Location '$FrontendDir'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Frontend'; `n`$env:VITE_API_BASE_URL = '/api/v1'; `n`$env:VITE_API_PROXY_TARGET = 'http://$BackendAccessHost`:$BackendPort'; `nnpm run dev -- --host $FrontendHost --port $FrontendPort }"
+    $command = "& { Set-Location '$FrontendDir'; `n`$host.UI.RawUI.WindowTitle = 'DTLMS Frontend'; `n`$env:VITE_API_BASE_URL = '/api/v1'; `n`$env:VITE_API_PROXY_TARGET = 'http://$FrontendProxyTargetHost`:$BackendPort'; `nnpm run dev -- --host $FrontendHost --port $FrontendPort }"
     return Start-Process -FilePath $TerminalExe -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', $command) -PassThru
 }
 
 Assert-Prerequisites
 Ensure-Dependencies
+Ensure-StaticFrontendBuild
 
 $ResolvedAccessHost = Get-PreferredAccessHost -RequestedHost $AccessHost
 $BackendProbeHost = Resolve-ProbeHost -BindHost $BackendHost
 $FrontendProbeHost = Resolve-ProbeHost -BindHost $FrontendHost
+$FrontendProxyTargetHost = $BackendProbeHost
 $BackendAccessHost = Resolve-ApiHost -BindHost $BackendHost -PreferredHost $ResolvedAccessHost
 $FrontendAccessHost = Resolve-ApiHost -BindHost $FrontendHost -PreferredHost $ResolvedAccessHost
 $FrontendApiBaseUrl = "http://$BackendAccessHost`:$BackendPort/api/v1"
@@ -284,8 +388,13 @@ $AllowedOriginsValue = Get-AllowedOriginsValue -Origins @(
 )
 
 Write-Step '检查并清理端口占用。'
+Stop-ManagedLauncherProcesses -Kind Backend -Port $BackendPort
 Stop-PortProcesses -Port $BackendPort
-Stop-PortProcesses -Port $FrontendPort
+
+if (-not $UseStaticFrontend) {
+    Stop-ManagedLauncherProcesses -Kind Frontend -Port $FrontendPort
+    Stop-PortProcesses -Port $FrontendPort
+}
 
 Write-Step '启动后端服务。'
 $backendProcess = Start-Backend
@@ -297,21 +406,37 @@ else {
     Write-Warning "后端启动超时，请查看新打开的后端终端窗口。进程 ID: $($backendProcess.Id)"
 }
 
-Write-Step '启动前端服务。'
-$frontendProcess = Start-Frontend
+if (-not $UseStaticFrontend) {
+    Write-Step '启动前端服务。'
+    $frontendProcess = Start-Frontend
 
-if (Wait-PortState -TargetHost $FrontendProbeHost -Port $FrontendPort -DesiredState Listening -TimeoutSeconds 30) {
-    Write-Step "前端已启动: http://127.0.0.1`:$FrontendPort"
-}
-else {
-    Write-Warning "前端启动超时，请查看新打开的前端终端窗口。进程 ID: $($frontendProcess.Id)"
+    if (Wait-PortState -TargetHost $FrontendProbeHost -Port $FrontendPort -DesiredState Listening -TimeoutSeconds 30) {
+        Write-Step "前端已启动: http://127.0.0.1`:$FrontendPort"
+    }
+    else {
+        Write-Warning "前端启动超时，请查看新打开的前端终端窗口。进程 ID: $($frontendProcess.Id)"
+    }
 }
 
 Write-Host ''
 Write-Host '启动完成。' -ForegroundColor Green
-Write-Host "前端地址(本机): http://127.0.0.1`:$FrontendPort" -ForegroundColor Green
-Write-Host "前端地址(局域网): http://$FrontendAccessHost`:$FrontendPort" -ForegroundColor Green
 Write-Host "后端地址(本机): http://127.0.0.1`:$BackendPort/docs" -ForegroundColor Green
 Write-Host "后端地址(局域网): http://$BackendAccessHost`:$BackendPort/docs" -ForegroundColor Green
-Write-Host "前端 API 基地址: /api/v1 (通过 Vite 代理到 http://$BackendAccessHost`:$BackendPort)" -ForegroundColor Green
 Write-Host "后端允许的前端源: $AllowedOriginsValue" -ForegroundColor Green
+
+if ($UseStaticFrontend) {
+    Write-Host "统一访问地址(本机): http://127.0.0.1`:$BackendPort" -ForegroundColor Yellow
+    Write-Host "统一访问地址(局域网): http://$BackendAccessHost`:$BackendPort" -ForegroundColor Yellow
+    Write-Host '前端模式: 静态构建，由 FastAPI 直接托管 frontend/dist' -ForegroundColor Yellow
+}
+else {
+    Write-Host "前端地址(本机): http://127.0.0.1`:$FrontendPort" -ForegroundColor Green
+    Write-Host "前端地址(局域网): http://$FrontendAccessHost`:$FrontendPort" -ForegroundColor Green
+    Write-Host "前端 API 基地址: /api/v1 (通过 Vite 代理到 http://$FrontendProxyTargetHost`:$BackendPort)" -ForegroundColor Green
+}
+
+if ($EnableBackendFrontendProxy -and -not $UseStaticFrontend) {
+    Write-Host "统一访问地址(本机): http://127.0.0.1`:$BackendPort" -ForegroundColor Yellow
+    Write-Host "统一访问地址(局域网): http://$BackendAccessHost`:$BackendPort" -ForegroundColor Yellow
+    Write-Host "前端开发代理: 已启用，FastAPI 将非 /api 请求转发到 http://127.0.0.1`:$FrontendPort" -ForegroundColor Yellow
+}

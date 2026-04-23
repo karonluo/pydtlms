@@ -94,3 +94,38 @@ def test_download_recruitment_application_template_returns_blank_excel(monkeypat
     assert response.content == b"blank-template"
     assert response.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     assert "attachment; filename*=UTF-8''" in response.headers["content-disposition"]
+
+
+def test_delete_recruitment_plan_endpoint_returns_no_content(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "recruiter", ["recruitment:write"])
+    deleted_plan_ids: list[int] = []
+
+    def fake_delete_recruitment_plan(plan_id: int) -> None:
+        deleted_plan_ids.append(plan_id)
+
+    monkeypatch.setattr("app.api.v1.recruitment.delete_recruitment_plan", fake_delete_recruitment_plan)
+
+    response = client.delete(
+        "/api/v1/recruitment/plans/9",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 204
+    assert deleted_plan_ids == [9]
+
+
+def test_delete_recruitment_plan_endpoint_returns_bad_request_when_plan_has_applications(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "recruiter", ["recruitment:write"])
+
+    def fake_delete_recruitment_plan(plan_id: int) -> None:
+        raise ValueError(f"计划 {plan_id} 下仍有报名申请，不能删除")
+
+    monkeypatch.setattr("app.api.v1.recruitment.delete_recruitment_plan", fake_delete_recruitment_plan)
+
+    response = client.delete(
+        "/api/v1/recruitment/plans/9",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "计划 9 下仍有报名申请，不能删除"

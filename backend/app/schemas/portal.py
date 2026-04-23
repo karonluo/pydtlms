@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Sequence
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import SelectOption
+from app.schemas.contact import validate_email, validate_phone_number
+from app.schemas.identity import validate_china_resident_id_number
 
 
 def _first_non_empty(*values: Any) -> str | None:
@@ -17,7 +19,7 @@ def _first_non_empty(*values: Any) -> str | None:
     return None
 
 
-def _serialize_models(items: list[BaseModel] | list[dict[str, Any]] | None) -> str | None:
+def _serialize_models(items: Sequence[BaseModel | dict[str, Any]] | None) -> str | None:
     if not items:
         return None
     payload: list[dict[str, Any]] = []
@@ -89,7 +91,9 @@ class PortalEducationExperienceItem(BaseModel):
     verifier_name: str | None = None
     verifier_phone: str | None = None
     transcript_attachment_url: str | None = None
+    transcript_attachment_name: str | None = None
     degree_certificate_attachment_url: str | None = None
+    degree_certificate_attachment_name: str | None = None
 
 
 class PortalPracticeExperienceItem(BaseModel):
@@ -106,6 +110,7 @@ class PortalEnglishProficiencyItem(BaseModel):
     exam_name: str
     score_text: str | None = None
     certificate_attachment_url: str | None = None
+    certificate_attachment_name: str | None = None
 
 
 class PortalFamilyMemberItem(BaseModel):
@@ -134,6 +139,7 @@ class PortalPersonalStatementData(BaseModel):
     ai_problem_statement: str | None = None
     ai_industry_opinion: str | None = None
     resume_attachment_url: str | None = None
+    resume_attachment_name: str | None = None
 
 
 class PortalApplicationDeclarationData(BaseModel):
@@ -157,12 +163,53 @@ class PortalApplicationDraftRecord(BaseModel):
     submitted_at: str | None = None
 
 
+class PortalRegistrationEmailCodeRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str) -> str:
+        return validate_email(value)
+
+
+class PortalRegistrationEmailCodeResponse(BaseModel):
+    message: str
+    expires_in_seconds: int
+    cooldown_seconds: int
+
+
 class PortalRegistrationRequest(BaseModel):
     phone_number: str
     email: str
     full_name: str
     id_number: str
     password: str
+    email_verification_code: str = ""
+
+    @field_validator("id_number")
+    @classmethod
+    def validate_id_number(cls, value: str) -> str:
+        return validate_china_resident_id_number(value)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number_field(cls, value: str) -> str:
+        return validate_phone_number(value)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("email_verification_code")
+    @classmethod
+    def validate_email_verification_code_field(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return ""
+        if len(normalized) != 6 or not normalized.isdigit():
+            raise ValueError("邮件验证码格式不正确，请输入 6 位数字验证码")
+        return normalized
 
 
 class PortalRegistrationResponse(BaseModel):
@@ -180,6 +227,11 @@ class PortalPasswordResetRequest(BaseModel):
     id_number: str
     new_password: str
 
+    @field_validator("id_number")
+    @classmethod
+    def validate_id_number(cls, value: str) -> str:
+        return validate_china_resident_id_number(value)
+
 
 class PortalPasswordChangeRequest(BaseModel):
     current_password: str
@@ -192,6 +244,8 @@ class PortalStudentRecord(BaseModel):
     phone_number: str
     email: str
     id_number: str
+    business_key: str | None = None
+    candidate_no: str | None = None
     account_status: str = "启用"
     gender: str | None = None
     birth_date: str | None = None

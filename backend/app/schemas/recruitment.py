@@ -1,8 +1,10 @@
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import PaginationResponseBase, SelectOption
+from app.schemas.contact import validate_optional_email, validate_optional_phone_number
+from app.schemas.identity import validate_china_resident_id_number
 from app.schemas.portal import (
     PortalApplicantProfileData,
     PortalApplicationDeclarationData,
@@ -184,6 +186,7 @@ class RecruitApplicationRecord(BaseModel):
     student_activity_experience: str | None = None
     personal_statement_attachment: str | None = None
     material_list_attachment: str | None = None
+    material_list_attachment_name: str | None = None
     supplementary_profile: str | None = None
     material_status: str
     application_status: str
@@ -322,6 +325,16 @@ class RecruitApplicationUpsert(BaseModel):
     personal_statement: PortalPersonalStatementData | None = None
     declaration: PortalApplicationDeclarationData | None = None
 
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str | None) -> str | None:
+        return validate_optional_email(value)
+
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "RecruitApplicationUpsert":
         if self.profile is not None:
@@ -377,6 +390,17 @@ class RecruitApplicationUpsert(BaseModel):
             raise ValueError("缺少毕业院校/就读学校信息")
         if not _first_non_empty(self.highest_degree):
             raise ValueError("缺少最高学历/教育阶段信息")
+        return self
+
+    @model_validator(mode="after")
+    def validate_resident_id_number(self) -> "RecruitApplicationUpsert":
+        id_number = _first_non_empty(self.id_number)
+        if not id_number:
+            return self
+        id_type = _first_non_empty(self.id_type, self.profile.id_type if self.profile else None)
+        if id_type and "身份证" not in id_type:
+            return self
+        self.id_number = validate_china_resident_id_number(id_number, "居民身份证号码")
         return self
 
 

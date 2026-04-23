@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from app.schemas.contact import validate_optional_email, validate_optional_phone_number
 
 
 class TokenResponse(BaseModel):
@@ -29,6 +31,16 @@ class UserProfileUpdate(BaseModel):
     phone_number: str | None = None
     email: str | None = None
     theme_color: str
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str | None) -> str | None:
+        return validate_optional_email(value)
 
 
 class PasswordChangeRequest(BaseModel):

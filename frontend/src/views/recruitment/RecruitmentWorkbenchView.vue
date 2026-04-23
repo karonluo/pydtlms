@@ -1,18 +1,23 @@
 <script setup lang="ts">
+import { Document, Download } from '@element-plus/icons-vue'
 import axios from 'axios'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { getEmailValidationMessage, getPhoneValidationMessage, normalizeEmail, normalizePhoneNumber } from '../../utils/contactValidation'
+import { getChinaResidentIdValidationMessage, normalizeChinaResidentIdNumber } from '../../utils/chinaResidentId'
 import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
   createRecruitmentApplication,
   createRecruitmentPlan,
+  deleteRecruitmentPlan,
   deleteRecruitmentApplication,
   downloadRecruitmentTemplate,
   exportRecruitmentApplications,
+  getRecruitmentApplicationDetail,
   getRecruitmentOptions,
   getRecruitmentStats,
   getRecruitmentWorkbench,
@@ -234,10 +239,13 @@ const applicationsLoading = ref(false)
 const planDialogVisible = ref(false)
 const applicationDialogVisible = ref(false)
 const applicationDetailVisible = ref(false)
+const deleteApplicationDialogVisible = ref(false)
 const planMode = ref<'create' | 'edit'>('create')
 const applicationMode = ref<'create' | 'edit'>('create')
+const deletingPlan = ref(false)
 const planSubmitting = ref(false)
 const applicationSubmitting = ref(false)
+const deleteApplicationSubmitting = ref(false)
 const importSubmitting = ref(false)
 const exportSubmitting = ref(false)
 const templateSubmitting = ref(false)
@@ -245,6 +253,7 @@ const brochureUploading = ref(false)
 const selectedPlanId = ref<number | undefined>()
 const editingPlanId = ref<number | null>(null)
 const editingApplicationId = ref<number | null>(null)
+const deletingApplication = ref<RecruitApplicationRecord | null>(null)
 const planReferenceList = ref<RecruitPlanRecord[]>([])
 const viewingApplication = ref<RecruitApplicationRecord | null>(null)
 const applicationStatusColors = ref<DictColorMap>({})
@@ -332,8 +341,6 @@ const applicationDetailSections: Array<{ title: string; fields: Array<{ label: s
       { label: '申请时间', key: 'applied_at' },
       { label: '是否接受调剂', key: 'accept_adjustment' },
       { label: '材料得分', key: 'final_score' },
-      { label: '个人陈述附件', key: 'personal_statement_attachment' },
-      { label: '材料清单附件', key: 'material_list_attachment' },
     ],
   },
   {
@@ -374,6 +381,35 @@ function displayDetailValue(value: unknown) {
   return String(value)
 }
 
+function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
+  const normalizedName = String(fileName || '').trim()
+  if (normalizedName) {
+    return normalizedName
+  }
+  const normalizedUrl = String(url || '').trim()
+  if (!normalizedUrl) {
+    return fallbackLabel
+  }
+  const segments = normalizedUrl.split('/')
+  const lastSegment = segments[segments.length - 1] || ''
+  return decodeURIComponent(lastSegment) || fallbackLabel
+}
+
+function triggerAttachmentDownload(url: string | null | undefined, fileName: string) {
+  const normalizedUrl = String(url || '').trim()
+  if (!normalizedUrl) {
+    return
+  }
+  const link = document.createElement('a')
+  link.href = normalizedUrl
+  link.download = fileName
+  link.target = '_blank'
+  link.rel = 'noopener'
+  document.body.append(link)
+  link.click()
+  link.remove()
+}
+
 async function loadOverview() {
   const [statsResponse, workbenchResponse, optionsResponse] = await Promise.all([getRecruitmentStats(), getRecruitmentWorkbench(), getRecruitmentOptions()])
   stats.value = statsResponse.data
@@ -381,6 +417,10 @@ async function loadOverview() {
   options.value = optionsResponse.data
   applicationStatusColors.value = buildDictColorMap(optionsResponse.data.application_status_options)
   materialStatusColors.value = buildDictColorMap(optionsResponse.data.material_status_options)
+}
+
+function resolveAutoSelectedPlanId(planItems: RecruitPlanRecord[]) {
+  return planItems.find((item) => item.application_count > 0)?.id ?? planItems[0]?.id
 }
 
 async function loadPlans() {
@@ -398,7 +438,7 @@ async function loadPlans() {
       selectedPlanId.value = undefined
     }
     if (!selectedPlanId.value && plans.value.length > 0) {
-      selectedPlanId.value = plans.value[0].id
+      selectedPlanId.value = resolveAutoSelectedPlanId(plans.value)
     }
   } finally {
     plansLoading.value = false
@@ -469,17 +509,58 @@ function openEditPlanDialog(row: RecruitPlanRecord) {
   planDialogVisible.value = true
 }
 
+async function handleDeleteSelectedPlan() {
+  if (!selectedPlan.value || deletingPlan.value) {
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除招生计划“${selectedPlan.value.plan_name}”吗？`,
+      '删除招生计划',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  deletingPlan.value = true
+  try {
+    const deletedPlanId = selectedPlan.value.id
+    await deleteRecruitmentPlan(deletedPlanId)
+    ElMessage.success('招生计划已删除')
+    if (selectedPlanId.value === deletedPlanId) {
+      selectedPlanId.value = undefined
+    }
+    await refreshAll()
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '删除招生计划失败'
+    ElMessage.error(message)
+  } finally {
+    deletingPlan.value = false
+  }
+}
+
 function openCreateApplicationDialog() {
   applicationMode.value = 'create'
   resetApplicationForm()
   applicationDialogVisible.value = true
 }
 
-function openEditApplicationDialog(row: RecruitApplicationRecord) {
+async function openEditApplicationDialog(row: RecruitApplicationRecord) {
   applicationMode.value = 'edit'
-  editingApplicationId.value = row.id
-  Object.assign(applicationForm, buildApplicationFormState(row))
-  applicationDialogVisible.value = true
+  try {
+    const response = await getRecruitmentApplicationDetail(row.id)
+    editingApplicationId.value = row.id
+    Object.assign(applicationForm, buildApplicationFormState(response.data))
+    applicationDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载报名申请详情失败'
+    ElMessage.error(message)
+  }
 }
 
 function addPreference() {
@@ -558,9 +639,15 @@ function syncApplicationLegacyFields() {
   applicationForm.discovery_channel = trimText(applicationForm.source_channel_other) || trimText(applicationForm.source_channel)
 }
 
-function openViewApplicationDetail(row: RecruitApplicationRecord) {
-  viewingApplication.value = row
-  applicationDetailVisible.value = true
+async function openViewApplicationDetail(row: RecruitApplicationRecord) {
+  try {
+    const response = await getRecruitmentApplicationDetail(row.id)
+    viewingApplication.value = response.data
+    applicationDetailVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载报名申请详情失败'
+    ElMessage.error(message)
+  }
 }
 
 async function submitPlanForm() {
@@ -628,6 +715,33 @@ async function submitApplicationForm() {
     return
   }
 
+  const idType = trimText(applicationForm.id_type || applicationForm.profile?.id_type)
+  const idNumber = trimText(applicationForm.id_number)
+  const phoneValidationMessage = getPhoneValidationMessage(applicationForm.phone_number || '')
+  if (phoneValidationMessage) {
+    ElMessage.warning(phoneValidationMessage)
+    return
+  }
+  const emailValidationMessage = getEmailValidationMessage(applicationForm.email || '')
+  if (emailValidationMessage) {
+    ElMessage.warning(emailValidationMessage)
+    return
+  }
+  if (idNumber && (!idType || idType.includes('身份证'))) {
+    const idValidationMessage = getChinaResidentIdValidationMessage(idNumber)
+    if (idValidationMessage) {
+      ElMessage.warning(idValidationMessage)
+      return
+    }
+    applicationForm.id_number = normalizeChinaResidentIdNumber(idNumber)
+  }
+  if (trimText(applicationForm.phone_number)) {
+    applicationForm.phone_number = normalizePhoneNumber(applicationForm.phone_number || '')
+  }
+  if (trimText(applicationForm.email)) {
+    applicationForm.email = normalizeEmail(applicationForm.email || '')
+  }
+
   applicationSubmitting.value = true
   try {
     const payload: RecruitApplicationUpsert = {
@@ -671,13 +785,30 @@ async function submitApplicationForm() {
   }
 }
 
-async function handleDeleteApplication(row: RecruitApplicationRecord) {
-  await ElMessageBox.confirm(`确定删除报名申请 ${row.student_name} 吗？`, '删除确认', {
-    type: 'warning',
-  })
-  await deleteRecruitmentApplication(row.id)
-  ElMessage.success('报名申请已删除')
-  await refreshAll()
+function handleDeleteApplication(row: RecruitApplicationRecord) {
+  deletingApplication.value = row
+  deleteApplicationDialogVisible.value = true
+}
+
+async function submitDeleteApplication() {
+  if (!deletingApplication.value) {
+    return
+  }
+  deleteApplicationSubmitting.value = true
+  try {
+    await deleteRecruitmentApplication(deletingApplication.value.id)
+    ElMessage.success('报名申请已删除')
+    deleteApplicationDialogVisible.value = false
+    deletingApplication.value = null
+    await refreshAll()
+  } finally {
+    deleteApplicationSubmitting.value = false
+  }
+}
+
+function closeDeleteApplicationDialog() {
+  deleteApplicationDialogVisible.value = false
+  deletingApplication.value = null
 }
 
 function triggerTemplateImport() {
@@ -848,6 +979,7 @@ onMounted(() => {
         <div class="header-actions">
           <span class="summary-text" v-if="selectedPlan">当前计划：{{ selectedPlan.plan_name }}</span>
           <el-button v-if="selectedPlan" @click="openEditPlanDialog(selectedPlan)">编辑当前计划</el-button>
+          <el-button v-if="selectedPlan" type="danger" plain :loading="deletingPlan" @click="handleDeleteSelectedPlan">删除当前计划</el-button>
           <el-button type="primary" round @click="openCreatePlanDialog">新增招生计划</el-button>
         </div>
       </div>
@@ -1321,6 +1453,34 @@ onMounted(() => {
       </template>
     </el-dialog>
 
+    <el-dialog v-model="deleteApplicationDialogVisible" title="删除确认" width="560px" destroy-on-close @closed="closeDeleteApplicationDialog">
+      <div v-if="deletingApplication" class="dialog-form delete-application-dialog">
+        <p class="delete-application-dialog__lead">确定删除这条报名申请吗？删除后不可恢复。</p>
+        <div class="delete-application-dialog__summary">
+          <div>
+            <span class="delete-application-dialog__label">姓名</span>
+            <strong>{{ deletingApplication.student_name }}</strong>
+          </div>
+          <div>
+            <span class="delete-application-dialog__label">业务编号</span>
+            <strong>{{ deletingApplication.business_key || '未生成' }}</strong>
+          </div>
+          <div>
+            <span class="delete-application-dialog__label">第一志愿</span>
+            <strong>{{ deletingApplication.first_choice || '未填写' }}</strong>
+          </div>
+          <div>
+            <span class="delete-application-dialog__label">申请状态</span>
+            <strong>{{ deletingApplication.application_status || '未填写' }}</strong>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="closeDeleteApplicationDialog">取消</el-button>
+        <el-button type="danger" :loading="deleteApplicationSubmitting" @click="submitDeleteApplication">确认删除</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="applicationDetailVisible" title="报名申请详情" size="760px" destroy-on-close>
       <template v-if="viewingApplication">
         <section v-for="section in applicationDetailSections" :key="section.title" class="detail-section">
@@ -1333,20 +1493,180 @@ onMounted(() => {
           </div>
         </section>
         <section class="detail-section">
-          <h3 class="dialog-section__title">文本陈述</h3>
+          <h3 class="dialog-section__title">报名信息</h3>
+          <div v-if="viewingApplication.preferences?.length" class="detail-record-stack">
+            <article v-for="(item, index) in viewingApplication.preferences" :key="`detail-preference-${index}`" class="detail-record-card">
+              <div class="detail-record-card__header">
+                <strong>{{ index === 0 ? '第一志愿' : '第二志愿' }}</strong>
+              </div>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-item__label">研究中心/方向</span>
+                  <span class="detail-item__value">{{ displayDetailValue(item.research_center_name) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-item__label">意向导师</span>
+                  <span class="detail-item__value">{{ displayDetailValue(item.advisor_name) }}</span>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-inline">当前未填写报名志愿。</div>
+        </section>
+        <section class="detail-section">
+          <h3 class="dialog-section__title">教育经历</h3>
+          <div v-if="viewingApplication.education_experiences?.length" class="detail-record-stack">
+            <article v-for="(item, index) in viewingApplication.education_experiences" :key="`detail-education-${index}`" class="detail-record-card">
+              <div class="detail-record-card__header">
+                <strong>教育经历 {{ index + 1 }}</strong>
+              </div>
+              <div class="detail-grid">
+                <div class="detail-item"><span class="detail-item__label">教育阶段</span><span class="detail-item__value">{{ displayDetailValue(item.education_stage) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">院校</span><span class="detail-item__value">{{ displayDetailValue(item.school_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">专业</span><span class="detail-item__value">{{ displayDetailValue(item.major_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">开始时间</span><span class="detail-item__value">{{ displayDetailValue(item.start_month) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">结束时间</span><span class="detail-item__value">{{ displayDetailValue(item.end_month) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">平均分</span><span class="detail-item__value">{{ displayDetailValue(item.average_score) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">绩点</span><span class="detail-item__value">{{ displayDetailValue(item.gpa) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">排名</span><span class="detail-item__value">{{ displayDetailValue(item.ranking) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">证明人</span><span class="detail-item__value">{{ displayDetailValue(item.verifier_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">证明人电话</span><span class="detail-item__value">{{ displayDetailValue(item.verifier_phone) }}</span></div>
+                <div v-if="item.transcript_attachment_url" class="detail-item detail-item--full">
+                  <span class="detail-item__label">成绩单附件</span>
+                  <div class="detail-attachment-actions">
+                    <a class="detail-attachment-link" :href="item.transcript_attachment_url" target="_blank" rel="noopener noreferrer">
+                      <el-icon><Document /></el-icon>
+                      <span>{{ resolveAttachmentDisplayName(item.transcript_attachment_url, item.transcript_attachment_name, '成绩单附件') }}</span>
+                    </a>
+                    <button
+                      type="button"
+                      class="detail-attachment-download"
+                      @click="triggerAttachmentDownload(item.transcript_attachment_url, resolveAttachmentDisplayName(item.transcript_attachment_url, item.transcript_attachment_name, '成绩单附件'))"
+                    >
+                      <el-icon><Download /></el-icon>
+                      <span>下载</span>
+                    </button>
+                  </div>
+                </div>
+                <div v-if="item.degree_certificate_attachment_url" class="detail-item detail-item--full">
+                  <span class="detail-item__label">学位证附件</span>
+                  <div class="detail-attachment-actions">
+                    <a class="detail-attachment-link" :href="item.degree_certificate_attachment_url" target="_blank" rel="noopener noreferrer">
+                      <el-icon><Document /></el-icon>
+                      <span>{{ resolveAttachmentDisplayName(item.degree_certificate_attachment_url, item.degree_certificate_attachment_name, '学位证附件') }}</span>
+                    </a>
+                    <button
+                      type="button"
+                      class="detail-attachment-download"
+                      @click="triggerAttachmentDownload(item.degree_certificate_attachment_url, resolveAttachmentDisplayName(item.degree_certificate_attachment_url, item.degree_certificate_attachment_name, '学位证附件'))"
+                    >
+                      <el-icon><Download /></el-icon>
+                      <span>下载</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-inline">当前未填写教育经历。</div>
+        </section>
+        <section class="detail-section">
+          <h3 class="dialog-section__title">实践经历</h3>
+          <div v-if="viewingApplication.practice_experiences?.length" class="detail-record-stack">
+            <article v-for="(item, index) in viewingApplication.practice_experiences" :key="`detail-practice-${index}`" class="detail-record-card">
+              <div class="detail-record-card__header">
+                <strong>实践经历 {{ index + 1 }}</strong>
+              </div>
+              <div class="detail-grid">
+                <div class="detail-item"><span class="detail-item__label">单位名称</span><span class="detail-item__value">{{ displayDetailValue(item.organization_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">岗位名称</span><span class="detail-item__value">{{ displayDetailValue(item.position_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">开始时间</span><span class="detail-item__value">{{ displayDetailValue(item.start_month) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">结束时间</span><span class="detail-item__value">{{ displayDetailValue(item.end_month) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">证明人</span><span class="detail-item__value">{{ displayDetailValue(item.verifier_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">证明人电话</span><span class="detail-item__value">{{ displayDetailValue(item.verifier_phone) }}</span></div>
+                <div class="detail-item detail-item--full"><span class="detail-item__label">职责说明</span><span class="detail-item__value">{{ displayDetailValue(item.responsibility_text) }}</span></div>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-inline">当前未填写实践经历。</div>
+        </section>
+        <section class="detail-section">
+          <h3 class="dialog-section__title">家庭情况</h3>
+          <div v-if="viewingApplication.family_members?.length" class="detail-record-stack">
+            <article v-for="(item, index) in viewingApplication.family_members" :key="`detail-family-${index}`" class="detail-record-card">
+              <div class="detail-record-card__header">
+                <strong>家庭成员 {{ index + 1 }}</strong>
+              </div>
+              <div class="detail-grid">
+                <div class="detail-item"><span class="detail-item__label">姓名</span><span class="detail-item__value">{{ displayDetailValue(item.member_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">关系</span><span class="detail-item__value">{{ displayDetailValue(item.relation_type) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">工作单位</span><span class="detail-item__value">{{ displayDetailValue(item.employer_name) }}</span></div>
+                <div class="detail-item"><span class="detail-item__label">职务</span><span class="detail-item__value">{{ displayDetailValue(item.job_title) }}</span></div>
+                <div class="detail-item detail-item--full"><span class="detail-item__label">联系电话</span><span class="detail-item__value">{{ displayDetailValue(item.contact_phone) }}</span></div>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-inline">当前未填写家庭成员信息。</div>
+        </section>
+        <section class="detail-section">
+          <h3 class="dialog-section__title">附件材料</h3>
+          <div class="detail-text-list">
+            <article v-if="viewingApplication.personal_statement?.resume_attachment_url || viewingApplication.personal_statement_attachment" class="detail-text-card">
+              <h4>个人陈述附件</h4>
+              <div class="detail-attachment-actions detail-attachment-actions--stacked">
+                <a
+                  class="detail-attachment-link"
+                  :href="viewingApplication.personal_statement?.resume_attachment_url || viewingApplication.personal_statement_attachment || '#'
+                  "
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <el-icon><Document /></el-icon>
+                  <span>{{ resolveAttachmentDisplayName(viewingApplication.personal_statement?.resume_attachment_url || viewingApplication.personal_statement_attachment, viewingApplication.personal_statement?.resume_attachment_name, '个人陈述附件') }}</span>
+                </a>
+                <button
+                  type="button"
+                  class="detail-attachment-download"
+                  @click="triggerAttachmentDownload(viewingApplication.personal_statement?.resume_attachment_url || viewingApplication.personal_statement_attachment, resolveAttachmentDisplayName(viewingApplication.personal_statement?.resume_attachment_url || viewingApplication.personal_statement_attachment, viewingApplication.personal_statement?.resume_attachment_name, '个人陈述附件'))"
+                >
+                  <el-icon><Download /></el-icon>
+                  <span>下载</span>
+                </button>
+              </div>
+            </article>
+            <article v-if="viewingApplication.material_list_attachment" class="detail-text-card">
+              <h4>材料清单附件</h4>
+              <div class="detail-attachment-actions detail-attachment-actions--stacked">
+                <a class="detail-attachment-link" :href="viewingApplication.material_list_attachment" target="_blank" rel="noopener noreferrer">
+                  <el-icon><Document /></el-icon>
+                  <span>{{ resolveAttachmentDisplayName(viewingApplication.material_list_attachment, viewingApplication.material_list_attachment_name, '材料清单附件') }}</span>
+                </a>
+                <button
+                  type="button"
+                  class="detail-attachment-download"
+                  @click="triggerAttachmentDownload(viewingApplication.material_list_attachment, resolveAttachmentDisplayName(viewingApplication.material_list_attachment, viewingApplication.material_list_attachment_name, '材料清单附件'))"
+                >
+                  <el-icon><Download /></el-icon>
+                  <span>下载</span>
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+        <section class="detail-section">
+          <h3 class="dialog-section__title">个人陈述与补充说明</h3>
           <div class="detail-text-list">
             <article class="detail-text-card"><h4>本人自我评价</h4><p>{{ displayDetailValue(viewingApplication.self_evaluation) }}</p></article>
-            <article class="detail-text-card"><h4>关键科研问题</h4><p>{{ displayDetailValue(viewingApplication.research_problem) }}</p></article>
+            <article class="detail-text-card"><h4>个人陈述</h4><p>{{ displayDetailValue(viewingApplication.personal_statement?.personal_statement_text) }}</p></article>
+            <article class="detail-text-card"><h4>关键科研问题</h4><p>{{ displayDetailValue(viewingApplication.personal_statement?.ai_problem_statement || viewingApplication.research_problem) }}</p></article>
+            <article class="detail-text-card"><h4>AI 行业不同观点</h4><p>{{ displayDetailValue(viewingApplication.personal_statement?.ai_industry_opinion || viewingApplication.dissenting_view) }}</p></article>
             <article class="detail-text-card"><h4>研究现状与局限</h4><p>{{ displayDetailValue(viewingApplication.research_status_analysis) }}</p></article>
             <article class="detail-text-card"><h4>问题解决后的影响</h4><p>{{ displayDetailValue(viewingApplication.research_impact) }}</p></article>
             <article class="detail-text-card"><h4>AI 对社会影响判断</h4><p>{{ displayDetailValue(viewingApplication.ai_society_impact) }}</p></article>
-            <article class="detail-text-card"><h4>不同意的行业共识</h4><p>{{ displayDetailValue(viewingApplication.dissenting_view) }}</p></article>
-            <article class="detail-text-card"><h4>家庭情况</h4><p>{{ displayDetailValue(viewingApplication.family_info) }}</p></article>
-            <article class="detail-text-card"><h4>教育经历</h4><p>{{ displayDetailValue(viewingApplication.education_experience) }}</p></article>
-            <article class="detail-text-card"><h4>实践经历</h4><p>{{ displayDetailValue(viewingApplication.practice_experience) }}</p></article>
-            <article class="detail-text-card"><h4>个人陈述</h4><p>{{ displayDetailValue(viewingApplication.personal_statement_text) }}</p></article>
             <article class="detail-text-card"><h4>学生活动经历</h4><p>{{ displayDetailValue(viewingApplication.student_activity_experience) }}</p></article>
             <article class="detail-text-card"><h4>补充简介</h4><p>{{ displayDetailValue(viewingApplication.supplementary_profile) }}</p></article>
+            <article class="detail-text-card"><h4>声明确认</h4><p>{{ viewingApplication.declaration?.has_read_declaration ? '已阅读并确认声明' : '未确认声明' }}</p></article>
+            <article v-if="viewingApplication.declaration?.declaration_text" class="detail-text-card"><h4>声明内容</h4><p>{{ displayDetailValue(viewingApplication.declaration?.declaration_text) }}</p></article>
           </div>
         </section>
       </template>
@@ -1470,6 +1790,40 @@ onMounted(() => {
 
 .filter-form {
   margin-bottom: 12px;
+}
+
+.delete-application-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.delete-application-dialog__lead {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.delete-application-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.delete-application-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.delete-application-dialog__summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
 }
 
 .task-list {
@@ -1649,6 +2003,31 @@ onMounted(() => {
   gap: 10px 14px;
 }
 
+.detail-record-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-record-card {
+  padding: 12px;
+  border: 1px solid rgba(18, 50, 95, 0.08);
+  border-radius: 16px;
+  background: rgba(246, 249, 255, 0.7);
+}
+
+.detail-record-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.detail-record-card__header strong {
+  color: #12315e;
+  font-size: 13px;
+}
+
 .detail-item {
   display: grid;
   gap: 4px;
@@ -1667,6 +2046,46 @@ onMounted(() => {
   color: #12315e;
   font-size: 13px;
   line-height: 1.5;
+  word-break: break-word;
+}
+
+.detail-item--full {
+  grid-column: 1 / -1;
+}
+
+.detail-attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.detail-attachment-actions--stacked {
+  margin-top: 10px;
+}
+
+.detail-attachment-link,
+.detail-attachment-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(28, 78, 146, 0.12);
+  background: rgba(240, 246, 255, 0.96);
+  color: #1c4e92;
+  text-decoration: none;
+}
+
+.detail-attachment-download {
+  border: none;
+  cursor: pointer;
+}
+
+.detail-attachment-link span,
+.detail-attachment-download span {
+  line-height: 1.4;
   word-break: break-word;
 }
 

@@ -4,8 +4,9 @@ from app.services.postgres_state_store import PostgresStateStore
 
 
 class FakeCursor:
-    def __init__(self, fetchone_results=None) -> None:
+    def __init__(self, fetchone_results=None, fetchall_results=None) -> None:
         self.fetchone_results = list(fetchone_results or [])
+        self.fetchall_results = list(fetchall_results or [])
         self.executed: list[tuple[str, object]] = []
 
     def execute(self, sql, params=None) -> None:
@@ -15,6 +16,11 @@ class FakeCursor:
         if self.fetchone_results:
             return self.fetchone_results.pop(0)
         return None
+
+    def fetchall(self):
+        if self.fetchall_results:
+            return self.fetchall_results.pop(0)
+        return []
 
     def __enter__(self):
         return self
@@ -146,3 +152,31 @@ def test_seed_portal_application_structures_uses_application_id_for_personal_sta
     assert attachment_rows == [
         (7, 15, "personal_statement", 15, "resume", "resume-a.pdf", "/portal-attachments/uploads/student-7/resume/resume-a.pdf", "pdf")
     ]
+
+
+def test_seed_recruitment_normalizes_academic_year_range_for_plan_dates() -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchall_results=[[]])
+    state = {
+        "recruitment_plans": [
+            {
+                "id": 3,
+                "plan_name": "跨学年招生计划",
+                "academic_year": "2026-2027",
+                "semester": "春",
+                "plan_description": "测试跨学年时间拼接",
+                "target_quota": 10,
+                "current_stage": "资格审核",
+                "is_open": True,
+                "brochure_image_url": None,
+                "interview_group_count": 0,
+            }
+        ],
+        "recruitment_applications": [],
+    }
+
+    store._seed_recruitment(cursor, state)
+
+    plan_insert = next(params for sql, params in cursor.executed if "INSERT INTO dtlms_recruitment_plans" in sql)
+    assert plan_insert[6] == "2026-03-01 08:00:00+08"
+    assert plan_insert[7] == "2026-10-31 18:00:00+08"

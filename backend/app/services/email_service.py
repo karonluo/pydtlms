@@ -34,6 +34,17 @@ class NotificationEmailService:
         )
         self.send_message(to_email=email, subject=subject, text_body=text_body)
 
+    def send_portal_registration_verification_code(self, email: str, verification_code: str) -> None:
+        subject = "学生门户邮箱验证码"
+        text_body = (
+            "您好：\n\n"
+            "您正在进行博士生生命周期管理系统学生门户注册。\n"
+            f"本次邮箱验证码为：{verification_code}\n"
+            "验证码 10 分钟内有效，请勿泄露给他人。\n\n"
+            "此邮件为系统自动发送，请勿直接回复。"
+        )
+        self.send_message(to_email=email, subject=subject, text_body=text_body)
+
     def send_portal_password_reset_success(self, full_name: str, email: str, account: str) -> None:
         subject = "学生门户密码重置成功通知"
         text_body = (

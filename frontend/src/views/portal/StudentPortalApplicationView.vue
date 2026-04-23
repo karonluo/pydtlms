@@ -344,7 +344,7 @@ function isAttachmentUploading(key: string) {
 async function uploadAttachmentAndResolveUrl(file: File, category: PortalAttachmentCategory, successMessage: string) {
   const response = await uploadPortalAttachment(file, category)
   ElMessage.success(successMessage)
-  return response.data.url
+  return response.data
 }
 
 async function handleEducationAttachmentUpload(index: number, field: EducationAttachmentField, event: Event) {
@@ -358,13 +358,15 @@ async function handleEducationAttachmentUpload(index: number, field: EducationAt
   attachmentUploading[key] = true
   try {
     const category: PortalAttachmentCategory = field === 'transcript' ? 'education_transcript' : 'education_degree_certificate'
-    const url = await uploadAttachmentAndResolveUrl(file, category, field === 'transcript' ? '成绩单附件已上传' : '学位证附件已上传')
+    const attachment = await uploadAttachmentAndResolveUrl(file, category, field === 'transcript' ? '成绩单附件已上传' : '学位证附件已上传')
     const current = form.education_experiences?.[index]
     if (current) {
       if (field === 'transcript') {
-        current.transcript_attachment_url = url
+        current.transcript_attachment_url = attachment.url
+        current.transcript_attachment_name = attachment.file_name
       } else {
-        current.degree_certificate_attachment_url = url
+        current.degree_certificate_attachment_url = attachment.url
+        current.degree_certificate_attachment_name = attachment.file_name
       }
     }
   } catch (error) {
@@ -385,10 +387,11 @@ async function handleEnglishAttachmentUpload(index: number, event: Event) {
   const key = buildAttachmentUploadKey('english', index, 'certificate')
   attachmentUploading[key] = true
   try {
-    const url = await uploadAttachmentAndResolveUrl(file, 'english_certificate', '英语证明附件已上传')
+    const attachment = await uploadAttachmentAndResolveUrl(file, 'english_certificate', '英语证明附件已上传')
     const current = form.english_proficiencies?.[index]
     if (current) {
-      current.certificate_attachment_url = url
+      current.certificate_attachment_url = attachment.url
+      current.certificate_attachment_name = attachment.file_name
     }
   } catch (error) {
     await showPortalAlert(resolveRequestError(error, '附件上传失败'), '附件上传失败', 'error')
@@ -408,9 +411,10 @@ async function handleResumeAttachmentUpload(event: Event) {
   const key = buildAttachmentUploadKey('statement', 0, 'resume')
   attachmentUploading[key] = true
   try {
-    const url = await uploadAttachmentAndResolveUrl(file, 'resume', '个人简历已上传')
+    const attachment = await uploadAttachmentAndResolveUrl(file, 'resume', '个人简历已上传')
     if (form.personal_statement) {
-      form.personal_statement.resume_attachment_url = url
+      form.personal_statement.resume_attachment_url = attachment.url
+      form.personal_statement.resume_attachment_name = attachment.file_name
     }
   } catch (error) {
     await showPortalAlert(resolveRequestError(error, '附件上传失败'), '附件上传失败', 'error')
@@ -430,9 +434,9 @@ async function handleProfilePhotoUpload(event: Event) {
   const key = buildAttachmentUploadKey('profile', 0, 'photo')
   attachmentUploading[key] = true
   try {
-    const url = await uploadAttachmentAndResolveUrl(file, 'profile_photo', '个人照片已上传')
+    const attachment = await uploadAttachmentAndResolveUrl(file, 'profile_photo', '个人照片已上传')
     if (form.profile) {
-      form.profile.profile_photo_url = url
+      form.profile.profile_photo_url = attachment.url
     }
   } catch (error) {
     await showPortalAlert(resolveRequestError(error, '个人照片上传失败'), '个人照片上传失败', 'error')

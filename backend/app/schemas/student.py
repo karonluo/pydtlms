@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import PaginationResponseBase, SelectOption
+from app.schemas.contact import validate_optional_phone_number
 
 
 class StudentSummary(BaseModel):
@@ -44,6 +45,11 @@ class StudentUpsert(BaseModel):
     enrollment_year: int
     phone_number: str | None = None
     political_status: str | None = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value)
 
 
 class StudentManagementResponse(PaginationResponseBase):

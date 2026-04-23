@@ -16,6 +16,8 @@ from app.schemas.portal import (
     PortalPlanListResponse,
     PortalProfileOptionsResponse,
     PortalPasswordResetRequest,
+    PortalRegistrationEmailCodeRequest,
+    PortalRegistrationEmailCodeResponse,
     PortalRegistrationRequest,
     PortalRegistrationResponse,
     PortalSessionResponse,
@@ -29,10 +31,13 @@ from app.services.dashboard_service import (
     get_public_recruitment_plans,
     get_public_teams,
     login_portal_student,
+    clear_portal_registration_email_code,
     register_portal_student,
     reset_portal_student_password,
     save_portal_application_draft,
+    send_portal_registration_email_code,
     submit_portal_application,
+    validate_portal_registration_email_code,
 )
 
 
@@ -104,10 +109,27 @@ def _validate_portal_attachment(file: UploadFile, category: str) -> str:
 
 @router.post("/register", response_model=PortalRegistrationResponse, status_code=status.HTTP_201_CREATED)
 def portal_register(payload: PortalRegistrationRequest) -> PortalRegistrationResponse:
+    if not payload.email_verification_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先填写邮件验证码")
     try:
-        return register_portal_student(payload)
+        validate_portal_registration_email_code(payload.email, payload.email_verification_code)
+        response = register_portal_student(payload)
+        clear_portal_registration_email_code(payload.email)
+        return response
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.post("/register/email-code", response_model=PortalRegistrationEmailCodeResponse)
+def portal_send_registration_email_code(payload: PortalRegistrationEmailCodeRequest) -> PortalRegistrationEmailCodeResponse:
+    try:
+        return send_portal_registration_email_code(payload.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.post("/login", response_model=PortalSessionResponse)

@@ -25,8 +25,8 @@
   --panel-shadow: 0 20px 48px rgba(30, 75, 125, 0.12);
   --panel-shadow-soft: 0 10px 24px rgba(30, 75, 125, 0.08);
   --panel-shadow-strong: 0 12px 24px rgba(70, 117, 187, 0.18);
-  --title-font: 'Bahnschrift', 'Aptos Display', 'Microsoft YaHei UI', sans-serif;
-  --body-font: 'Aptos', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --title-font: 'Microsoft YaHei', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --body-font: 'Microsoft YaHei', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
   --brand-accent: #27a3ea;
   color: var(--text-main);
   font-family: var(--body-font);
@@ -311,8 +311,43 @@ a {
 
 body .el-overlay,
 body .el-overlay-dialog,
+body .el-overlay-message-box,
 body .el-message-box__wrapper {
   z-index: 3000 !important;
+}
+
+body .is-message-box .el-overlay-message-box,
+body .el-message-box__wrapper {
+  text-align: center;
+  padding: 16px;
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+}
+
+body .is-message-box .el-overlay-message-box::after,
+body .el-message-box__wrapper::after {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 100%;
+  vertical-align: middle;
+}
+
+body .el-message-box {
+  margin: 0 !important;
+  display: inline-block;
+  vertical-align: middle;
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+body .el-message-box__message {
+  word-break: break-word;
+}
+
+body .el-message-box__message p {
+  line-height: 1.6;
 }
 
 body .crud-dialog {

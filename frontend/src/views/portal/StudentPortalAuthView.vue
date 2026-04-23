@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
@@ -9,14 +9,20 @@ import {
   loginPortalStudent,
   registerPortalStudent,
   resetPortalStudentPassword,
+  sendPortalRegistrationEmailCode,
   setPortalToken,
 } from '../../api/portal'
+import { getEmailValidationMessage, getPhoneValidationMessage, normalizeEmail, normalizePhoneNumber } from '../../utils/contactValidation'
+import { getChinaResidentIdValidationMessage, normalizeChinaResidentIdNumber } from '../../utils/chinaResidentId'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 const router = useRouter()
 const mode = ref<'login' | 'register' | 'reset'>('login')
 const submitting = ref(false)
 const agreed = ref(true)
+const emailCodeSending = ref(false)
+const emailCodeCooldownSeconds = ref(0)
+const emailCodeTarget = ref('')
 
 const loginForm = reactive({
   account: '',
@@ -31,6 +37,7 @@ const registerForm = reactive({
   id_number: '',
   password: '',
   confirm_password: '',
+  email_verification_code: '',
   captcha: '',
 })
 
@@ -42,7 +49,7 @@ const resetForm = reactive({
   captcha: '',
 })
 
-const captchaSeed = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+const captchaSeed = '23456789'
 const captchaCode = ref('')
 const captchaImage = ref('')
 
@@ -59,6 +66,17 @@ const panelTitle = computed(() => {
 const registerButtonText = computed(() => (submitting.value ? '注册中...' : '立即注册'))
 const loginButtonText = computed(() => (submitting.value ? '登录中...' : '立即登录'))
 const resetButtonText = computed(() => (submitting.value ? '提交中...' : '重置密码'))
+const emailCodeButtonText = computed(() => {
+  if (emailCodeSending.value) {
+    return '发送中...'
+  }
+  if (emailCodeCooldownSeconds.value > 0) {
+    return `${emailCodeCooldownSeconds.value}s后重试`
+  }
+  return '获取验证码'
+})
+
+let emailCodeCountdownTimer: number | null = null
 
 function switchMode(nextMode: 'login' | 'register' | 'reset') {
   if (submitting.value) {
@@ -148,6 +166,52 @@ function ensureAgreement() {
   return true
 }
 
+function clearEmailCodeCountdown() {
+  if (emailCodeCountdownTimer !== null) {
+    window.clearInterval(emailCodeCountdownTimer)
+    emailCodeCountdownTimer = null
+  }
+}
+
+function startEmailCodeCountdown(seconds: number) {
+  clearEmailCodeCountdown()
+  emailCodeCooldownSeconds.value = Math.max(0, Math.floor(seconds))
+  if (emailCodeCooldownSeconds.value <= 0) {
+    return
+  }
+  emailCodeCountdownTimer = window.setInterval(() => {
+    if (emailCodeCooldownSeconds.value <= 1) {
+      emailCodeCooldownSeconds.value = 0
+      clearEmailCodeCountdown()
+      return
+    }
+    emailCodeCooldownSeconds.value -= 1
+  }, 1000)
+}
+
+async function sendRegisterEmailCode() {
+  if (submitting.value || emailCodeSending.value || emailCodeCooldownSeconds.value > 0) {
+    return
+  }
+  const emailValidationMessage = getEmailValidationMessage(registerForm.email, true)
+  if (emailValidationMessage) {
+    await showPortalAlert(emailValidationMessage, '提示', 'warning')
+    return
+  }
+  emailCodeSending.value = true
+  try {
+    const normalizedEmail = normalizeEmail(registerForm.email)
+    const response = await sendPortalRegistrationEmailCode({ email: normalizedEmail })
+    emailCodeTarget.value = normalizedEmail
+    startEmailCodeCountdown(response.data.cooldown_seconds)
+    await showPortalAlert(response.data.message, '发送成功', 'success')
+  } catch (error) {
+    await showPortalAlert(resolveRequestError(error, '邮件验证码发送失败'), '发送失败', 'error')
+  } finally {
+    emailCodeSending.value = false
+  }
+}
+
 async function submitLogin() {
   if (submitting.value) {
     return
@@ -159,7 +223,7 @@ async function submitLogin() {
   try {
     const response = await loginPortalStudent(loginForm)
     setPortalToken(response.data.access_token)
-    await router.replace('/portal/applicationv2')
+    await router.replace('/portal/home')
   } catch (error) {
     refreshCaptcha()
     await showPortalAlert(resolveRequestError(error, '登录失败'), '登录失败', 'error')
@@ -179,6 +243,30 @@ async function submitRegister() {
     await showPortalAlert('两次输入的密码不一致', '提示', 'warning')
     return
   }
+  const registerPhoneValidationMessage = getPhoneValidationMessage(registerForm.phone_number, true)
+  if (registerPhoneValidationMessage) {
+    await showPortalAlert(registerPhoneValidationMessage, '提示', 'warning')
+    return
+  }
+  const registerEmailValidationMessage = getEmailValidationMessage(registerForm.email, true)
+  if (registerEmailValidationMessage) {
+    await showPortalAlert(registerEmailValidationMessage, '提示', 'warning')
+    return
+  }
+  const normalizedRegisterEmail = normalizeEmail(registerForm.email)
+  if (!registerForm.email_verification_code.trim()) {
+    await showPortalAlert('请先填写邮件验证码', '提示', 'warning')
+    return
+  }
+  if (!emailCodeTarget.value || emailCodeTarget.value !== normalizedRegisterEmail) {
+    await showPortalAlert('请先获取当前邮箱对应的邮件验证码', '提示', 'warning')
+    return
+  }
+  const registerIdValidationMessage = getChinaResidentIdValidationMessage(registerForm.id_number)
+  if (registerIdValidationMessage) {
+    await showPortalAlert(registerIdValidationMessage, '提示', 'warning')
+    return
+  }
   if (!ensureCaptcha(registerForm.captcha)) {
     return
   }
@@ -186,13 +274,18 @@ async function submitRegister() {
   try {
     const response = await registerPortalStudent({
       full_name: registerForm.full_name,
-      phone_number: registerForm.phone_number,
-      email: registerForm.email,
-      id_number: registerForm.id_number,
+      phone_number: normalizePhoneNumber(registerForm.phone_number),
+      email: normalizedRegisterEmail,
+      id_number: normalizeChinaResidentIdNumber(registerForm.id_number),
       password: registerForm.password,
+      email_verification_code: registerForm.email_verification_code.trim(),
     })
     loginForm.account = registerForm.phone_number
     loginForm.password = registerForm.password
+    registerForm.email_verification_code = ''
+    emailCodeTarget.value = ''
+    clearEmailCodeCountdown()
+    emailCodeCooldownSeconds.value = 0
     await showPortalAlert(response.data.message, '完成注册', 'success')
     mode.value = 'login'
     refreshCaptcha()
@@ -215,6 +308,11 @@ async function submitReset() {
     await showPortalAlert('两次输入的新密码不一致', '提示', 'warning')
     return
   }
+  const resetIdValidationMessage = getChinaResidentIdValidationMessage(resetForm.id_number)
+  if (resetIdValidationMessage) {
+    await showPortalAlert(resetIdValidationMessage, '提示', 'warning')
+    return
+  }
   if (!ensureCaptcha(resetForm.captcha)) {
     return
   }
@@ -222,7 +320,7 @@ async function submitReset() {
   try {
     const response = await resetPortalStudentPassword({
       account: resetForm.account,
-      id_number: resetForm.id_number,
+      id_number: normalizeChinaResidentIdNumber(resetForm.id_number),
       new_password: resetForm.new_password,
     })
     await showPortalAlert(response.data.message, '操作成功', 'success')
@@ -243,22 +341,36 @@ onMounted(async () => {
   if (getPortalToken()) {
     try {
       await getPortalProfile()
-      await router.replace('/portal/applicationv2')
+      await router.replace('/portal/home')
     } catch {
       clearPortalToken()
     }
   }
 })
+
+onUnmounted(() => {
+  clearEmailCodeCountdown()
+})
 </script>
 
 <template>
   <div class="portal-auth-shell">
+    <section class="portal-auth-copy" aria-label="门户欢迎说明">
+      <p class="portal-auth-copy__eyebrow">同学你好，</p>
+      <h1 class="portal-auth-copy__title">欢迎加入上海人工智能实验室</h1>
+      <p class="portal-auth-copy__description">
+        上海人工智能实验室自2022年启动博士生联合培养项目以来，已与国内十余所顶尖高校建立深度合作关系，致力于在通用人工智能（AGI）及相关前沿领域培养高水平科研人才。<br />
+      </p>
+    </section>
     <section class="auth-card">
       <div class="auth-card__header">
         <div class="auth-tabs">
-          <button type="button" :class="{ active: mode === 'login' }" :disabled="submitting" @click="switchMode('login')">账号登录</button>
-          <button type="button" :class="{ active: mode === 'register' }" :disabled="submitting" @click="switchMode('register')">立即注册</button>
-          <button type="button" :class="{ active: mode === 'reset' }" :disabled="submitting" @click="switchMode('reset')">忘记密码</button>
+          <button type="button" :class="{ active: mode === 'login' }" :disabled="submitting"
+            @click="switchMode('login')">账号登录</button>
+          <button type="button" :class="{ active: mode === 'register' }" :disabled="submitting"
+            @click="switchMode('register')">立即注册</button>
+          <button type="button" :class="{ active: mode === 'reset' }" :disabled="submitting"
+            @click="switchMode('reset')">忘记密码</button>
         </div>
         <strong>{{ panelTitle }}</strong>
       </div>
@@ -276,26 +388,20 @@ onMounted(async () => {
           <span>随机验证码</span>
           <div class="captcha-row">
             <input v-model="loginForm.captcha" :disabled="submitting" placeholder="请输入右侧验证码" />
-            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting" @click="refreshCaptcha">
+            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting"
+              @click="refreshCaptcha">
               <span class="captcha-chip__sr">点击刷新验证码，当前验证码 {{ captchaCode }}</span>
             </button>
           </div>
         </label>
-        <button class="auth-submit" type="button" :disabled="submitting" @click="submitLogin">{{ loginButtonText }}</button>
+        <button class="auth-submit" type="button" :disabled="submitting" @click="submitLogin">{{ loginButtonText
+          }}</button>
       </div>
 
-      <div v-else-if="mode === 'register'" class="auth-form auth-form--grid">
+      <div v-else-if="mode === 'register'" class="auth-form auth-form--grid auth-form--register">
         <label>
           <span>姓名</span>
           <input v-model="registerForm.full_name" :disabled="submitting" placeholder="请输入真实姓名" />
-        </label>
-        <label>
-          <span>手机号</span>
-          <input v-model="registerForm.phone_number" :disabled="submitting" placeholder="请输入手机号" />
-        </label>
-        <label>
-          <span>邮箱</span>
-          <input v-model="registerForm.email" :disabled="submitting" placeholder="请输入邮箱" />
         </label>
         <label>
           <span>身份证号</span>
@@ -310,15 +416,34 @@ onMounted(async () => {
           <input v-model="registerForm.confirm_password" :disabled="submitting" type="password" placeholder="请再次输入密码" />
         </label>
         <label class="auth-form__full">
+          <span>邮箱</span>
+          <div class="inline-action-row">
+            <input v-model="registerForm.email" :disabled="submitting || emailCodeSending" placeholder="请输入邮箱" />
+            <button type="button" class="inline-action-button" :disabled="submitting || emailCodeSending || emailCodeCooldownSeconds > 0" @click="sendRegisterEmailCode">
+              {{ emailCodeButtonText }}
+            </button>
+          </div>
+        </label>
+        <label class="auth-form__full">
+          <span>邮件验证码</span>
+          <input v-model="registerForm.email_verification_code" :disabled="submitting" maxlength="6" placeholder="请输入邮件验证码" />
+        </label>
+        <label class="auth-form__full">
+          <span>手机号</span>
+          <input v-model="registerForm.phone_number" :disabled="submitting" placeholder="请输入手机号" />
+        </label>
+        <label class="auth-form__full">
           <span>随机验证码</span>
           <div class="captcha-row">
             <input v-model="registerForm.captcha" :disabled="submitting" placeholder="请输入右侧验证码" />
-            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting" @click="refreshCaptcha">
+            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting"
+              @click="refreshCaptcha">
               <span class="captcha-chip__sr">点击刷新验证码，当前验证码 {{ captchaCode }}</span>
             </button>
           </div>
         </label>
-        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitRegister">{{ registerButtonText }}</button>
+        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitRegister">{{
+          registerButtonText }}</button>
       </div>
 
       <div v-else class="auth-form auth-form--grid">
@@ -342,12 +467,14 @@ onMounted(async () => {
           <span>随机验证码</span>
           <div class="captcha-row">
             <input v-model="resetForm.captcha" :disabled="submitting" placeholder="请输入右侧验证码" />
-            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting" @click="refreshCaptcha">
+            <button type="button" class="captcha-chip" :style="{ backgroundImage: captchaImage }" :disabled="submitting"
+              @click="refreshCaptcha">
               <span class="captcha-chip__sr">点击刷新验证码，当前验证码 {{ captchaCode }}</span>
             </button>
           </div>
         </label>
-        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitReset">{{ resetButtonText }}</button>
+        <button class="auth-submit auth-submit--full" type="button" :disabled="submitting" @click="submitReset">{{
+          resetButtonText }}</button>
       </div>
 
       <label class="auth-agreement">
@@ -363,9 +490,40 @@ onMounted(async () => {
   min-height: 100vh;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 32px 200px 32px 32px;
+  justify-content: space-between;
+  gap: 48px;
+  padding: 32px 160px 32px 96px;
   background: url('/images/login_background.png') center center / cover no-repeat;
+}
+
+.portal-auth-copy {
+  max-width: 680px;
+  margin-top: 248px;
+  color: #1f6fd7;
+}
+
+.portal-auth-copy__eyebrow {
+  margin: 0 0 16px;
+  font-size: clamp(26px, 2.7vw, 38px);
+  line-height: 1.18;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.portal-auth-copy__title {
+  margin: 0;
+  font-size: clamp(26px, 2.7vw, 38px);
+  line-height: 1.24;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.portal-auth-copy__description {
+  margin: 30px 0 0;
+  color: #67707d;
+  font-size: clamp(14px, 0.98vw, 17px);
+  line-height: 1.74;
+  font-weight: 400;
 }
 
 .auth-card {
@@ -408,11 +566,15 @@ onMounted(async () => {
 
 .auth-form {
   display: grid;
-  gap: 16px;
+  gap: 13px;
 }
 
 .auth-form--grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.auth-form--register {
+  align-items: start;
 }
 
 .auth-form__full,
@@ -442,6 +604,29 @@ onMounted(async () => {
 }
 
 .auth-form input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.inline-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 10px;
+  align-items: center;
+}
+
+.inline-action-button {
+  min-height: 48px;
+  border: 1px solid #cbd7f0;
+  border-radius: 14px;
+  background: #eef4ff;
+  color: #2b58d6;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.inline-action-button:disabled {
   cursor: not-allowed;
   opacity: 0.7;
 }
@@ -505,6 +690,15 @@ onMounted(async () => {
 }
 
 @media (max-width: 1080px) {
+  .portal-auth-shell {
+    padding: 24px;
+  }
+
+  .portal-auth-copy {
+    margin-top: 0;
+    max-width: 560px;
+  }
+
   .auth-card {
     border-radius: 0;
   }
@@ -512,14 +706,29 @@ onMounted(async () => {
 
 @media (max-width: 720px) {
   .portal-auth-shell {
-    padding: 0;
+    justify-content: center;
+    flex-direction: column;
+    gap: 24px;
+    padding: 20px 16px;
+  }
+
+  .portal-auth-copy {
+    max-width: none;
+    margin-top: 0;
+  }
+
+  .portal-auth-copy__description {
+    margin-top: 20px;
+    line-height: 1.72;
   }
 
   .auth-card {
     padding: 24px 18px;
+    border-radius: 28px;
   }
 
   .auth-form--grid,
+  .inline-action-row,
   .captcha-row {
     grid-template-columns: 1fr;
   }

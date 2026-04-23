@@ -80,6 +80,7 @@ export type RecruitApplicationRecord = {
   student_activity_experience?: string | null
   personal_statement_attachment?: string | null
   material_list_attachment?: string | null
+  material_list_attachment_name?: string | null
   supplementary_profile?: string | null
   material_status: string
   application_status: string
@@ -198,6 +199,11 @@ export function updateRecruitmentPlan(id: number, payload: RecruitPlanUpsert) {
 }
 
 
+export function deleteRecruitmentPlan(id: number) {
+  return http.delete(`/recruitment/plans/${id}`)
+}
+
+
 export function listRecruitmentApplications(params?: PaginationParams & { keyword?: string; status?: string; plan_id?: number }) {
   return http.get<RecruitApplicationListResponse>('/recruitment/applications', { params })
 }
@@ -205,6 +211,11 @@ export function listRecruitmentApplications(params?: PaginationParams & { keywor
 
 export function createRecruitmentApplication(payload: RecruitApplicationUpsert) {
   return http.post<RecruitApplicationRecord>('/recruitment/applications', payload)
+}
+
+
+export function getRecruitmentApplicationDetail(id: number) {
+  return http.get<RecruitApplicationRecord>(`/recruitment/applications/${id}`)
 }
 
 

@@ -32,10 +32,10 @@ const workflowStages = [
 ]
 
 const headerLinks = [
-  { label: '首页', href: '/portal' },
-  { label: '招生信息', href: '/portal' },
+  { label: '首页', href: '/portal/home' },
+  { label: '招生信息', href: '/portal/home#portal-news' },
   { label: '在线申请', href: '/portal/applicationv2', active: true },
-  { label: '申请进度', href: '/portal/applicationv2' },
+  { label: '申请进度', href: '/portal/home#portal-progress' },
 ]
 
 const formSections = [

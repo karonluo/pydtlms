@@ -3,6 +3,7 @@ import axios from 'axios'
 import type { SelectOption } from './common'
 
 const PORTAL_TOKEN_KEY = 'dtlms-portal-access-token'
+const PORTAL_LONG_RUNNING_TIMEOUT = 60000
 
 export type PortalApplicantProfileData = {
   full_name_pinyin?: string | null
@@ -40,7 +41,9 @@ export type PortalEducationExperienceItem = {
   verifier_name?: string | null
   verifier_phone?: string | null
   transcript_attachment_url?: string | null
+  transcript_attachment_name?: string | null
   degree_certificate_attachment_url?: string | null
+  degree_certificate_attachment_name?: string | null
 }
 
 export type PortalPracticeExperienceItem = {
@@ -57,6 +60,7 @@ export type PortalEnglishProficiencyItem = {
   exam_name: string
   score_text?: string | null
   certificate_attachment_url?: string | null
+  certificate_attachment_name?: string | null
 }
 
 export type PortalFamilyMemberItem = {
@@ -85,6 +89,7 @@ export type PortalPersonalStatementData = {
   ai_problem_statement?: string | null
   ai_industry_opinion?: string | null
   resume_attachment_url?: string | null
+  resume_attachment_name?: string | null
 }
 
 export type PortalApplicationDeclarationData = {
@@ -114,6 +119,8 @@ export type PortalStudentRecord = {
   phone_number: string
   email: string
   id_number: string
+  business_key?: string | null
+  candidate_no?: string | null
   account_status?: string | null
   gender?: string | null
   birth_date?: string | null
@@ -185,6 +192,17 @@ export type PortalRegistrationRequest = {
   full_name: string
   id_number: string
   password: string
+  email_verification_code: string
+}
+
+export type PortalRegistrationEmailCodeRequest = {
+  email: string
+}
+
+export type PortalRegistrationEmailCodeResponse = {
+  message: string
+  expires_in_seconds: number
+  cooldown_seconds: number
 }
 
 export type PortalLoginRequest = {
@@ -306,6 +324,10 @@ export function registerPortalStudent(payload: PortalRegistrationRequest) {
   return portalHttp.post<PortalRegistrationResponse>('/portal/register', payload)
 }
 
+export function sendPortalRegistrationEmailCode(payload: PortalRegistrationEmailCodeRequest) {
+  return portalHttp.post<PortalRegistrationEmailCodeResponse>('/portal/register/email-code', payload)
+}
+
 export function loginPortalStudent(payload: PortalLoginRequest) {
   return portalHttp.post<PortalSessionResponse>('/portal/login', payload)
 }
@@ -336,11 +358,15 @@ export function listPortalTeams() {
 }
 
 export function submitPortalApplication(payload: PortalApplicationUpsert) {
-  return portalHttp.post<PortalApplicationSubmissionResponse>('/portal/applications', payload)
+  return portalHttp.post<PortalApplicationSubmissionResponse>('/portal/applications', payload, {
+    timeout: PORTAL_LONG_RUNNING_TIMEOUT,
+  })
 }
 
 export function savePortalApplicationDraft(payload: PortalApplicationUpsert) {
-  return portalHttp.post<PortalApplicationDraftSaveResponse>('/portal/applications/draft', payload)
+  return portalHttp.post<PortalApplicationDraftSaveResponse>('/portal/applications/draft', payload, {
+    timeout: PORTAL_LONG_RUNNING_TIMEOUT,
+  })
 }
 
 export function uploadPortalAttachment(file: File, category: PortalAttachmentCategory) {

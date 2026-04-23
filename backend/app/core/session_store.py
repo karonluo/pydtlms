@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 from redis import Redis
@@ -52,7 +53,10 @@ def get_session_payload(session_id: str) -> dict | None:
     value = _client().get(_session_key(session_id))
     if not value:
         return None
-    return json.loads(value)
+    if not isinstance(value, (str, bytes, bytearray)):
+        return None
+    payload: Any = json.loads(value)
+    return payload if isinstance(payload, dict) else None
 
 
 def validate_session(session_id: str, token_type: str) -> dict | None:

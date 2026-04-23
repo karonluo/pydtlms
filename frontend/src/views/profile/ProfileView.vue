@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { useAuthStore } from '../../stores/auth'
+import { getEmailValidationMessage, getPhoneValidationMessage, normalizeEmail, normalizePhoneNumber } from '../../utils/contactValidation'
 
 const authStore = useAuthStore()
 const savingProfile = ref(false)
@@ -54,6 +55,19 @@ onBeforeUnmount(() => {
 })
 
 async function saveProfile() {
+  const phoneValidationMessage = getPhoneValidationMessage(profileForm.phone_number)
+  if (phoneValidationMessage) {
+    ElMessage.warning(phoneValidationMessage)
+    return
+  }
+  const emailValidationMessage = getEmailValidationMessage(profileForm.email)
+  if (emailValidationMessage) {
+    ElMessage.warning(emailValidationMessage)
+    return
+  }
+
+  profileForm.phone_number = normalizePhoneNumber(profileForm.phone_number)
+  profileForm.email = normalizeEmail(profileForm.email)
   savingProfile.value = true
   try {
     await authStore.saveProfile(profileForm)

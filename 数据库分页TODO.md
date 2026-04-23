@@ -102,12 +102,18 @@
 ### P1：第二批改造
 
 - 招生计划列表
+- 已完成：`backend/app/services/postgres_state_store.py` 已支持基于 `dtlms_recruitment_plans` 与报名申请聚合计数的关键字、学期分页查询；`backend/app/services/management_service.py` 中 `get_recruitment_plans` 已优先走数据库分页，异常时回退内存分页。
 - 团队列表
 - 培养方案列表
+- 已完成：`backend/app/services/postgres_state_store.py` 已支持基于 `dtlms_runtime_training_plans` 的关键字、状态、导师、汇报周期分页查询；`backend/app/services/management_service.py` 中 `get_training_plans` 已优先走数据库分页，异常时回退内存分页。
 - 科研报告列表
+- 已完成：`backend/app/services/postgres_state_store.py` 已支持基于 `dtlms_runtime_scientific_reports` 的关键字、报告状态、评阅人分页查询；`backend/app/services/management_service.py` 中 `get_scientific_reports` 已优先走数据库分页，异常时回退内存分页。
 - 外出研修列表
+- 已完成：`backend/app/services/postgres_state_store.py` 已支持基于 `dtlms_runtime_outbound_studies` 的关键字、审批状态、研修类型、导师分页查询；`backend/app/services/management_service.py` 中 `get_outbound_studies` 已优先走数据库分页，异常时回退内存分页。
 - 论文列表
 - 论文评审列表
+
+补充说明：团队列表已在第一批数据库分页改造中完成，此处保留仅用于对照第二批原始候选范围。
 
 ### P2：最后改造
 

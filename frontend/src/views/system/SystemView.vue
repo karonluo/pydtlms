@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
 import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
@@ -426,6 +427,11 @@ function validateForm() {
       ElMessage.warning('请完整填写系统账号信息')
       return false
     }
+    const phoneValidationMessage = getPhoneValidationMessage(userForm.phone_number || '')
+    if (phoneValidationMessage) {
+      ElMessage.warning(phoneValidationMessage)
+      return false
+    }
     return true
   }
   if (activeSection.value === 'roles') {
@@ -459,7 +465,7 @@ async function submit() {
     if (activeSection.value === 'users') {
       const payload: SystemUserUpsert = {
         ...userForm,
-        phone_number: userForm.phone_number?.trim() || '',
+        phone_number: normalizePhoneNumber(userForm.phone_number || ''),
         password: userForm.password?.trim() || undefined,
       }
       if (dialogMode.value === 'create') {

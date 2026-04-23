@@ -15,6 +15,7 @@ const DictView = () => import('../views/system/DictView.vue')
 const WorkflowCenterView = () => import('../views/workflow/WorkflowCenterView.vue')
 const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
+const PortalHomeView = () => import('../views/home/PortalHomeView.vue')
 const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
 const StudentPortalApplicationView = () => import('../views/portal/StudentPortalApplicationView.vue')
 const StudentPortalApplicationV2View = () => import('../views/portal/StudentPortalApplicationV2View.vue')
@@ -26,6 +27,7 @@ const router = createRouter({
   routes: [
     { path: '/login', component: LoginView, meta: { public: true, title: '系统登录' } },
     { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
+    { path: '/portal/home', component: PortalHomeView, meta: { public: true, portalProtected: true, title: '门户首页' } },
     { path: '/portal/application', component: StudentPortalApplicationView, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
     { path: '/portal/applicationv2', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表V2' } },
     {
@@ -76,7 +78,7 @@ router.beforeEach(async (to) => {
       try {
         await getPortalProfile()
         if (to.path === '/portal') {
-          return '/portal/applicationv2'
+          return '/portal/home'
         }
       } catch {
         clearPortalToken()

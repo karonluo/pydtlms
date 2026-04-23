@@ -11,6 +11,7 @@ from app.schemas.portal import (
     PortalPlanListResponse,
     PortalProfileOptionsResponse,
     PortalPasswordResetRequest,
+    PortalRegistrationEmailCodeResponse,
     PortalRegistrationResponse,
     PortalSessionResponse,
     PortalStudentRecord,
@@ -209,6 +210,10 @@ def update_recruitment_plan(plan_id: int, payload):
     return store.update_recruitment_plan(plan_id, payload)
 
 
+def delete_recruitment_plan(plan_id: int) -> None:
+    store.delete_recruitment_plan(plan_id)
+
+
 def get_recruitment_application_list(
     keyword: str | None = None,
     plan_id: int | None = None,
@@ -217,6 +222,10 @@ def get_recruitment_application_list(
     page_size: int = 10,
 ) -> RecruitApplicationListResponse:
     return store.get_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status, page=page, page_size=page_size)
+
+
+def get_recruitment_application_detail(application_id: int):
+    return store.get_recruitment_application_detail(application_id)
 
 
 def create_recruitment_application(payload, principal: Principal | None = None):
@@ -241,6 +250,18 @@ def export_recruitment_applications(keyword: str | None = None, plan_id: int | N
 
 def export_recruitment_application_blank_template() -> bytes:
     return store.export_recruitment_application_blank_template()
+
+
+def send_portal_registration_email_code(email: str) -> PortalRegistrationEmailCodeResponse:
+    return store.send_portal_registration_email_code(email)
+
+
+def validate_portal_registration_email_code(email: str, verification_code: str) -> None:
+    store.validate_portal_registration_email_code(email, verification_code)
+
+
+def clear_portal_registration_email_code(email: str) -> None:
+    store.clear_portal_registration_email_code(email)
 
 
 def register_portal_student(payload: PortalRegistrationRequest) -> PortalRegistrationResponse:

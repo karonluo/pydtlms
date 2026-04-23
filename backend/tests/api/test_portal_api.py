@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.schemas.recruitment import RecruitApplicationRecord
-from app.schemas.portal import PortalRegistrationResponse, PortalStudentRecord
+from app.schemas.portal import PortalRegistrationEmailCodeResponse, PortalRegistrationResponse, PortalStudentRecord
 from app.services.management_service import RuntimeManagementStore
 
 
@@ -15,7 +15,7 @@ def _portal_student_payload(student_id: int = 7) -> dict[str, object]:
         'full_name': '张三',
         'phone_number': '13800001111',
         'email': 'zhangsan@example.com',
-        'id_number': '320000199901011234',
+        'id_number': '32000019990101123X',
         'graduation_school': '江南大学',
         'highest_degree': '硕士',
         'intended_field': '智能制造',
@@ -34,6 +34,8 @@ def _portal_student_record(student_id: int = 7) -> PortalStudentRecord:
 
 def test_portal_register_returns_profile(monkeypatch) -> None:
     with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.validate_portal_registration_email_code', lambda email, verification_code: None)
+        monkeypatch.setattr('app.api.v1.portal.clear_portal_registration_email_code', lambda email: None)
         monkeypatch.setattr(
             'app.api.v1.portal.register_portal_student',
             lambda payload: PortalRegistrationResponse(message='注册成功，请登录后继续填写申请表', student=_portal_student_record()),
@@ -45,8 +47,9 @@ def test_portal_register_returns_profile(monkeypatch) -> None:
                 'phone_number': '13800001111',
                 'email': 'zhangsan@example.com',
                 'full_name': '张三',
-                'id_number': '320000199901011234',
+                'id_number': '32000019990101123X',
                 'password': 'Secret123!',
+                'email_verification_code': '123456',
             },
         )
 
@@ -55,6 +58,28 @@ def test_portal_register_returns_profile(monkeypatch) -> None:
         assert payload['message'] == '注册成功，请登录后继续填写申请表'
         assert payload['student']['full_name'] == '张三'
         assert payload['student']['selected_team_name'] == '智能制造联合团队'
+
+
+def test_portal_send_registration_email_code_returns_message(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr(
+            'app.api.v1.portal.send_portal_registration_email_code',
+            lambda email: PortalRegistrationEmailCodeResponse(
+                message='邮件验证码已发送，请查收邮箱',
+                expires_in_seconds=600,
+                cooldown_seconds=60,
+            ),
+        )
+
+        response = client.post(
+            '/api/v1/portal/register/email-code',
+            json={'email': 'zhangsan@example.com'},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['message'] == '邮件验证码已发送，请查收邮箱'
+        assert payload['cooldown_seconds'] == 60
 
 
 def test_portal_login_returns_session(monkeypatch) -> None:
@@ -85,7 +110,7 @@ def test_portal_forgot_password_returns_message(monkeypatch) -> None:
             '/api/v1/portal/forgot-password',
             json={
                 'account': 'zhangsan@example.com',
-                'id_number': '320000199901011234',
+                'id_number': '32000019990101123X',
                 'new_password': 'NewSecret123!',
             },
         )
@@ -342,7 +367,7 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
 
 
 def test_portal_application_submission_creates_new_record_without_deadlock(monkeypatch) -> None:
-    created_records: list[dict[str, object]] = []
+    portal_submission_calls: list[dict[str, object]] = []
     saved_markers: list[str] = []
 
     class DummyStore:
@@ -355,7 +380,7 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
                         'full_name': '张三',
                         'phone_number': '13800001111',
                         'email': 'zhangsan@example.com',
-                        'id_number': '320000199901011234',
+                        'id_number': '32000019990101123X',
                     }
                 ],
                 'recruitment_plans': [{'id': 3, 'is_open': True, 'plan_name': '2026 秋季博士招生'}],
@@ -392,6 +417,9 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
         def _ensure_team_exists(self, team_name: str):
             return next(item for item in self._list('teams') if item['team_name'] == team_name)
 
+        def _normalize_portal_account_status(self, value):
+            return str(value or '启用').strip() or '启用'
+
         def _build_portal_profile_payload(self, payload):
             return {'gender': payload.gender, 'birth_date': payload.birth_date, 'native_place': payload.native_place}
 
@@ -425,17 +453,46 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
         def _record_operation(self, *args, **kwargs):
             return None
 
+        def _workflow_task_index_by_business_key(self, business_key: str):
+            del business_key
+            return None
+
         def _save(self):
             saved_markers.append('saved')
 
-        def create_recruitment_application(self, payload, principal=None):
-            with self._lock:
-                item = self._workflow_initial_item('recruitment_application', payload.model_dump())
-                item['id'] = self._next_id('recruitment_applications')
-                self._list('recruitment_applications').insert(0, item)
-                created_records.append(item)
-                self._save()
-                return RecruitApplicationRecord(**item)
+        def sync_portal_application_submission(self, student, application, operation_log, workflow_task=None, counters=None):
+            portal_submission_calls.append(
+                {
+                    'student': student,
+                    'application': application,
+                    'operation_log': operation_log,
+                    'workflow_task': workflow_task,
+                    'counters': counters,
+                }
+            )
+
+        def _persist_portal_application_submission(
+            self,
+            student,
+            application,
+            operation_log,
+            *,
+            workflow_task=None,
+            created_application=False,
+            created_workflow_task=False,
+        ):
+            counters = {'operation_logs': int(self.state['counters'].get('operation_logs', 0))}
+            if created_application:
+                counters['recruitment_applications'] = int(self.state['counters'].get('recruitment_applications', 0))
+            if created_workflow_task:
+                counters['workflow_tasks'] = int(self.state['counters'].get('workflow_tasks', 0))
+            self.sync_portal_application_submission(
+                student,
+                application,
+                operation_log,
+                workflow_task=workflow_task,
+                counters=counters,
+            )
 
         def get_portal_student(self, student_id: int):
             student = next(item for item in self._list('portal_students') if int(item['id']) == int(student_id))
@@ -485,5 +542,38 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
 
     assert response.status_code == 200
     assert response.json()['application_business_key'] == 'RECRUIT-20260421-0007'
-    assert len(created_records) == 1
-    assert saved_markers
+    assert len(store.state['recruitment_applications']) == 1
+    assert len(portal_submission_calls) == 1
+    assert saved_markers == []
+
+
+def test_portal_register_rejects_invalid_id_number() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/portal/register',
+            json={
+                'phone_number': '13800001111',
+                'email': 'zhangsan@example.com',
+                'full_name': '张三',
+                'id_number': '320000199901011234',
+                'password': 'Secret123!',
+            },
+        )
+
+        assert response.status_code == 422
+
+
+def test_portal_register_rejects_invalid_phone_or_email() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/portal/register',
+            json={
+                'phone_number': '12345',
+                'email': 'invalid-email',
+                'full_name': '张三',
+                'id_number': '32000019990101123X',
+                'password': 'Secret123!',
+            },
+        )
+
+        assert response.status_code == 422

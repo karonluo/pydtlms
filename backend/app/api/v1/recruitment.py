@@ -23,9 +23,11 @@ from app.schemas.recruitment import (
 from app.services.dashboard_service import (
     create_recruitment_application,
     create_recruitment_plan,
+    delete_recruitment_plan,
     delete_recruitment_application,
     export_recruitment_application_blank_template,
     export_recruitment_applications,
+    get_recruitment_application_detail,
     get_recruitment_application_list,
     get_recruitment_options,
     get_recruitment_plan_list,
@@ -82,6 +84,16 @@ def update_recruitment_plan_record(plan_id: int, payload: RecruitPlanUpsert, pri
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment plan not found") from exc
 
 
+@router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_recruitment_plan_record(plan_id: int, principal: Principal = Depends(require_permissions("recruitment:write"))) -> None:
+    try:
+        delete_recruitment_plan(plan_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment plan not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/plans/brochure-upload")
 async def upload_recruitment_brochure_image(
     file: UploadFile = File(...),
@@ -112,6 +124,14 @@ def recruitment_applications(
     principal: Principal = Depends(require_permissions("recruitment:read")),
 ) -> RecruitApplicationListResponse:
     return get_recruitment_application_list(keyword=keyword, plan_id=plan_id, status=status_filter, page=page, page_size=page_size)
+
+
+@router.get("/applications/{application_id}", response_model=RecruitApplicationRecord)
+def recruitment_application_detail(application_id: int, principal: Principal = Depends(require_permissions("recruitment:read"))) -> RecruitApplicationRecord:
+    try:
+        return get_recruitment_application_detail(application_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment application not found") from exc
 
 
 @router.post("/applications", response_model=RecruitApplicationRecord, status_code=status.HTTP_201_CREATED)
