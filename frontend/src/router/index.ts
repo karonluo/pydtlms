@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { clearPortalToken, getPortalProfile } from '../api/portal'
 import { useAuthStore } from '../stores/auth'
+import { ensurePortalApplicationV2Available } from '../utils/portalApplicationV2Access'
 
 import AppLayout from '../layouts/AppLayout.vue'
 
@@ -34,7 +35,7 @@ const router = createRouter({
       path: '/',
       component: AppLayout,
       children: [
-        { path: '', redirect: '/dashboard' },
+        { path: '', redirect: '/portal' },
         { path: 'dashboard', component: DashboardView, meta: { title: '经营总览' } },
         { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划' } },
         { path: 'students', redirect: '/students/records' },
@@ -65,6 +66,10 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (to.path === '/') {
+    return { path: '/portal' }
+  }
+
   const authStore = useAuthStore()
   const hasAccessToken = Boolean(localStorage.getItem('dtlms-access-token'))
   const hasPortalToken = Boolean(localStorage.getItem('dtlms-portal-access-token'))
@@ -86,6 +91,13 @@ router.beforeEach(async (to) => {
           return { path: '/portal' }
         }
       }
+    }
+  }
+
+  if (to.path === '/portal/applicationv2') {
+    const allowed = await ensurePortalApplicationV2Available()
+    if (!allowed) {
+      return { path: '/portal/home' }
     }
   }
 

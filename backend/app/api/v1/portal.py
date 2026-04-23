@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.portal_security import create_portal_access_token, portal_bearer, resolve_portal_student_id
+from app.core.config import settings
 from app.schemas.portal import (
     PortalApplicationDraftSaveResponse,
     PortalApplicationDraftUpsert,
     PortalAttachmentUploadResponse,
+    PortalPublicConfigResponse,
     PortalApplicationSubmissionResponse,
     PortalApplicationUpsert,
     PortalLoginRequest,
@@ -86,6 +88,14 @@ def get_current_active_portal_student_id(student_id: int = Depends(get_current_p
     if student.account_status != "启用":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用，请联系管理员")
     return student_id
+
+
+def ensure_portal_application_v2_available() -> None:
+    if settings.portal_application_v2_blocked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=settings.portal_application_v2_block_message,
+        )
 
 
 def _validate_portal_attachment(file: UploadFile, category: str) -> str:
@@ -188,6 +198,16 @@ def portal_teams(student_id: int = Depends(get_current_active_portal_student_id)
     return get_public_teams()
 
 
+@router.get("/public-config", response_model=PortalPublicConfigResponse)
+def portal_public_config(student_id: int = Depends(get_current_active_portal_student_id)) -> PortalPublicConfigResponse:
+    del student_id
+    return PortalPublicConfigResponse(
+        portal_admissions_info_url=settings.portal_admissions_info_url,
+        portal_application_v2_blocked=settings.portal_application_v2_blocked,
+        portal_application_v2_block_message=settings.portal_application_v2_block_message,
+    )
+
+
 @router.post("/attachments/upload", response_model=PortalAttachmentUploadResponse)
 async def portal_upload_attachment(
     category: str = Form(...),
@@ -225,6 +245,7 @@ def portal_submit_application(
     payload: PortalApplicationUpsert,
     student_id: int = Depends(get_current_active_portal_student_id),
 ) -> PortalApplicationSubmissionResponse:
+    ensure_portal_application_v2_available()
     try:
         return submit_portal_application(student_id, payload)
     except KeyError as exc:
@@ -238,6 +259,7 @@ def portal_save_application_draft(
     payload: PortalApplicationDraftUpsert,
     student_id: int = Depends(get_current_active_portal_student_id),
 ) -> PortalApplicationDraftSaveResponse:
+    ensure_portal_application_v2_available()
     try:
         student = save_portal_application_draft(student_id, payload)
         return PortalApplicationDraftSaveResponse(message="草稿已保存", student=student)

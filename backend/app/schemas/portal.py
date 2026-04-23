@@ -385,6 +385,12 @@ class PortalProfileOptionsResponse(BaseModel):
     ethnic_group_options: list[SelectOption] = Field(default_factory=list)
 
 
+class PortalPublicConfigResponse(BaseModel):
+    portal_admissions_info_url: str = "https://www.shlab.org.cn"
+    portal_application_v2_blocked: bool = False
+    portal_application_v2_block_message: str = "4月30日（周四）20点之前开放，敬请期待"
+
+
 class PortalApplicationUpsert(BaseModel):
     plan_id: int
     profile: PortalApplicantProfileData | None = None

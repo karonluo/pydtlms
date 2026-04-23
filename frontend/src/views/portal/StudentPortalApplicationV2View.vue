@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import { changePortalStudentPassword, clearPortalToken, getPortalProfile } from '../../api/portal'
+import { ensurePortalApplicationV2Available } from '../../utils/portalApplicationV2Access'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 import PortalApplicationV2Form from './applicationv2/PortalApplicationV2Form.vue'
 
@@ -155,6 +156,12 @@ async function submitPasswordChange() {
 }
 
 onMounted(async () => {
+  const allowed = await ensurePortalApplicationV2Available()
+  if (!allowed) {
+    await router.replace('/portal/home')
+    return
+  }
+
   try {
     const response = await getPortalProfile()
     portalStudentName.value = response.data.full_name || '学生'

@@ -2,6 +2,8 @@ import axios from 'axios'
 
 export type PortalAlertType = 'success' | 'warning' | 'error'
 
+type PortalAlertBodyMode = 'text' | 'html'
+
 const PORTAL_ALERT_STYLE_ID = 'portal-alert-styles'
 
 function ensurePortalAlertStyles() {
@@ -114,7 +116,7 @@ function ensurePortalAlertStyles() {
   document.head.appendChild(style)
 }
 
-export async function showPortalAlert(message: string, title: string, type: PortalAlertType = 'warning') {
+async function showPortalAlertCore(message: string, title: string, type: PortalAlertType, bodyMode: PortalAlertBodyMode) {
   ensurePortalAlertStyles()
 
   await new Promise<void>((resolve) => {
@@ -148,7 +150,11 @@ export async function showPortalAlert(message: string, title: string, type: Port
 
     const body = document.createElement('div')
     body.className = 'portal-alert-dialog__body'
-    body.textContent = message
+    if (bodyMode === 'html') {
+      body.innerHTML = message
+    } else {
+      body.textContent = message
+    }
 
     const actions = document.createElement('div')
     actions.className = 'portal-alert-dialog__actions'
@@ -195,6 +201,14 @@ export async function showPortalAlert(message: string, title: string, type: Port
 
     confirmButton.focus()
   })
+}
+
+export async function showPortalAlert(message: string, title: string, type: PortalAlertType = 'warning') {
+  await showPortalAlertCore(message, title, type, 'text')
+}
+
+export async function showPortalAlertHtml(message: string, title: string, type: PortalAlertType = 'warning') {
+  await showPortalAlertCore(message, title, type, 'html')
 }
 
 export function resolveRequestError(error: unknown, fallback: string) {

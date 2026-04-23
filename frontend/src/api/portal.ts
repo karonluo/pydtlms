@@ -175,6 +175,12 @@ export type PortalProfileOptionsResponse = {
   ethnic_group_options: SelectOption[]
 }
 
+export type PortalPublicConfigResponse = {
+  portal_admissions_info_url: string
+  portal_application_v2_blocked: boolean
+  portal_application_v2_block_message: string
+}
+
 export type PortalTeamRecord = {
   id: number
   team_name: string
@@ -347,6 +353,10 @@ export function getPortalProfile() {
 
 export function getPortalProfileOptions() {
   return portalHttp.get<PortalProfileOptionsResponse>('/portal/profile-options')
+}
+
+export function getPortalPublicConfig() {
+  return portalHttp.get<PortalPublicConfigResponse>('/portal/public-config')
 }
 
 export function listPortalPlans() {

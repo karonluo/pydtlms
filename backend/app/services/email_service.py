@@ -24,10 +24,10 @@ class NotificationEmailService:
         )
 
     def send_portal_registration_success(self, full_name: str, email: str) -> None:
-        subject = "学生门户注册成功通知"
+        subject = "申请系统注册成功通知"
         text_body = (
             f"{full_name}，您好：\n\n"
-            "您已成功注册博士生生命周期管理系统学生门户账号。"
+            "您已成功注册博士生生命周期管理系统申请系统账号。"
             "后续可使用注册手机号或邮箱登录系统并继续完善报名信息。\n\n"
             f"登录账号：{email}\n\n"
             "此邮件为系统自动发送，请勿直接回复。"
@@ -35,10 +35,10 @@ class NotificationEmailService:
         self.send_message(to_email=email, subject=subject, text_body=text_body)
 
     def send_portal_registration_verification_code(self, email: str, verification_code: str) -> None:
-        subject = "学生门户邮箱验证码"
+        subject = "申请系统邮箱验证码"
         text_body = (
             "您好：\n\n"
-            "您正在进行博士生生命周期管理系统学生门户注册。\n"
+            "您正在进行申请系统注册。\n"
             f"本次邮箱验证码为：{verification_code}\n"
             "验证码 10 分钟内有效，请勿泄露给他人。\n\n"
             "此邮件为系统自动发送，请勿直接回复。"
@@ -46,10 +46,10 @@ class NotificationEmailService:
         self.send_message(to_email=email, subject=subject, text_body=text_body)
 
     def send_portal_password_reset_success(self, full_name: str, email: str, account: str) -> None:
-        subject = "学生门户密码重置成功通知"
+        subject = "申请系统密码重置成功通知"
         text_body = (
             f"{full_name}，您好：\n\n"
-            "您的学生门户密码已成功重置。"
+            "您的申请系统密码已成功重置。"
             "请尽快使用新密码重新登录，并妥善保管账号信息。\n\n"
             f"重置账号：{account}\n\n"
             "此邮件为系统自动发送，请勿直接回复。"
@@ -57,10 +57,10 @@ class NotificationEmailService:
         self.send_message(to_email=email, subject=subject, text_body=text_body)
 
     def send_portal_admin_password_reset(self, full_name: str, email: str, temporary_password: str) -> None:
-        subject = "学生门户密码重置通知"
+        subject = "申请系统密码重置通知"
         text_body = (
             f"{full_name}，您好：\n\n"
-            "管理员已为您重置学生门户登录密码，请尽快登录后修改为您自己的密码。\n\n"
+            "管理员已为您重置申请系统登录密码，请尽快登录后修改为您自己的密码。\n\n"
             f"临时密码：{temporary_password}\n\n"
             "此邮件为系统自动发送，请勿直接回复。"
         )

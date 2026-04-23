@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../../stores/auth'
+import { showPortalAlert } from '../../utils/portalAlerts'
 
 const router = useRouter()
 const route = useRoute()
@@ -11,8 +12,8 @@ const authStore = useAuthStore()
 const loading = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: 'Admin@123456',
+  username: '',
+  password: '',
 })
 
 const presets = ['招生协同', '培养流程', '学位治理']
@@ -37,7 +38,7 @@ async function submit() {
       window.location.assign(resolved.href)
     }
   } catch {
-    ElMessage.error(authStore.sessionError || '登录失败')
+    await showPortalAlert(authStore.sessionError || '登录失败', '登录失败', 'error')
   } finally {
     loading.value = false
   }
@@ -87,12 +88,6 @@ async function submit() {
           </el-form-item>
           <el-button type="primary" native-type="submit" size="large" class="login-button" :loading="loading">登录系统</el-button>
         </el-form>
-
-        <div class="account-panel">
-          <p>系统管理员：admin / Admin@123456</p>
-          <p>导师账号：liu.ya / LiuYa@2026</p>
-          <p>学位秘书：zhou.qing / ZhouQing@2026</p>
-        </div>
       </section>
     </article>
   </section>
@@ -128,7 +123,6 @@ async function submit() {
 .login-badge,
 .login-hero h1,
 .login-hero p,
-.account-panel p,
 .login-panel h2,
 .login-panel__tip {
   margin: 0;
@@ -222,12 +216,6 @@ async function submit() {
 .login-button {
   width: 100%;
   margin-top: 6px;
-}
-
-.account-panel {
-  color: #6f86a7;
-  font-size: 13px;
-  line-height: 1.8;
 }
 
 @media (max-width: 900px) {

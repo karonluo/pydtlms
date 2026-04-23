@@ -178,9 +178,27 @@ def test_portal_plans_and_teams_require_auth_and_return_data(monkeypatch) -> Non
         assert teams_response.json()['items'][0]['team_name'] == '智能制造联合团队'
 
 
+def test_portal_public_config_returns_application_v2_switch(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_admissions_info_url', 'https://admissions.example.com')
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', True)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_block_message', '4月30日（周四）20点之前开放，敬请期待')
+
+        response = client.get('/api/v1/portal/public-config', headers={'Authorization': 'Bearer portal-token'})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            'portal_admissions_info_url': 'https://admissions.example.com',
+            'portal_application_v2_blocked': True,
+            'portal_application_v2_block_message': '4月30日（周四）20点之前开放，敬请期待',
+        }
+
+
 def test_portal_application_submission_returns_business_key(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr(
             'app.api.v1.portal.submit_portal_application',
             lambda student_id, payload: {
@@ -217,6 +235,44 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
         assert payload['application_business_key'] == 'RECRUIT-20260413-0007'
         assert payload['application_status'] == '报名已提交'
         assert payload['student']['selected_plan_id'] == 3
+
+
+def test_portal_application_submission_is_blocked_when_switch_is_enabled(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', True)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_block_message', '4月30日（周四）20点之前开放，敬请期待')
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'graduation_school': '江南大学',
+                'highest_degree': '硕士',
+                'selected_team_name': '智能制造联合团队',
+                'intended_field': '智能制造',
+            },
+        )
+
+        assert response.status_code == 403
+        assert response.json()['detail'] == '4月30日（周四）20点之前开放，敬请期待'
+
+
+def test_portal_application_draft_is_blocked_when_switch_is_enabled(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', True)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_block_message', '4月30日（周四）20点之前开放，敬请期待')
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={'plan_id': 3},
+        )
+
+        assert response.status_code == 403
+        assert response.json()['detail'] == '4月30日（周四）20点之前开放，敬请期待'
 
 
 def test_portal_attachment_upload_returns_public_url(monkeypatch, tmp_path: Path) -> None:
@@ -303,6 +359,7 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
 
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
 
         response = client.post(
@@ -501,6 +558,7 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
     store = DummyStore()
 
     monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+    monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
     monkeypatch.setattr(
         'app.api.v1.portal.submit_portal_application',
         lambda student_id, payload: RuntimeManagementStore.submit_portal_application(store, student_id, payload),

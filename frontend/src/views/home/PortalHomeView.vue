@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message, Phone, Tickets, User } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
-import { clearPortalToken, getPortalProfile, listPortalPlans, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
+import { changePortalStudentPassword, clearPortalToken, getPortalProfile, getPortalPublicConfig, listPortalPlans, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
+import { openPortalApplicationV2 } from '../../utils/portalApplicationV2Access'
+import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 type ProgressCard = {
   key: string
@@ -15,6 +18,8 @@ type ProgressCard = {
 
 const router = useRouter()
 const defaultProfilePhotoUrl = '/images/default_head.png'
+const showPortalHomeNewsSections = false
+const portalAdmissionsInfoUrl = ref('')
 
 function trimText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -27,6 +32,13 @@ function resolveProgressCount(value: unknown): number {
 
 const portalStudent = ref<PortalStudentRecord | null>(null)
 const planList = ref<PortalPlanRecord[]>([])
+const passwordDialogVisible = ref(false)
+const passwordSubmitting = ref(false)
+const passwordForm = reactive({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+})
 
 const fallbackAnnouncements = [
   { title: '2027 春季招生计划', term: '2027 春' },
@@ -172,17 +184,71 @@ const announcements = computed(() => {
 
 async function loadPortalHome() {
   try {
-    const [profileResponse, planResponse] = await Promise.all([getPortalProfile(), listPortalPlans()])
+    const [profileResponse, planResponse, publicConfigResponse] = await Promise.all([getPortalProfile(), listPortalPlans(), getPortalPublicConfig()])
     portalStudent.value = profileResponse.data
     planList.value = planResponse.data.items || []
+    portalAdmissionsInfoUrl.value = publicConfigResponse.data.portal_admissions_info_url || ''
   } catch {
     clearPortalToken()
     await router.replace('/portal')
   }
 }
 
+async function openPortalAdmissionsInfo() {
+  const targetUrl = portalAdmissionsInfoUrl.value.trim()
+  if (!targetUrl) {
+    await showPortalAlert('招生信息地址暂未配置', '提示', 'warning')
+    return
+  }
+  window.open(targetUrl, '_blank', 'noopener,noreferrer')
+}
+
 function goToApplication() {
-  void router.push('/portal/applicationv2')
+  void openPortalApplicationV2(router)
+}
+
+function resetPasswordForm() {
+  passwordForm.currentPassword = ''
+  passwordForm.newPassword = ''
+  passwordForm.confirmPassword = ''
+}
+
+function openPasswordDialog() {
+  passwordDialogVisible.value = true
+}
+
+function closePasswordDialog() {
+  passwordDialogVisible.value = false
+  resetPasswordForm()
+}
+
+async function submitPasswordChange() {
+  if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+    await showPortalAlert('请填写完整的密码信息', '修改密码', 'warning')
+    return
+  }
+  if (passwordForm.newPassword.length < 8) {
+    await showPortalAlert('新密码长度不能少于 8 位', '修改密码', 'warning')
+    return
+  }
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    await showPortalAlert('两次输入的新密码不一致', '修改密码', 'warning')
+    return
+  }
+
+  passwordSubmitting.value = true
+  try {
+    const response = await changePortalStudentPassword({
+      current_password: passwordForm.currentPassword,
+      new_password: passwordForm.newPassword,
+    })
+    closePasswordDialog()
+    ElMessage.success(response.data.message || '密码修改成功')
+  } catch (error) {
+    await showPortalAlert(resolveRequestError(error, '密码修改失败'), '修改密码失败', 'error')
+  } finally {
+    passwordSubmitting.value = false
+  }
 }
 
 function logoutPortal() {
@@ -204,8 +270,8 @@ onMounted(() => {
         </div>
         <nav class="portal-home-header__nav" aria-label="门户导航">
           <a class="portal-home-header__nav-link portal-home-header__nav-link--active" href="/portal/home">首页</a>
-          <a class="portal-home-header__nav-link" href="#portal-news">招生信息</a>
-          <a class="portal-home-header__nav-link" href="/portal/applicationv2">在线申请</a>
+          <button type="button" class="portal-home-header__nav-link" @click="openPortalAdmissionsInfo">招生信息</button>
+          <a class="portal-home-header__nav-link" href="/portal/applicationv2" @click.prevent="goToApplication">在线申请</a>
           <a class="portal-home-header__nav-link" href="#portal-progress">申请进度</a>
         </nav>
         <div class="portal-home-header__actions">
@@ -237,7 +303,7 @@ onMounted(() => {
             <div>
               <h2>{{ studentDisplayName }}</h2>
             </div>
-            <button type="button" class="portal-home-profile-card__manage" @click="goToApplication">账号管理 →</button>
+            <button type="button" class="portal-home-profile-card__manage" @click="openPasswordDialog">账号管理 →</button>
           </div>
           <div class="portal-home-profile-card__meta-grid">
             <div class="portal-home-profile-card__meta">
@@ -303,14 +369,21 @@ onMounted(() => {
         </button>
       </section>
 
-      <section class="portal-home-banner">
+      <section
+        class="portal-home-banner"
+        role="button"
+        tabindex="0"
+        @click="openPortalAdmissionsInfo"
+        @keydown.enter.prevent="openPortalAdmissionsInfo"
+        @keydown.space.prevent="openPortalAdmissionsInfo"
+      >
         <div class="portal-home-banner__inner">
           <p>查看更多上海人工智能实验室招生信息</p>
-          <a href="#portal-news">了解更多 <span>→</span></a>
+          <span class="portal-home-banner__action">了解更多 <span>→</span></span>
         </div>
       </section>
 
-      <section id="portal-news" class="portal-home-info-grid">
+      <section v-if="showPortalHomeNewsSections" id="portal-news" class="portal-home-info-grid">
         <article class="portal-home-info-card">
           <div class="portal-home-info-card__title-row">
             <h3>招生信息</h3>
@@ -342,6 +415,39 @@ onMounted(() => {
     </main>
 
     <footer class="portal-home-footer"></footer>
+
+    <div v-if="passwordDialogVisible" class="portal-home-password-dialog">
+      <button type="button" class="portal-home-password-dialog__mask" aria-label="关闭修改密码弹窗" @click="closePasswordDialog"></button>
+      <div class="portal-home-password-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="portal-home-password-title">
+        <div class="portal-home-password-dialog__header">
+          <div>
+            <strong id="portal-home-password-title">修改登录密码</strong>
+            <span>当前登录人：{{ studentDisplayName }}</span>
+          </div>
+          <button type="button" class="portal-home-password-dialog__close" @click="closePasswordDialog">关闭</button>
+        </div>
+
+        <div class="portal-home-password-dialog__body">
+          <label>
+            <span>当前密码</span>
+            <input v-model="passwordForm.currentPassword" type="password" placeholder="请输入当前密码" />
+          </label>
+          <label>
+            <span>新密码</span>
+            <input v-model="passwordForm.newPassword" type="password" placeholder="至少 8 位" />
+          </label>
+          <label>
+            <span>确认新密码</span>
+            <input v-model="passwordForm.confirmPassword" type="password" placeholder="请再次输入新密码" />
+          </label>
+        </div>
+
+        <div class="portal-home-password-dialog__actions">
+          <button type="button" class="portal-home-password-dialog__button portal-home-password-dialog__button--ghost" :disabled="passwordSubmitting" @click="closePasswordDialog">取消</button>
+          <button type="button" class="portal-home-password-dialog__button portal-home-password-dialog__button--primary" :disabled="passwordSubmitting" @click="submitPasswordChange">{{ passwordSubmitting ? '提交中...' : '确认修改' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -403,8 +509,11 @@ onMounted(() => {
 .portal-home-header__nav-link {
   position: relative;
   padding: 8px 6px;
+  border: none;
+  background: transparent;
   font-weight: 600;
   letter-spacing: 0.04em;
+  cursor: pointer;
 }
 
 .portal-home-header__nav-link::after {
@@ -708,6 +817,7 @@ onMounted(() => {
   margin-top: 30px;
   border-radius: 8px;
   overflow: hidden;
+  cursor: pointer;
   background:
     linear-gradient(180deg, rgba(7, 62, 138, 0.54), rgba(7, 62, 138, 0.54)),
     url('/images/middle_background.png') center/cover no-repeat;
@@ -731,9 +841,8 @@ onMounted(() => {
   letter-spacing: 0.02em;
 }
 
-.portal-home-banner__inner a {
+.portal-home-banner__action {
   color: #fff;
-  text-decoration: none;
   font-size: 17px;
 }
 
@@ -849,6 +958,117 @@ onMounted(() => {
   gap: 12px;
   margin-top: 12px;
   font-size: 24px;
+}
+
+.portal-home-password-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+.portal-home-password-dialog__mask {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(9, 29, 62, 0.42);
+}
+
+.portal-home-password-dialog__panel {
+  position: relative;
+  z-index: 1;
+  width: min(460px, calc(100vw - 32px));
+  margin: 12vh auto 0;
+  padding: 22px 22px 20px;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 28px 72px rgba(7, 42, 99, 0.24);
+}
+
+.portal-home-password-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.portal-home-password-dialog__header strong,
+.portal-home-password-dialog__header span {
+  display: block;
+}
+
+.portal-home-password-dialog__header strong {
+  color: #18355d;
+  font-size: 20px;
+}
+
+.portal-home-password-dialog__header span {
+  margin-top: 6px;
+  color: #6f86a7;
+  font-size: 13px;
+}
+
+.portal-home-password-dialog__close {
+  border: none;
+  background: transparent;
+  color: #6f86a7;
+  cursor: pointer;
+}
+
+.portal-home-password-dialog__body {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.portal-home-password-dialog__body label {
+  display: grid;
+  gap: 8px;
+}
+
+.portal-home-password-dialog__body span {
+  color: #18355d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.portal-home-password-dialog__body input {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #d7e3f3;
+  border-radius: 12px;
+  outline: none;
+}
+
+.portal-home-password-dialog__body input:focus {
+  border-color: #4b84d4;
+  box-shadow: 0 0 0 3px rgba(75, 132, 212, 0.12);
+}
+
+.portal-home-password-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.portal-home-password-dialog__button {
+  min-width: 96px;
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.portal-home-password-dialog__button--ghost {
+  border: 1px solid #d7e3f3;
+  background: #fff;
+  color: #31537f;
+}
+
+.portal-home-password-dialog__button--primary {
+  border: none;
+  background: linear-gradient(135deg, #1f73d8, #1b58b3);
+  color: #fff;
 }
 
 @media (max-width: 1100px) {
