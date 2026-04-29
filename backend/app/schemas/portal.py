@@ -809,13 +809,12 @@ class PortalApplicationUpsert(BaseModel):
             self.material_list_attachment = self.material_list_attachment or self.personal_statement.supporting_material_attachment_url
 
         if self.personal_statement is not None and not self.personal_profile:
-            self.personal_profile = self.personal_statement.growth_experience_text
+            self.personal_profile = self.personal_statement.personal_statement_text
 
         if self.personal_statement is not None and not self.self_evaluation:
             self.self_evaluation = _first_non_empty(
                 self.personal_statement.ai_industry_opinion,
                 self.personal_statement.personal_statement_text,
-                self.personal_statement.career_plan_text,
             )
 
         if self.declaration is not None:
@@ -933,13 +932,12 @@ class PortalApplicationDraftUpsert(BaseModel):
             self.material_list_attachment = self.material_list_attachment or self.personal_statement.supporting_material_attachment_url
 
         if self.personal_statement is not None and not self.personal_profile:
-            self.personal_profile = self.personal_statement.growth_experience_text
+            self.personal_profile = self.personal_statement.personal_statement_text
 
         if self.personal_statement is not None and not self.self_evaluation:
             self.self_evaluation = _first_non_empty(
                 self.personal_statement.ai_industry_opinion,
                 self.personal_statement.personal_statement_text,
-                self.personal_statement.career_plan_text,
             )
 
         if self.declaration is not None:
