@@ -654,7 +654,7 @@ function addFamilyMember() {
 }
 
 function removeFamilyMember(index: number) {
-  if ((form.family_members?.length || 0) <= 2) {
+  if (index <= 0) {
     return
   }
   form.family_members?.splice(index, 1)
@@ -777,7 +777,7 @@ function buildSectionStatuses(): PortalSectionStatus[] {
   const familyStarted = familyItems.some((item) => trimText(item.member_name) || trimText(item.relation_type))
   const father = familyItems.find((item) => item.relation_type === '父亲' && trimText(item.member_name))
   const mother = familyItems.find((item) => item.relation_type === '母亲' && trimText(item.member_name))
-  const familyCompleted = Boolean(father && mother)
+  const familyCompleted = Boolean(father || mother)
 
   const achievementItems = form.achievement_records || []
   const achievementCompleted = achievementItems.some((item) => trimText(item.achievement_type))
@@ -980,8 +980,8 @@ async function submitForm() {
   const familyMembers = form.family_members || []
   const father = familyMembers.find((item) => item.relation_type === '父亲' && trimText(item.member_name))
   const mother = familyMembers.find((item) => item.relation_type === '母亲' && trimText(item.member_name))
-  if (!father || !mother) {
-    await showPortalAlert('请完整填写父亲和母亲信息', '提交受阻', 'warning')
+  if (!father && !mother) {
+    await showPortalAlert('父母信息至少填写一方', '提交受阻', 'warning')
     return
   }
 
@@ -1009,6 +1009,14 @@ async function submitForm() {
 }
 
 async function saveDraft(showSuccess = true) {
+  const familyMembers = form.family_members || []
+  const father = familyMembers.find((item) => item.relation_type === '父亲' && trimText(item.member_name))
+  const mother = familyMembers.find((item) => item.relation_type === '母亲' && trimText(item.member_name))
+  if (!father && !mother) {
+    await showPortalAlert('父母信息至少填写一方', '草稿保存受阻', 'warning')
+    return false
+  }
+
   savingDraft.value = true
   try {
     const response = await savePortalApplicationDraft(buildSubmitPayload())
@@ -1564,7 +1572,7 @@ defineExpose({
               <span class="panel-toggle__copy">
                 <small>STEP 07</small>
                 <strong>家庭情况</strong>
-                <span>父母信息必填，兄弟姐妹可按需补充</span>
+                <span>父母信息至少填写一方，其他成员可按需补充</span>
               </span>
               <span class="panel-toggle__action">{{ isSectionExpanded('family-section') ? '收起' : '展开' }}</span>
               <span class="panel-toggle__icon" :class="{ 'panel-toggle__icon--expanded': isSectionExpanded('family-section') }" aria-hidden="true"></span>
@@ -1573,15 +1581,15 @@ defineExpose({
               <div class="record-toolbar">
                 <div>
                   <strong>家庭成员</strong>
-                  <span>父亲与母亲信息请完整填写，其他成员可补充。</span>
+                  <span>父母信息至少填写一方，其他成员可补充。</span>
                 </div>
                 <button type="button" class="secondary-button" @click="addFamilyMember">新增家庭成员</button>
               </div>
               <div class="record-list">
                 <section v-for="(item, index) in form.family_members" :key="`family-${index}`" class="record-card">
                   <div class="record-card__header">
-                    <div><strong>家庭成员 {{ index + 1 }}</strong><span>{{ item.relation_type || '请选择关系' }}</span></div>
-                    <button v-if="form.family_members!.length > 2" type="button" class="tertiary-button" @click="removeFamilyMember(index)">删除</button>
+                    <div><strong>家庭成员 {{ index + 1 }}</strong></div>
+                    <button v-if="index > 0" type="button" class="tertiary-button" @click="removeFamilyMember(index)">删除</button>
                   </div>
                   <div class="form-grid form-grid--three">
                     <label><span>与本人关系</span><select v-model="item.relation_type"><option value="">请选择</option><option v-for="relation in familyRelationOptions" :key="relation" :value="relation">{{ relation }}</option></select></label>

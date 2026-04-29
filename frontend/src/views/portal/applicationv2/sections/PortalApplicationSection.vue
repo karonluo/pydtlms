@@ -48,10 +48,7 @@ defineProps<{
     </div>
 
     <div class="section-card">
-      <div class="section-card__header">
-        <strong>了解项目方式</strong>
-        <!-- <span>该项位于研究中心志愿下方。</span> -->
-      </div>
+      <div class="section-card__header"><strong>了解项目方式</strong></div>
       <div class="section-grid">
         <label>
           <span>获知渠道</span>

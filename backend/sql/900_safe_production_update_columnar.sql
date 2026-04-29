@@ -1,5 +1,10 @@
 BEGIN;
 
+-- 0) 本次上线新增结构字段（等价覆盖 057_portal_education_graduation_certificate.sql）
+ALTER TABLE IF EXISTS dtlms_portal_application_education_experiences
+    ADD COLUMN IF NOT EXISTS graduation_certificate_attachment_url TEXT;
+
+-- 0.1) 既有生产环境字段兜底
 ALTER TABLE IF EXISTS dtlms_portal_students
     ADD COLUMN IF NOT EXISTS application_draft JSONB;
 

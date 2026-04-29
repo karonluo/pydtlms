@@ -22,8 +22,8 @@ defineProps<{
     <div class="record-list">
       <section v-for="(item, index) in form.family_members" :key="`family-${index}`" class="record-card">
         <div class="record-card__header">
-          <div><strong>家庭成员 {{ index + 1 }}</strong><span>{{ item.relation_type || '请选择关系' }}</span></div>
-          <button v-if="(form.family_members?.length || 0) > 2" type="button" class="link-button" @click="removeFamilyMember(index)">删除</button>
+          <div><strong>家庭成员 {{ index + 1 }}</strong></div>
+          <button v-if="index > 0" type="button" class="link-button" @click="removeFamilyMember(index)">删除</button>
         </div>
 
         <div class="section-grid">

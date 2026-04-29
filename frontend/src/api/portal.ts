@@ -45,6 +45,8 @@ export type PortalEducationExperienceItem = {
   transcript_attachment_name?: string | null
   degree_certificate_attachment_url?: string | null
   degree_certificate_attachment_name?: string | null
+  graduation_certificate_attachment_url?: string | null
+  graduation_certificate_attachment_name?: string | null
 }
 
 export type PortalPracticeExperienceItem = {
@@ -302,6 +304,7 @@ export type PortalApplicationDraftSaveResponse = {
 export type PortalAttachmentCategory =
   | 'education_transcript'
   | 'education_degree_certificate'
+  | 'education_graduation_certificate'
   | 'english_certificate'
   | 'achievement_award_certificate'
   | 'profile_photo'

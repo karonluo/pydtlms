@@ -41,6 +41,7 @@ class PostgresStateStore:
         "053_portal_application_draft_persistence.sql",
         "054_portal_achievement_records_v2.sql",
         "055_portal_personal_statement_v2.sql",
+        "057_portal_education_graduation_certificate.sql",
     )
 
     DATASET_TABLES: dict[str, str] = {
@@ -87,6 +88,7 @@ class PostgresStateStore:
         "050_dict_schema.sql",
         "052_portal_id_card_collage.sql",
         "053_portal_application_draft_persistence.sql",
+        "057_portal_education_graduation_certificate.sql",
     )
 
     def __init__(self) -> None:
@@ -2118,8 +2120,8 @@ class PostgresStateStore:
                         INSERT INTO dtlms_portal_application_education_experiences (
                             application_id, sort_order, education_stage, start_month, end_month, school_name,
                             major_name, average_score, gpa, ranking, verifier_name, verifier_phone,
-                            transcript_attachment_url, degree_certificate_attachment_url
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            transcript_attachment_url, degree_certificate_attachment_url, graduation_certificate_attachment_url
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
@@ -2137,6 +2139,7 @@ class PostgresStateStore:
                             education.get("verifier_phone"),
                             education.get("transcript_attachment_url"),
                             education.get("degree_certificate_attachment_url"),
+                            education.get("graduation_certificate_attachment_url"),
                         ),
                     )
                     education_row = cur.fetchone()
@@ -2154,6 +2157,13 @@ class PostgresStateStore:
                         "degree_certificate",
                         education.get("degree_certificate_attachment_url"),
                         education.get("degree_certificate_attachment_name"),
+                    )
+                    insert_attachment(
+                        "education_experience",
+                        education_id,
+                        "graduation_certificate",
+                        education.get("graduation_certificate_attachment_url"),
+                        education.get("graduation_certificate_attachment_name"),
                     )
 
                 for practice in draft.get("practice_experiences", []):
@@ -2459,7 +2469,7 @@ class PostgresStateStore:
                     """
                     SELECT id, sort_order, education_stage, start_month, end_month, school_name, major_name,
                            average_score, gpa, ranking, verifier_name, verifier_phone,
-                           transcript_attachment_url, degree_certificate_attachment_url
+                              transcript_attachment_url, degree_certificate_attachment_url, graduation_certificate_attachment_url
                     FROM dtlms_portal_application_education_experiences
                     WHERE application_id = %s
                     ORDER BY sort_order ASC, id ASC
@@ -2472,11 +2482,15 @@ class PostgresStateStore:
                     education_id = int(education.get("id") or 0)
                     transcript_url = education.get("transcript_attachment_url")
                     degree_url = education.get("degree_certificate_attachment_url")
+                    graduation_url = education.get("graduation_certificate_attachment_url")
                     education["transcript_attachment_name"] = resolve_attachment_name(
                         "education_experience", education_id, "transcript", transcript_url
                     )
                     education["degree_certificate_attachment_name"] = resolve_attachment_name(
                         "education_experience", education_id, "degree_certificate", degree_url
+                    )
+                    education["graduation_certificate_attachment_name"] = resolve_attachment_name(
+                        "education_experience", education_id, "graduation_certificate", graduation_url
                     )
                     education.pop("id", None)
                     education_experiences.append(education)
@@ -3972,8 +3986,8 @@ class PostgresStateStore:
                     INSERT INTO dtlms_portal_application_education_experiences (
                         application_id, sort_order, education_stage, start_month, end_month, school_name,
                         major_name, average_score, gpa, ranking, verifier_name, verifier_phone,
-                        transcript_attachment_url, degree_certificate_attachment_url
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        transcript_attachment_url, degree_certificate_attachment_url, graduation_certificate_attachment_url
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -3991,6 +4005,7 @@ class PostgresStateStore:
                         education.get("verifier_phone"),
                         education.get("transcript_attachment_url"),
                         education.get("degree_certificate_attachment_url"),
+                        education.get("graduation_certificate_attachment_url"),
                     ),
                 )
                 education_row = cur.fetchone()
@@ -4008,6 +4023,13 @@ class PostgresStateStore:
                     "degree_certificate",
                     education.get("degree_certificate_attachment_url"),
                     education.get("degree_certificate_attachment_name"),
+                )
+                insert_attachment(
+                    "education_experience",
+                    education_id,
+                    "graduation_certificate",
+                    education.get("graduation_certificate_attachment_url"),
+                    education.get("graduation_certificate_attachment_name"),
                 )
 
             for practice in draft.get("practice_experiences", []):
@@ -4927,7 +4949,7 @@ class PostgresStateStore:
                     """
                     SELECT sort_order, education_stage, start_month, end_month, school_name, major_name,
                            average_score, gpa, ranking, verifier_name, verifier_phone,
-                           transcript_attachment_url, degree_certificate_attachment_url
+                              transcript_attachment_url, degree_certificate_attachment_url, graduation_certificate_attachment_url
                     FROM dtlms_portal_application_education_experiences
                     WHERE application_id = %s
                     ORDER BY sort_order ASC, id ASC

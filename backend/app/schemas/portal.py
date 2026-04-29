@@ -84,6 +84,10 @@ def _validate_portal_practice_rules(items: Sequence["PortalPracticeExperienceIte
         raise ValueError("实践经历最多填写 2 条")
 
     for index, item in enumerate(normalized, start=1):
+        if not _first_non_empty(item.verifier_name):
+            raise ValueError(f"实践经历{index}必须填写证明人姓名")
+        if not _first_non_empty(item.verifier_phone):
+            raise ValueError(f"实践经历{index}必须填写证明人手机")
         if not _first_non_empty(item.start_month, item.end_month):
             continue
 
@@ -240,20 +244,71 @@ def _validate_portal_education_rules(items: Sequence["PortalEducationExperienceI
         return
 
     ordered = sorted(items, key=lambda item: item.sort_order)
+    first_item = ordered[0] if ordered else None
+    if first_item is None or _first_non_empty(first_item.education_stage) != "高中毕业":
+        raise ValueError("教育经历1的教育阶段必须为“高中毕业”")
+
     second_item = ordered[1] if len(ordered) > 1 else None
     if second_item is None or not _first_non_empty(second_item.education_stage) or not _first_non_empty(second_item.school_name):
         raise ValueError("教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”")
     if _first_non_empty(second_item.education_stage) not in {"本科在读", "本科毕业"}:
         raise ValueError("教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”")
 
+    third_item = ordered[2] if len(ordered) > 2 else None
+    third_item_started = third_item is not None and bool(
+        _first_non_empty(third_item.education_stage)
+        or _first_non_empty(third_item.school_name)
+        or _first_non_empty(third_item.start_month)
+        or _first_non_empty(third_item.end_month)
+    )
+    if third_item_started:
+        if _first_non_empty(second_item.education_stage) != "本科毕业":
+            raise ValueError("填写教育经历3前，教育经历2的教育阶段应为“本科毕业”")
+        if _first_non_empty(third_item.education_stage) not in {"硕士在读", "硕士毕业"}:
+            raise ValueError("教育经历3的教育阶段应为“硕士在读”或“硕士毕业”")
+
     normalized = _normalize_education_items(items)
     completed = [item for item in normalized if _first_non_empty(item.education_stage) and _first_non_empty(item.school_name)]
     stage_selected = [item for item in normalized if _first_non_empty(item.education_stage)]
 
-    if len(normalized) > 4:
-        raise ValueError("教育经历最多填写 4 条")
+    if len(normalized) > 3:
+        raise ValueError("教育经历最多填写 3 条")
     if require_minimum_two and len(completed) < 2:
         raise ValueError("请至少完整填写两条教育经历")
+
+    for index, item in enumerate(ordered, start=1):
+        stage = _first_non_empty(item.education_stage)
+        if not stage:
+            continue
+        missing_fields: list[str] = []
+        if not _first_non_empty(item.start_month):
+            missing_fields.append("开始年月")
+        if not stage.endswith("在读") and not _first_non_empty(item.end_month):
+            missing_fields.append("结束年月")
+        if not _first_non_empty(item.school_name):
+            missing_fields.append("就读学校")
+        if not _first_non_empty(item.verifier_name):
+            missing_fields.append("证明人姓名")
+        if not _first_non_empty(item.verifier_phone):
+            missing_fields.append("证明人手机")
+        if stage != "高中毕业":
+            if not _first_non_empty(item.major_name):
+                missing_fields.append("就读专业")
+            if not _first_non_empty(item.average_score):
+                missing_fields.append("期间平均成绩")
+            if not _first_non_empty(item.gpa):
+                missing_fields.append("期间绩点")
+            if not _first_non_empty(item.ranking):
+                missing_fields.append("成绩排名")
+            if not _first_non_empty(item.transcript_attachment_url):
+                missing_fields.append("成绩单附件")
+            if stage.endswith("毕业"):
+                if not _first_non_empty(item.degree_certificate_attachment_url):
+                    missing_fields.append("学位证附件")
+                if not _first_non_empty(item.graduation_certificate_attachment_url):
+                    missing_fields.append("毕业证附件")
+        if missing_fields:
+            raise ValueError(f"教育经历{index}以下字段必填：{'、'.join(missing_fields)}")
 
     stages = {_first_non_empty(item.education_stage) for item in stage_selected}
     if "本科毕业" in stages and not ({"硕士在读", "硕士毕业"} & stages):
@@ -381,6 +436,8 @@ class PortalEducationExperienceItem(BaseModel):
     transcript_attachment_name: str | None = None
     degree_certificate_attachment_url: str | None = None
     degree_certificate_attachment_name: str | None = None
+    graduation_certificate_attachment_url: str | None = None
+    graduation_certificate_attachment_name: str | None = None
 
 
 class PortalPracticeExperienceItem(BaseModel):
@@ -940,6 +997,7 @@ class PortalApplicationDraftUpsert(BaseModel):
             require_minimum_two=False,
         )
         _validate_portal_practice_rules(self.practice_experiences)
+        _validate_portal_family_rules(self.family_members, require_at_least_one_parent=True)
         _validate_portal_achievement_rules(self.achievement_records)
         _validate_portal_personal_statement_rules(self.personal_statement, require_complete=False)
 

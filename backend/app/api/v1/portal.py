@@ -53,6 +53,7 @@ PORTAL_ATTACHMENT_UPLOAD_DIR = PROJECT_ROOT / "frontend" / "public" / "portal-at
 PORTAL_ATTACHMENT_EXTENSIONS: dict[str, set[str]] = {
     "education_transcript": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "education_degree_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
+    "education_graduation_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "english_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "achievement_award_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "profile_photo": {".png", ".jpg", ".jpeg", ".webp"},
@@ -63,6 +64,7 @@ PORTAL_ATTACHMENT_EXTENSIONS: dict[str, set[str]] = {
 PORTAL_ATTACHMENT_CONTENT_TYPES: dict[str, tuple[str, ...]] = {
     "education_transcript": ("application/pdf", "image/"),
     "education_degree_certificate": ("application/pdf", "image/"),
+    "education_graduation_certificate": ("application/pdf", "image/"),
     "english_certificate": ("application/pdf", "image/"),
     "achievement_award_certificate": ("application/pdf", "image/"),
     "profile_photo": ("image/",),

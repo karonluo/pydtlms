@@ -62,12 +62,24 @@ type PortalSectionStatus = {
   status: 'not-started' | 'in-progress' | 'completed'
 }
 
-type EducationAttachmentField = 'transcript' | 'degree_certificate'
+type EducationAttachmentField = 'transcript' | 'degree_certificate' | 'graduation_certificate'
 
-const sourceChannelOptions = ['导师推荐', '实验室官网', '高校宣讲', '朋友同学推荐', '其他']
+const sourceChannelOptions = [
+  '高校老师推荐',
+  '学长学姐推荐',
+  '上海人工智能实验室官网',
+  '上海人工智能实验室公众号',
+  '浦江书院小红书',
+  '上海人工智能实验室小红书',
+  '其他',
+]
 const genderOptions = ['男', '女']
 const idTypeOptions = ['居民身份证', '护照', '港澳居民来往内地通行证']
-const educationStageOptions = ['硕士毕业', '硕士在读', '本科毕业', '本科在读', '高中毕业']
+const educationStageOptionsByOrder: Record<number, string[]> = {
+  1: ['高中毕业'],
+  2: ['本科在读', '本科毕业'],
+  3: ['硕士在读', '硕士毕业'],
+}
 const englishExamOptions = ['CET-6', 'IELTS', 'TOEFL', '其他']
 const familyRelationOptions = ['父亲', '母亲', '兄', '弟', '姐', '妹', '其他']
 const achievementTypeOptions = ['论文发表', '获奖经历']
@@ -144,25 +156,26 @@ function createEducation(order: number, stage = ''): PortalEducationExperienceIt
     verifier_phone: '',
     transcript_attachment_url: '',
     degree_certificate_attachment_url: '',
+    graduation_certificate_attachment_url: '',
   }
 }
 
 function createDefaultEducationExperiences(): PortalEducationExperienceItem[] {
-  return [createEducation(1, '高中毕业'), createEducation(2)]
+  return [createEducation(1, '高中毕业')]
 }
 
 function ensureEducationExperienceShape(items?: Array<Partial<PortalEducationExperienceItem>> | null) {
-  const normalized = (items || []).slice(0, 4).map((item, index) => ({
+  const normalized = (items || []).slice(0, 3).map((item, index) => ({
     ...createEducation(index + 1),
     ...item,
     sort_order: index + 1,
   }))
 
-  while (normalized.length < 2) {
-    normalized.push(createEducation(normalized.length + 1, normalized.length === 0 ? '高中毕业' : ''))
+  if (!normalized.length) {
+    normalized.push(createEducation(1, '高中毕业'))
   }
 
-  if (!trimText(normalized[0]?.education_stage)) {
+  if (!trimText(normalized[0]?.education_stage) || trimText(normalized[0]?.education_stage) !== '高中毕业') {
     normalized[0].education_stage = '高中毕业'
   }
 
@@ -173,13 +186,52 @@ function isHighSchoolStage(stage: string | null | undefined) {
   return trimText(stage) === '高中毕业'
 }
 
+function isCurrentEducationStage(stage: string | null | undefined) {
+  return trimText(stage).endsWith('在读')
+}
+
 function recommendedNextEducationStage(items?: PortalEducationExperienceItem[] | null) {
-  const preferredStages = ['本科在读', '本科毕业', '硕士在读', '硕士毕业']
-  const existingStages = new Set((items || []).map((item) => trimText(item.education_stage)).filter(Boolean))
-  return preferredStages.find((stage) => !existingStages.has(stage)) || ''
+  const currentItems = items || []
+  if (currentItems.length <= 1) {
+    return '本科在读'
+  }
+  if (currentItems.length === 2 && trimText(currentItems[1]?.education_stage) === '本科毕业') {
+    return '硕士在读'
+  }
+  return ''
+}
+
+function getEducationStageOptions(index: number) {
+  return educationStageOptionsByOrder[index + 1] || []
+}
+
+function getEducationAddBlockedMessage(items?: PortalEducationExperienceItem[] | null) {
+  const currentItems = items || []
+  if (currentItems.length >= 3) {
+    return '教育经历最多填写 3 条'
+  }
+  if (currentItems.length <= 1) {
+    return ''
+  }
+
+  const secondStage = trimText(currentItems[1]?.education_stage)
+  if (secondStage === '本科在读') {
+    return '教育经历2选择“本科在读”后，不能继续新增教育经历'
+  }
+  if (secondStage !== '本科毕业') {
+    return '新增教育经历3前，请先将教育经历2的教育阶段填写为“本科毕业”'
+  }
+  return ''
 }
 
 function normalizeEducationWhenStageChanges(item: PortalEducationExperienceItem) {
+  if (!trimText(item.education_stage).endsWith('毕业')) {
+    item.degree_certificate_attachment_url = ''
+    item.degree_certificate_attachment_name = ''
+    item.graduation_certificate_attachment_url = ''
+    item.graduation_certificate_attachment_name = ''
+  }
+
   if (!isHighSchoolStage(item.education_stage)) {
     return
   }
@@ -187,8 +239,6 @@ function normalizeEducationWhenStageChanges(item: PortalEducationExperienceItem)
   item.average_score = ''
   item.gpa = ''
   item.ranking = ''
-  item.degree_certificate_attachment_url = ''
-  item.degree_certificate_attachment_name = ''
 }
 
 function getCompletedEducationExperiences(items?: PortalEducationExperienceItem[] | null) {
@@ -197,12 +247,87 @@ function getCompletedEducationExperiences(items?: PortalEducationExperienceItem[
 
 function validateEducationRules(items?: PortalEducationExperienceItem[] | null) {
   const orderedItems = [...(items || [])].sort((left, right) => left.sort_order - right.sort_order)
+  const firstItem = orderedItems[0]
+  if (!firstItem || trimText(firstItem.education_stage) !== '高中毕业') {
+    return '教育经历1的教育阶段必须为“高中毕业”'
+  }
+
   const secondItem = orderedItems[1]
   if (!secondItem || !trimText(secondItem.education_stage) || !trimText(secondItem.school_name)) {
     return '教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”'
   }
   if (!['本科在读', '本科毕业'].includes(trimText(secondItem.education_stage))) {
     return '教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”'
+  }
+
+  const thirdItem = orderedItems[2]
+  const thirdItemStarted = Boolean(
+    thirdItem
+    && (
+      trimText(thirdItem.education_stage)
+      || trimText(thirdItem.school_name)
+      || trimText(thirdItem.start_month)
+      || trimText(thirdItem.end_month)
+    ),
+  )
+  if (thirdItemStarted) {
+    if (trimText(secondItem.education_stage) !== '本科毕业') {
+      return '填写教育经历3前，教育经历2的教育阶段应为“本科毕业”'
+    }
+    if (!['硕士在读', '硕士毕业'].includes(trimText(thirdItem?.education_stage))) {
+      return '教育经历3的教育阶段应为“硕士在读”或“硕士毕业”'
+    }
+  }
+
+  for (const [index, item] of orderedItems.entries()) {
+    const stage = trimText(item.education_stage)
+    if (!stage) {
+      continue
+    }
+    const missingFields: string[] = []
+    if (!trimText(item.start_month)) {
+      missingFields.push('开始年月')
+    }
+    if (!isCurrentEducationStage(stage) && !trimText(item.end_month)) {
+      missingFields.push('结束年月')
+    }
+    if (!trimText(item.school_name)) {
+      missingFields.push('就读学校')
+    }
+    if (!trimText(item.verifier_name)) {
+      missingFields.push('证明人姓名')
+    }
+    if (!trimText(item.verifier_phone)) {
+      missingFields.push('证明人手机')
+    }
+    if (!isHighSchoolStage(stage)) {
+      if (!trimText(item.major_name)) {
+        missingFields.push('就读专业')
+      }
+      if (!trimText(item.average_score)) {
+        missingFields.push('期间平均成绩')
+      }
+      if (!trimText(item.gpa)) {
+        missingFields.push('期间绩点')
+      }
+      if (!trimText(item.ranking)) {
+        missingFields.push('成绩排名')
+      }
+      if (!trimText(item.transcript_attachment_url)) {
+        missingFields.push('成绩单附件')
+      }
+      if (stage.endsWith('毕业')) {
+        if (!trimText(item.degree_certificate_attachment_url)) {
+          missingFields.push('学位证附件')
+        }
+        if (!trimText(item.graduation_certificate_attachment_url)) {
+          missingFields.push('毕业证附件')
+        }
+      }
+    }
+    if (missingFields.length) {
+      return `教育经历${index + 1}以下字段必填：${missingFields.join('、')}`
+    }
   }
 
   const stages = orderedItems.map((item) => trimText(item.education_stage)).filter(Boolean)
@@ -249,7 +374,7 @@ function ensurePracticeExperienceShape(items?: Array<Partial<PortalPracticeExper
     .filter((item) => practiceItemHasContent(item))
     .slice(0, 2)
 
-  return normalized.length ? normalized : [createPractice()]
+  return normalized
 }
 
 function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
@@ -260,6 +385,12 @@ function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
 
   for (let index = 0; index < meaningfulItems.length; index += 1) {
     const item = meaningfulItems[index]
+    if (!trimText(item.verifier_name)) {
+      return `实践经历${index + 1}必须填写证明人姓名`
+    }
+    if (!trimText(item.verifier_phone)) {
+      return `实践经历${index + 1}必须填写证明人手机`
+    }
     if (!trimText(item.start_month) && !trimText(item.end_month)) {
       continue
     }
@@ -556,7 +687,7 @@ function createEmptyForm(): PortalApplicationUpsert {
     source_channel_other: '',
     preferences: [createPreference(1, false), createPreference(2, true)],
     education_experiences: createDefaultEducationExperiences(),
-    practice_experiences: [createPractice()],
+    practice_experiences: [],
     english_proficiencies: [createEnglish()],
     family_members: [createFamilyMember('父亲'), createFamilyMember('母亲')],
     achievement_records: [],
@@ -654,16 +785,31 @@ async function handleEducationAttachmentUpload(index: number, field: EducationAt
   const key = buildAttachmentUploadKey('education', index, field)
   attachmentUploading[key] = true
   try {
-    const category: PortalAttachmentCategory = field === 'transcript' ? 'education_transcript' : 'education_degree_certificate'
-    const attachment = await uploadAttachmentAndResolveUrl(file, category, field === 'transcript' ? '成绩单附件已上传' : '学位证附件已上传')
+    const category: PortalAttachmentCategory = field === 'transcript'
+      ? 'education_transcript'
+      : field === 'degree_certificate'
+        ? 'education_degree_certificate'
+        : 'education_graduation_certificate'
+    const attachment = await uploadAttachmentAndResolveUrl(
+      file,
+      category,
+      field === 'transcript'
+        ? '成绩单附件已上传'
+        : field === 'degree_certificate'
+          ? '学位证附件已上传'
+          : '毕业证附件已上传',
+    )
     const current = form.education_experiences?.[index]
     if (current) {
       if (field === 'transcript') {
         current.transcript_attachment_url = attachment.url
         current.transcript_attachment_name = attachment.file_name
-      } else {
+      } else if (field === 'degree_certificate') {
         current.degree_certificate_attachment_url = attachment.url
         current.degree_certificate_attachment_name = attachment.file_name
+      } else {
+        current.graduation_certificate_attachment_url = attachment.url
+        current.graduation_certificate_attachment_name = attachment.file_name
       }
     }
   } catch (error) {
@@ -908,8 +1054,9 @@ function choosePlan(planId: number) {
 }
 
 function addEducation() {
-  if ((form.education_experiences?.length || 0) >= 4) {
-    ElMessage.warning('教育经历最多填写 4 条')
+  const blockedMessage = getEducationAddBlockedMessage(form.education_experiences)
+  if (blockedMessage) {
+    ElMessage.warning(blockedMessage)
     return
   }
   form.education_experiences = [
@@ -919,8 +1066,12 @@ function addEducation() {
 }
 
 function removeEducation(index: number) {
-  if ((form.education_experiences?.length || 0) <= 2) {
-    ElMessage.warning('教育经历至少保留 2 条')
+  if (index <= 0) {
+    ElMessage.warning('默认高中毕业记录不可删除')
+    return
+  }
+  if ((form.education_experiences?.length || 0) <= 1) {
+    ElMessage.warning('教育经历至少保留 1 条')
     return
   }
   form.education_experiences?.splice(index, 1)
@@ -946,10 +1097,6 @@ async function addPractice() {
 }
 
 async function removePractice(index: number) {
-  if ((form.practice_experiences?.length || 0) <= 1) {
-    await showPortalAlert('实践经历至少保留 1 条', '实践经历提醒', 'warning')
-    return
-  }
   form.practice_experiences?.splice(index, 1)
 }
 
@@ -970,7 +1117,7 @@ function addFamilyMember() {
 }
 
 function removeFamilyMember(index: number) {
-  if ((form.family_members?.length || 0) <= 2) {
+  if (index <= 0) {
     return
   }
   form.family_members?.splice(index, 1)
@@ -1142,6 +1289,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       end_month: trimText(item.end_month) || null,
       transcript_attachment_url: trimText(item.transcript_attachment_url) || null,
       degree_certificate_attachment_url: isHighSchoolStage(item.education_stage) ? null : trimText(item.degree_certificate_attachment_url) || null,
+      graduation_certificate_attachment_url: isHighSchoolStage(item.education_stage) ? null : trimText(item.graduation_certificate_attachment_url) || null,
     }))
     .filter((item) => item.education_stage && item.school_name)
 
@@ -1369,6 +1517,11 @@ async function saveDraft(showSuccess = true) {
     await showPortalAlert(practiceRuleMessage, '草稿保存受阻', 'warning')
     return false
   }
+  const familyRuleMessage = validateFamilyRules(form.family_members)
+  if (familyRuleMessage) {
+    await showPortalAlert(familyRuleMessage, '草稿保存受阻', 'warning')
+    return false
+  }
   const achievementRuleMessage = validateAchievementRules(form.achievement_records)
   if (achievementRuleMessage) {
     await showPortalAlert(achievementRuleMessage, '草稿保存受阻', 'warning')
@@ -1485,7 +1638,7 @@ defineExpose({
       <PortalEducationSection
         v-else-if="activeSectionId === 'education-section'"
         :form="form"
-        :education-stage-options="educationStageOptions"
+        :get-education-stage-options="getEducationStageOptions"
         :certificate-attachment-accept="certificateAttachmentAccept"
         :is-attachment-uploading="isAttachmentUploading"
         :build-attachment-upload-key="buildAttachmentUploadKey"

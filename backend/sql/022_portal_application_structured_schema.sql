@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_education_experiences (
     verifier_phone VARCHAR(32),
     transcript_attachment_url TEXT,
     degree_certificate_attachment_url TEXT,
+    graduation_certificate_attachment_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_portal_application_education_sort_order CHECK (sort_order > 0)

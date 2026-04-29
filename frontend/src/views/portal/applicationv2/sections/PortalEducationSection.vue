@@ -1,17 +1,22 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { PortalApplicationUpsert, PortalEducationExperienceItem } from '../../../../api/portal'
 
-defineProps<{
+const props = defineProps<{
   form: PortalApplicationUpsert
-  educationStageOptions: string[]
+  getEducationStageOptions: (index: number) => string[]
   certificateAttachmentAccept: string
   isAttachmentUploading: (key: string) => boolean
   buildAttachmentUploadKey: (section: string, index: number | string, field: string) => string
-  handleEducationAttachmentUpload: (index: number, field: 'transcript' | 'degree_certificate', event: Event) => void | Promise<void>
+  handleEducationAttachmentUpload: (index: number, field: 'transcript' | 'degree_certificate' | 'graduation_certificate', event: Event) => void | Promise<void>
   handleEducationStageChange: (item: PortalEducationExperienceItem) => void
   addEducation: () => void
   removeEducation: (index: number) => void
 }>()
+
+const displayedEducationItems = computed(() => (props.form.education_experiences || [])
+  .map((item, actualIndex) => ({ item, actualIndex }))
+  .reverse())
 </script>
 
 <template>
@@ -19,32 +24,29 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>教育经历列表</strong>
-        <span>至少完整填写 2 条，最多 4 条，建议按“硕士/本科/高中”顺序补全。</span>
+        <span>默认包含一条高中毕业记录；新增面板会显示在上方，最多填写 3 条。</span>
       </div>
       <button type="button" class="action-button" @click="addEducation">新增教育经历</button>
     </div>
 
     <div class="record-list">
-      <section v-for="(item, index) in form.education_experiences" :key="`education-${index}`" class="record-card">
+      <section v-for="({ item, actualIndex }) in displayedEducationItems" :key="`education-${actualIndex}`" class="record-card">
         <div class="record-card__header">
-          <div>
-            <strong>教育经历 {{ index + 1 }}</strong>
-            <span>{{ index === 0 ? '默认高中毕业' : '用于派生最高学历与毕业院校' }}</span>
-          </div>
-          <button v-if="form.education_experiences!.length > 2" type="button" class="link-button" @click="removeEducation(index)">删除</button>
+          <div><strong>教育经历 {{ actualIndex + 1 }}</strong></div>
+          <button v-if="actualIndex > 0" type="button" class="link-button" @click="removeEducation(actualIndex)">删除</button>
         </div>
 
         <div class="section-grid">
-          <label><span><span v-if="index < 2" class="required-mark">*</span>教育阶段</span><select v-model="item.education_stage" @change="handleEducationStageChange(item)"><option value="">请选择</option><option v-for="stage in educationStageOptions" :key="stage" :value="stage">{{ stage }}</option></select></label>
-          <label><span>开始年月</span><input v-model="item.start_month" type="month" /></label>
-          <label><span>结束年月</span><input v-model="item.end_month" type="month" /></label>
-          <label><span><span v-if="index < 2" class="required-mark">*</span>就读学校</span><input v-model="item.school_name" placeholder="请输入就读学校" /></label>
-          <label v-if="item.education_stage !== '高中毕业'"><span>就读专业</span><input v-model="item.major_name" placeholder="请输入就读专业" /></label>
-          <label v-if="item.education_stage !== '高中毕业'"><span>期间平均成绩</span><input v-model="item.average_score" placeholder="如 88.5" /></label>
-          <label v-if="item.education_stage !== '高中毕业'"><span>期间绩点</span><input v-model="item.gpa" placeholder="如 3.7/4.0" /></label>
-          <label v-if="item.education_stage !== '高中毕业'"><span>成绩排名</span><input v-model="item.ranking" placeholder="如 5/120" /></label>
-          <label><span>证明人姓名</span><input v-model="item.verifier_name" placeholder="请输入证明人姓名" /></label>
-          <label><span>证明人手机</span><input v-model="item.verifier_phone" placeholder="请输入证明人手机" /></label>
+          <label><span><span v-if="actualIndex < 2" class="required-mark">*</span>教育阶段</span><select v-model="item.education_stage" @change="handleEducationStageChange(item)"><option value="">请选择</option><option v-for="stage in getEducationStageOptions(actualIndex)" :key="stage" :value="stage">{{ stage }}</option></select></label>
+          <label><span><span class="required-mark">*</span>开始年月</span><input v-model="item.start_month" type="month" /></label>
+          <label><span><span v-if="!item.education_stage.endsWith('在读')" class="required-mark">*</span>结束年月</span><input v-model="item.end_month" type="month" /></label>
+          <label><span><span v-if="actualIndex < 2" class="required-mark">*</span>就读学校</span><input v-model="item.school_name" placeholder="请输入就读学校" /></label>
+          <label v-if="item.education_stage !== '高中毕业'"><span><span class="required-mark">*</span>就读专业</span><input v-model="item.major_name" placeholder="请输入就读专业" /></label>
+          <label v-if="item.education_stage !== '高中毕业'"><span><span class="required-mark">*</span>期间平均成绩</span><input v-model="item.average_score" placeholder="如 88.5" /></label>
+          <label v-if="item.education_stage !== '高中毕业'"><span><span class="required-mark">*</span>期间绩点</span><input v-model="item.gpa" placeholder="如 3.7/4.0" /></label>
+          <label v-if="item.education_stage !== '高中毕业'"><span><span class="required-mark">*</span>成绩排名</span><input v-model="item.ranking" placeholder="如 5/120" /></label>
+          <label><span><span class="required-mark">*</span>证明人姓名</span><input v-model="item.verifier_name" placeholder="请输入证明人姓名" /></label>
+          <label><span><span class="required-mark">*</span>证明人手机</span><input v-model="item.verifier_phone" placeholder="请输入证明人手机" /></label>
         </div>
 
         <div class="upload-grid">
@@ -58,17 +60,17 @@ defineProps<{
               rel="noopener noreferrer"
               :title="item.transcript_attachment_name || ''"
             >{{ item.transcript_attachment_name }}</a>
-            <input v-else :value="''" readonly placeholder="未上传时可留空" />
+            <input v-else :value="''" readonly placeholder="未上传时不可提交" />
             <input
               class="upload-file"
               type="file"
-              :disabled="isAttachmentUploading(buildAttachmentUploadKey('education', index, 'transcript'))"
+              :disabled="isAttachmentUploading(buildAttachmentUploadKey('education', actualIndex, 'transcript'))"
               :accept="certificateAttachmentAccept"
-              @change="handleEducationAttachmentUpload(index, 'transcript', $event)"
+              @change="handleEducationAttachmentUpload(actualIndex, 'transcript', $event)"
             />
-            <small>{{ isAttachmentUploading(buildAttachmentUploadKey('education', index, 'transcript')) ? '上传中...' : '支持 PDF/JPG/PNG/WEBP，单个文件不超过 20MB' }}</small>
+            <small>{{ isAttachmentUploading(buildAttachmentUploadKey('education', actualIndex, 'transcript')) ? '上传中...' : '必传；支持 PDF/JPG/PNG/WEBP，单个文件不超过 20MB' }}</small>
           </div>
-          <div v-if="item.education_stage !== '高中毕业'" class="upload-card">
+          <div v-if="item.education_stage !== '高中毕业' && item.education_stage.endsWith('毕业')" class="upload-card">
             <span>学位证附件</span>
             <a
               v-if="item.degree_certificate_attachment_url && item.degree_certificate_attachment_name"
@@ -78,15 +80,35 @@ defineProps<{
               rel="noopener noreferrer"
               :title="item.degree_certificate_attachment_name || ''"
             >{{ item.degree_certificate_attachment_name }}</a>
-            <input v-else :value="''" readonly placeholder="未上传时可留空" />
+            <input v-else :value="''" readonly placeholder="未上传时不可提交" />
             <input
               class="upload-file"
               type="file"
-              :disabled="isAttachmentUploading(buildAttachmentUploadKey('education', index, 'degree_certificate'))"
+              :disabled="isAttachmentUploading(buildAttachmentUploadKey('education', actualIndex, 'degree_certificate'))"
               :accept="certificateAttachmentAccept"
-              @change="handleEducationAttachmentUpload(index, 'degree_certificate', $event)"
+              @change="handleEducationAttachmentUpload(actualIndex, 'degree_certificate', $event)"
             />
-            <small>{{ isAttachmentUploading(buildAttachmentUploadKey('education', index, 'degree_certificate')) ? '上传中...' : '支持 PDF/JPG/PNG/WEBP，单个文件不超过 20MB' }}</small>
+            <small>{{ isAttachmentUploading(buildAttachmentUploadKey('education', actualIndex, 'degree_certificate')) ? '上传中...' : '毕业阶段必传；支持 PDF/JPG/PNG/WEBP，单个文件不超过 20MB' }}</small>
+          </div>
+          <div v-if="item.education_stage !== '高中毕业' && item.education_stage.endsWith('毕业')" class="upload-card">
+            <span>毕业证附件</span>
+            <a
+              v-if="item.graduation_certificate_attachment_url && item.graduation_certificate_attachment_name"
+              class="upload-link-input"
+              :href="item.graduation_certificate_attachment_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              :title="item.graduation_certificate_attachment_name || ''"
+            >{{ item.graduation_certificate_attachment_name }}</a>
+            <input v-else :value="''" readonly placeholder="未上传时不可提交" />
+            <input
+              class="upload-file"
+              type="file"
+              :disabled="isAttachmentUploading(buildAttachmentUploadKey('education', actualIndex, 'graduation_certificate'))"
+              :accept="certificateAttachmentAccept"
+              @change="handleEducationAttachmentUpload(actualIndex, 'graduation_certificate', $event)"
+            />
+            <small>{{ isAttachmentUploading(buildAttachmentUploadKey('education', actualIndex, 'graduation_certificate')) ? '上传中...' : '毕业阶段必传；支持 PDF/JPG/PNG/WEBP，单个文件不超过 20MB' }}</small>
           </div>
         </div>
       </section>
