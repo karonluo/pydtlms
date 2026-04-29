@@ -1618,16 +1618,16 @@ defineExpose({
               <span class="panel-toggle__copy">
                 <small>STEP 09</small>
                 <strong>个人陈述与提交确认</strong>
-                <span>填写个人陈述、AI 问题思考并完成声明确认</span>
+                <span>填写 3 道个人陈述问题并完成声明确认</span>
               </span>
               <span class="panel-toggle__action">{{ isSectionExpanded('statement-section') ? '收起' : '展开' }}</span>
               <span class="panel-toggle__icon" :class="{ 'panel-toggle__icon--expanded': isSectionExpanded('statement-section') }" aria-hidden="true"></span>
             </button>
             <div v-show="isSectionExpanded('statement-section')" class="panel-body">
               <div class="form-grid form-grid--three">
-                <label class="form-field form-field--full"><span>个人陈述</span><textarea v-model="form.personal_statement!.personal_statement_text" rows="6" placeholder="请输入申请动机、研究基础与职业规划" /></label>
-                <label class="form-field form-field--full"><span>AI 关键问题思考</span><textarea v-model="form.personal_statement!.ai_problem_statement" rows="5" placeholder="请输入你关注的 AI 关键问题" /></label>
-                <label class="form-field form-field--full"><span>AI 行业不同观点</span><textarea v-model="form.personal_statement!.ai_industry_opinion" rows="5" placeholder="请输入你对行业议题的不同观点或补充说明" /></label>
+                <label class="form-field form-field--full"><span><span class="required-mark">*</span>1. 个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等</span><textarea v-model="form.personal_statement!.personal_statement_text" rows="6" placeholder="请填写个人成长经历、自我个性描述、申报动机及未来职业发展规划等内容" /></label>
+                <label class="form-field form-field--full"><span>2. 你认为目前AI技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？（选填）</span><textarea v-model="form.personal_statement!.ai_problem_statement" rows="5" placeholder="请输入你希望未来作为科研目标解决的重要问题" /></label>
+                <label class="form-field form-field--full"><span>3. 请陈述一个目前AI行业基本形成共识，但你不同意的观点，可以适当展开。（选填）</span><textarea v-model="form.personal_statement!.ai_industry_opinion" rows="5" placeholder="请输入你不同意的 AI 行业共识观点及说明" /></label>
               </div>
               <div class="upload-grid upload-grid--single">
                 <div class="upload-field">

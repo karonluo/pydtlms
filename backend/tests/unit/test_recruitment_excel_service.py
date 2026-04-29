@@ -36,7 +36,7 @@ def test_build_recruitment_template_preserves_duplicate_profile_columns() -> Non
         [
             {
                 "student_name": "李四",
-                "personal_statement_text": "第一段个人简介",
+                "personal_statement_text": "第一段个人陈述",
                 "supplementary_profile": "第二段个人简介",
             }
         ]
@@ -47,7 +47,8 @@ def test_build_recruitment_template_preserves_duplicate_profile_columns() -> Non
     headers = [cell.value for cell in worksheet[1]]
     values = [cell.value for cell in worksheet[2]]
     profile_indexes = [index for index, header in enumerate(headers) if header == "个人简介"]
+    statement_index = headers.index("个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等")
 
-    assert len(profile_indexes) == 2
-    assert values[profile_indexes[0]] == "第一段个人简介"
-    assert values[profile_indexes[1]] == "第二段个人简介"
+    assert len(profile_indexes) == 1
+    assert values[statement_index] == "第一段个人陈述"
+    assert values[profile_indexes[0]] == "第二段个人简介"

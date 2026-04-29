@@ -294,9 +294,9 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
         <h3 class="dialog-section__title">个人陈述与补充说明</h3>
         <div class="detail-text-list">
           <article class="detail-text-card"><h4>本人自我评价</h4><p>{{ displayDetailValue(application.self_evaluation) }}</p></article>
-          <article class="detail-text-card"><h4>个人陈述</h4><p>{{ displayDetailValue(application.personal_statement?.personal_statement_text) }}</p></article>
-          <article class="detail-text-card"><h4>关键科研问题</h4><p>{{ displayDetailValue(application.personal_statement?.ai_problem_statement || application.research_problem) }}</p></article>
-          <article class="detail-text-card"><h4>AI 行业不同观点</h4><p>{{ displayDetailValue(application.personal_statement?.ai_industry_opinion || application.dissenting_view) }}</p></article>
+          <article class="detail-text-card"><h4>问题 1：个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等</h4><p>{{ displayDetailValue(application.personal_statement?.personal_statement_text) }}</p></article>
+          <article class="detail-text-card"><h4>问题 2：你认为目前AI技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？</h4><p>{{ displayDetailValue(application.personal_statement?.ai_problem_statement || application.research_problem) }}</p></article>
+          <article class="detail-text-card"><h4>问题 3：请陈述一个目前AI行业基本形成共识，但你不同意的观点，可以适当展开</h4><p>{{ displayDetailValue(application.personal_statement?.ai_industry_opinion || application.dissenting_view) }}</p></article>
           <article class="detail-text-card"><h4>研究现状与局限</h4><p>{{ displayDetailValue(application.research_status_analysis) }}</p></article>
           <article class="detail-text-card"><h4>问题解决后的影响</h4><p>{{ displayDetailValue(application.research_impact) }}</p></article>
           <article class="detail-text-card"><h4>AI 对社会影响判断</h4><p>{{ displayDetailValue(application.ai_society_impact) }}</p></article>

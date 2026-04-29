@@ -47,7 +47,7 @@ const formSections = [
   { id: 'english-section', label: '英语能力', description: '请至少填写 1 条英语考试记录并上传证明材料。', icon: Reading },
   { id: 'family-section', label: '家庭情况', description: '父母信息必填，其他成员可按需补充。', icon: House },
   { id: 'achievement-section', label: '成果经历', description: '可补充论文发表与获奖经历，最多填写 4 条。', icon: Medal },
-  { id: 'statement-section', label: '个人陈述', description: '填写个人陈述、AI 思考并完成提交确认。', icon: EditPen },
+  { id: 'statement-section', label: '个人陈述', description: '填写 3 道个人陈述问题并完成提交确认。', icon: EditPen },
 ]
 
 const activeSectionId = ref('basic-section')

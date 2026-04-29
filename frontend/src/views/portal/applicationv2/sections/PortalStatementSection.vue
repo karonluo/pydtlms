@@ -20,13 +20,13 @@ defineProps<{
     <div class="section-card">
       <div class="section-intro">
         <strong>个人陈述与附件</strong>
-        <p>请围绕“个人成长经历、为何申报本项目或本专业、未来职业发展规划”三个主题填写。个人陈述总字数需控制在 800-1200 字，中英文皆可。</p>
+        <p>请按以下三个问题填写个人陈述内容，其中第 1 题必填，第 2、3 题选填。</p>
       </div>
 
       <div class="section-grid">
-        <label class="section-grid__full"><span><span class="required-mark">*</span>个人成长经历</span><textarea v-model="form.personal_statement!.growth_experience_text" rows="6" placeholder="请结合学习、科研、实践或重要阶段经历进行说明" /></label>
-        <label class="section-grid__full"><span><span class="required-mark">*</span>为何申报本项目或本专业</span><textarea v-model="form.personal_statement!.program_application_reason_text" rows="6" placeholder="请说明申报动机、研究兴趣、与项目方向的匹配度等" /></label>
-        <label class="section-grid__full"><span><span class="required-mark">*</span>未来职业发展规划</span><textarea v-model="form.personal_statement!.career_plan_text" rows="6" placeholder="请说明未来职业目标、发展路径和阶段规划" /></label>
+        <label class="section-grid__full"><span><span class="required-mark">*</span>1. 个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等</span><textarea v-model="form.personal_statement!.personal_statement_text" rows="6" placeholder="请填写个人成长经历、自我个性描述、申报动机及未来职业发展规划等内容" /></label>
+        <label class="section-grid__full"><span>2. 你认为目前AI技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？（选填）</span><textarea v-model="form.personal_statement!.ai_problem_statement" rows="6" placeholder="请输入你希望未来作为科研目标解决的重要问题" /></label>
+        <label class="section-grid__full"><span>3. 请陈述一个目前AI行业基本形成共识，但你不同意的观点，可以适当展开。（选填）</span><textarea v-model="form.personal_statement!.ai_industry_opinion" rows="6" placeholder="请输入你不同意的 AI 行业共识观点及说明" /></label>
       </div>
 
       <div class="upload-card">

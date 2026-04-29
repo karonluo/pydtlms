@@ -258,9 +258,9 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
             {"member_name": "张父", "relation_type": "父亲", "contact_phone": "13800001111"},
         ],
         personal_statement={
-            "growth_experience_text": "成长" + "甲" * 280,
-            "program_application_reason_text": "申报" + "乙" * 280,
-            "career_plan_text": "规划" + "丙" * 280,
+            "personal_statement_text": "我在个人成长过程中逐步明确了自己的研究兴趣，希望结合过往学习和实践经历继续在人工智能方向深耕。",
+            "ai_problem_statement": "希望重点研究复杂场景下模型可靠性问题。",
+            "ai_industry_opinion": "我不同意只靠扩大模型规模就能解决所有行业问题的观点。",
             "resume_attachment_url": "/portal-attachments/uploads/student-7/resume/resume-a.pdf",
         },
         signed_agreement=True,

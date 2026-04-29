@@ -34,9 +34,9 @@ def _portal_student_record(student_id: int = 7) -> PortalStudentRecord:
 
 def _build_personal_statement_payload(include_resume: bool = True, include_supporting_material: bool = False) -> dict[str, object]:
     payload: dict[str, object] = {
-        'growth_experience_text': '成长' + '甲' * 280,
-        'program_application_reason_text': '申报' + '乙' * 280,
-        'career_plan_text': '规划' + '丙' * 280,
+        'personal_statement_text': '我在学习与科研过程中逐步形成了主动探索、持续钻研的习惯，也更加明确了自己希望在人工智能方向长期深耕的发展目标。',
+        'ai_problem_statement': '我希望未来重点解决通用模型在复杂真实场景中的可靠性与可解释性问题。',
+        'ai_industry_opinion': '我不同意“只要模型规模继续扩大，所有行业问题都会自然解决”的观点。',
     }
     if include_resume:
         payload['resume_attachment_url'] = '/portal-attachments/uploads/student-7/resume/resume-a.pdf'
@@ -520,13 +520,13 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
         assert payload['education_experiences'][1]['transcript_attachment_url'].endswith('transcript-a.pdf')
         assert payload['education_experiences'][1]['degree_certificate_attachment_url'].endswith('degree-a.pdf')
         assert payload['english_proficiencies'][0]['certificate_attachment_url'].endswith('cet6-a.pdf')
-        assert payload['personal_statement']['growth_experience_text'].startswith('成长')
+        assert payload['personal_statement']['personal_statement_text'].startswith('我在学习与科研过程中')
         assert payload['personal_statement']['resume_attachment_url'].endswith('resume-a.pdf')
         assert payload['personal_statement']['supporting_material_attachment_url'].endswith('supporting-material.zip')
         assert payload['material_list_attachment'].endswith('supporting-material.zip')
 
 
-def test_portal_application_submission_rejects_short_personal_statement(monkeypatch) -> None:
+def test_portal_application_submission_requires_primary_personal_statement(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
         monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
@@ -567,16 +567,15 @@ def test_portal_application_submission_rejects_short_personal_statement(monkeypa
                     {'member_name': '张父', 'relation_type': '父亲'},
                 ],
                 'personal_statement': {
-                    'growth_experience_text': '成长经历过短',
-                    'program_application_reason_text': '申报理由过短',
-                    'career_plan_text': '发展规划过短',
+                    'ai_problem_statement': '希望研究模型对齐问题',
+                    'ai_industry_opinion': '不同意参数越大效果一定越好',
                     'resume_attachment_url': '/portal-attachments/uploads/student-7/resume/resume-a.pdf',
                 },
             },
         )
 
         assert response.status_code == 422
-        assert '800-1200' in response.text
+        assert '第 1 题个人陈述' in response.text
 
 
 def test_portal_application_submission_rejects_missing_resume_attachment(monkeypatch) -> None:

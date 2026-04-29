@@ -1383,14 +1383,14 @@ onMounted(() => {
             <el-form-item label="本人自我评价">
               <el-input v-model="applicationForm.self_evaluation" type="textarea" :rows="3" placeholder="请输入本人自我评价" />
             </el-form-item>
-            <el-form-item label="个人陈述">
-              <el-input v-model="applicationForm.personal_statement!.personal_statement_text" type="textarea" :rows="4" placeholder="请输入申请动机、研究基础与职业规划" />
+            <el-form-item label="问题 1：个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等">
+              <el-input v-model="applicationForm.personal_statement!.personal_statement_text" type="textarea" :rows="4" placeholder="请输入个人成长经历、自我个性描述、申报动机及未来职业发展规划等内容" />
             </el-form-item>
-            <el-form-item label="AI 关键问题思考">
-              <el-input v-model="applicationForm.personal_statement!.ai_problem_statement" type="textarea" :rows="4" placeholder="请输入你关注的 AI 关键问题" />
+            <el-form-item label="问题 2：你认为目前AI技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？">
+              <el-input v-model="applicationForm.personal_statement!.ai_problem_statement" type="textarea" :rows="4" placeholder="请输入希望未来作为科研目标解决的重要问题" />
             </el-form-item>
-            <el-form-item label="AI 行业不同观点">
-              <el-input v-model="applicationForm.personal_statement!.ai_industry_opinion" type="textarea" :rows="4" placeholder="请输入你对行业议题的不同观点或补充说明" />
+            <el-form-item label="问题 3：请陈述一个目前AI行业基本形成共识，但你不同意的观点，可以适当展开">
+              <el-input v-model="applicationForm.personal_statement!.ai_industry_opinion" type="textarea" :rows="4" placeholder="请输入你不同意的 AI 行业共识观点及说明" />
             </el-form-item>
             <el-form-item label="个人陈述附件">
               <el-input v-model="applicationForm.personal_statement!.resume_attachment_url" placeholder="请输入简历/个人陈述附件地址" />
