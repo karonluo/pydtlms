@@ -216,7 +216,7 @@ function getEducationAddBlockedMessage(items?: PortalEducationExperienceItem[] |
 
   const secondStage = trimText(currentItems[1]?.education_stage)
   if (secondStage === '本科在读') {
-    return '教育经历2选择“本科在读”后，不能继续新增教育经历'
+    return '最后一条教育经历当前为“本科在读”，请先改为“本科毕业”，再填写硕士相关经历'
   }
   if (secondStage !== '本科毕业') {
     return '新增教育经历3前，请先将教育经历2的教育阶段填写为“本科毕业”'
@@ -1053,10 +1053,10 @@ function choosePlan(planId: number) {
   form.plan_id = planId
 }
 
-function addEducation() {
+async function addEducation() {
   const blockedMessage = getEducationAddBlockedMessage(form.education_experiences)
   if (blockedMessage) {
-    ElMessage.warning(blockedMessage)
+    await showPortalAlert(blockedMessage, '教育经历提醒', 'warning')
     return
   }
   form.education_experiences = [
@@ -1065,13 +1065,13 @@ function addEducation() {
   ]
 }
 
-function removeEducation(index: number) {
+async function removeEducation(index: number) {
   if (index <= 0) {
-    ElMessage.warning('默认高中毕业记录不可删除')
+    await showPortalAlert('默认高中毕业记录不可删除', '教育经历提醒', 'warning')
     return
   }
   if ((form.education_experiences?.length || 0) <= 1) {
-    ElMessage.warning('教育经历至少保留 1 条')
+    await showPortalAlert('教育经历至少保留 1 条', '教育经历提醒', 'warning')
     return
   }
   form.education_experiences?.splice(index, 1)
