@@ -1264,6 +1264,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     signed_agreement: declaration.has_read_declaration,
     selected_team_name: primaryPreferenceItem?.research_center_name || '',
     selected_advisor_name: primaryPreferenceItem?.advisor_name || null,
+    self_evaluation: trimText(form.personal_statement?.ai_industry_opinion) || null,
   }
 }
 

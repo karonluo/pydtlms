@@ -812,7 +812,10 @@ class PortalApplicationUpsert(BaseModel):
             self.personal_profile = self.personal_statement.growth_experience_text
 
         if self.personal_statement is not None and not self.self_evaluation:
-            self.self_evaluation = self.personal_statement.career_plan_text
+            self.self_evaluation = _first_non_empty(
+                self.personal_statement.ai_industry_opinion,
+                self.personal_statement.career_plan_text,
+            )
 
         if self.declaration is not None:
             self.signed_agreement = self.signed_agreement or self.declaration.has_read_declaration
@@ -932,7 +935,10 @@ class PortalApplicationDraftUpsert(BaseModel):
             self.personal_profile = self.personal_statement.growth_experience_text
 
         if self.personal_statement is not None and not self.self_evaluation:
-            self.self_evaluation = self.personal_statement.career_plan_text
+            self.self_evaluation = _first_non_empty(
+                self.personal_statement.ai_industry_opinion,
+                self.personal_statement.career_plan_text,
+            )
 
         if self.declaration is not None:
             self.signed_agreement = self.signed_agreement or self.declaration.has_read_declaration
