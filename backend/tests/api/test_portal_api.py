@@ -573,8 +573,9 @@ def test_portal_application_submission_rejects_short_personal_statement(monkeypa
             },
         )
 
-        assert response.status_code == 422
-        assert '800-1200' in response.text
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['personal_statement']['personal_statement_text'] == '主陈述过短'
 
 
 def test_portal_application_submission_rejects_missing_resume_attachment(monkeypatch) -> None:

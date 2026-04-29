@@ -642,10 +642,6 @@ function createPersonalStatement(): PortalPersonalStatementData {
   }
 }
 
-function personalStatementLength(text: string | null | undefined) {
-  return trimText(text).replace(/\s+/g, '').length
-}
-
 function buildPersonalStatementSummary(personalStatement?: PortalPersonalStatementData | null) {
   return trimText(personalStatement?.personal_statement_text)
 }
@@ -658,11 +654,6 @@ function validatePersonalStatementRules(personalStatement?: PortalPersonalStatem
   const statementText = buildPersonalStatementSummary(personalStatement)
   if (!statementText) {
     return '请填写个人陈述第 1 题'
-  }
-
-  const length = personalStatementLength(statementText)
-  if (length < 800 || length > 1200) {
-    return '个人陈述第 1 题总字数需控制在 800-1200 字'
   }
   if (!trimText(personalStatement?.resume_attachment_url)) {
     return '请先上传个人简历附件'

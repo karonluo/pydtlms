@@ -317,12 +317,6 @@ def _validate_portal_education_rules(items: Sequence["PortalEducationExperienceI
         raise ValueError("填写“本科在读”时，不能同时填写“硕士在读”或“硕士毕业”教育经历")
 
 
-def _portal_statement_length(value: str | None) -> int:
-    if not isinstance(value, str):
-        return 0
-    return len("".join(value.split()))
-
-
 def _build_personal_statement_summary(personal_statement: "PortalPersonalStatementData") -> str | None:
     return _first_non_empty(personal_statement.personal_statement_text)
 
@@ -387,10 +381,6 @@ def _validate_portal_personal_statement_rules(
 
     if not statement_text:
         raise ValueError("请填写个人陈述第 1 题")
-
-    length = _portal_statement_length(statement_text)
-    if length < 800 or length > 1200:
-        raise ValueError("个人陈述第 1 题总字数需控制在 800-1200 字")
 
     if not resume_attachment_url:
         raise ValueError("请上传个人简历附件")
