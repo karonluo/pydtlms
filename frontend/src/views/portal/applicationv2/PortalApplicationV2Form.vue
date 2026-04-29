@@ -514,10 +514,6 @@ function createPersonalStatement(): PortalPersonalStatementData {
   }
 }
 
-function personalStatementLength(text: string | null | undefined) {
-  return trimText(text).replace(/\s+/g, '').length
-}
-
 function buildPersonalStatementSummary(personalStatement?: PortalPersonalStatementData | null) {
   return trimText(personalStatement?.personal_statement_text)
 }
