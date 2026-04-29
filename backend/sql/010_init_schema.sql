@@ -3,9 +3,12 @@ CREATE TABLE IF NOT EXISTS dtlms_users (
     username VARCHAR(64) NOT NULL UNIQUE,
     full_name VARCHAR(128) NOT NULL,
     email VARCHAR(128),
+    department_name VARCHAR(128) NOT NULL DEFAULT '',
+    phone_number VARCHAR(32),
     password_hash VARCHAR(255) NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -14,6 +17,7 @@ CREATE TABLE IF NOT EXISTS dtlms_roles (
     id BIGSERIAL PRIMARY KEY,
     role_code VARCHAR(64) NOT NULL UNIQUE,
     role_name VARCHAR(128) NOT NULL,
+    scope_name VARCHAR(64) NOT NULL DEFAULT '系统管理',
     description TEXT,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -299,6 +303,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     selected_team_name VARCHAR(128),
     selected_advisor_name VARCHAR(128),
     self_evaluation TEXT,
+    application_draft JSONB,
     submitted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -308,6 +313,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_student_profiles (
     portal_student_id BIGINT PRIMARY KEY REFERENCES dtlms_portal_students(id) ON DELETE CASCADE,
     full_name_pinyin VARCHAR(128),
     profile_photo_url VARCHAR(255),
+    id_card_collage_url VARCHAR(255),
     gender VARCHAR(16),
     birth_date VARCHAR(32),
     ethnic_group VARCHAR(64),
@@ -472,10 +478,14 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_achievement_records (
     author_order VARCHAR(32),
     journal_or_conference VARCHAR(255),
     publish_or_index_month VARCHAR(16),
+    achievement_month VARCHAR(16),
     award_name VARCHAR(255),
+    award_rank VARCHAR(64),
+    award_certificate_attachment_url VARCHAR(512),
     awarding_organization VARCHAR(255),
     award_level VARCHAR(128),
     award_year VARCHAR(16),
+    description_text TEXT,
     responsibility_text TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -484,9 +494,13 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_achievement_records (
 CREATE TABLE IF NOT EXISTS dtlms_portal_application_personal_statements (
     application_id BIGINT PRIMARY KEY REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
     personal_statement_text TEXT,
+    growth_experience_text TEXT,
+    program_application_reason_text TEXT,
+    career_plan_text TEXT,
     ai_problem_statement TEXT,
     ai_industry_opinion TEXT,
     resume_attachment_url TEXT,
+    supporting_material_attachment_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -670,6 +684,28 @@ CREATE TABLE IF NOT EXISTS dtlms_system_configs (
     config_key VARCHAR(128) NOT NULL UNIQUE,
     config_value TEXT NOT NULL,
     description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_audit_policies (
+    id BIGSERIAL PRIMARY KEY,
+    item VARCHAR(255) NOT NULL,
+    policy TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT '启用',
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_integrations (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    direction VARCHAR(64) NOT NULL,
+    cadence VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT '正常',
+    owner VARCHAR(128) NOT NULL,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

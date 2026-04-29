@@ -67,10 +67,10 @@ type EducationAttachmentField = 'transcript' | 'degree_certificate'
 const sourceChannelOptions = ['导师推荐', '实验室官网', '高校宣讲', '朋友同学推荐', '其他']
 const genderOptions = ['男', '女']
 const idTypeOptions = ['居民身份证', '护照', '港澳居民来往内地通行证']
-const educationStageOptions = ['硕士', '硕士在读', '本科', '本科在读', '高中']
-const englishExamOptions = ['CET-4', 'CET-6', 'IELTS', 'TOEFL', '其他']
+const educationStageOptions = ['硕士毕业', '硕士在读', '本科毕业', '本科在读', '高中毕业']
+const englishExamOptions = ['CET-6', 'IELTS', 'TOEFL', '其他']
 const familyRelationOptions = ['父亲', '母亲', '兄', '弟', '姐', '妹', '其他']
-const achievementTypeOptions = ['论文发表', '科研项目', '学生活动', '获奖经历']
+const achievementTypeOptions = ['论文发表', '获奖经历']
 const defaultPoliticalStatusOptions: SelectOption[] = [
   { label: '中共党员', value: '中共党员' },
   { label: '中共预备党员', value: '中共预备党员' },
@@ -94,13 +94,18 @@ const defaultEthnicGroupOptions: SelectOption[] = [
   '赫哲族', '门巴族', '珞巴族', '基诺族',
 ].map((value) => ({ label: value, value }))
 const certificateAttachmentAccept = '.pdf,.png,.jpg,.jpeg,.webp'
+const achievementAwardAttachmentAccept = '.pdf,.png,.jpg,.jpeg,.webp'
 const profilePhotoAttachmentAccept = '.png,.jpg,.jpeg,.webp'
+const idCardCollageAttachmentAccept = '.jpg,.jpeg'
 const resumeAttachmentAccept = '.pdf,.doc,.docx'
+const supportingMaterialAttachmentAccept = '.zip,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp'
+const declarationReminderText = '本表及证明材料仅作为申请上海人工智能实验室联培博士项目的参考依据，并承诺提交材料的所有内容均真实、准确、完整。所提供的材料中如有任何不实信息，将被取消录取资格。'
 
 function createProfile(): PortalApplicantProfileData {
   return {
     full_name_pinyin: '',
     profile_photo_url: '',
+    id_card_collage_url: '',
     gender: '',
     birth_date: '',
     ethnic_group: '',
@@ -124,10 +129,10 @@ function createPreference(order: number, isOptional: boolean): PortalApplication
   }
 }
 
-function createEducation(order: number): PortalEducationExperienceItem {
+function createEducation(order: number, stage = ''): PortalEducationExperienceItem {
   return {
     sort_order: order,
-    education_stage: order === 1 ? '硕士' : '',
+    education_stage: stage,
     start_month: '',
     end_month: '',
     school_name: '',
@@ -142,6 +147,78 @@ function createEducation(order: number): PortalEducationExperienceItem {
   }
 }
 
+function createDefaultEducationExperiences(): PortalEducationExperienceItem[] {
+  return [createEducation(1, '高中毕业'), createEducation(2)]
+}
+
+function ensureEducationExperienceShape(items?: Array<Partial<PortalEducationExperienceItem>> | null) {
+  const normalized = (items || []).slice(0, 4).map((item, index) => ({
+    ...createEducation(index + 1),
+    ...item,
+    sort_order: index + 1,
+  }))
+
+  while (normalized.length < 2) {
+    normalized.push(createEducation(normalized.length + 1, normalized.length === 0 ? '高中毕业' : ''))
+  }
+
+  if (!trimText(normalized[0]?.education_stage)) {
+    normalized[0].education_stage = '高中毕业'
+  }
+
+  return normalized
+}
+
+function isHighSchoolStage(stage: string | null | undefined) {
+  return trimText(stage) === '高中毕业'
+}
+
+function recommendedNextEducationStage(items?: PortalEducationExperienceItem[] | null) {
+  const preferredStages = ['本科在读', '本科毕业', '硕士在读', '硕士毕业']
+  const existingStages = new Set((items || []).map((item) => trimText(item.education_stage)).filter(Boolean))
+  return preferredStages.find((stage) => !existingStages.has(stage)) || ''
+}
+
+function normalizeEducationWhenStageChanges(item: PortalEducationExperienceItem) {
+  if (!isHighSchoolStage(item.education_stage)) {
+    return
+  }
+  item.major_name = ''
+  item.average_score = ''
+  item.gpa = ''
+  item.ranking = ''
+  item.degree_certificate_attachment_url = ''
+  item.degree_certificate_attachment_name = ''
+}
+
+function getCompletedEducationExperiences(items?: PortalEducationExperienceItem[] | null) {
+  return (items || []).filter((item) => trimText(item.education_stage) && trimText(item.school_name))
+}
+
+function validateEducationRules(items?: PortalEducationExperienceItem[] | null) {
+  const orderedItems = [...(items || [])].sort((left, right) => left.sort_order - right.sort_order)
+  const secondItem = orderedItems[1]
+  if (!secondItem || !trimText(secondItem.education_stage) || !trimText(secondItem.school_name)) {
+    return '教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”'
+  }
+  if (!['本科在读', '本科毕业'].includes(trimText(secondItem.education_stage))) {
+    return '教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”'
+  }
+
+  const stages = orderedItems.map((item) => trimText(item.education_stage)).filter(Boolean)
+  const hasBachelorGraduate = stages.includes('本科毕业')
+  const hasBachelorCurrent = stages.includes('本科在读')
+  const hasMasterStage = stages.includes('硕士在读') || stages.includes('硕士毕业')
+
+  if (hasBachelorGraduate && !hasMasterStage) {
+    return '填写“本科毕业”时，必须同时填写“硕士在读”或“硕士毕业”教育经历'
+  }
+  if (hasBachelorCurrent && hasMasterStage) {
+    return '填写“本科在读”时，不能同时填写“硕士在读”或“硕士毕业”教育经历'
+  }
+  return ''
+}
+
 function createPractice(): PortalPracticeExperienceItem {
   return {
     start_month: '',
@@ -154,12 +231,112 @@ function createPractice(): PortalPracticeExperienceItem {
   }
 }
 
+function practiceItemHasContent(item: PortalPracticeExperienceItem) {
+  return Boolean(
+    trimText(item.start_month)
+    || trimText(item.end_month)
+    || trimText(item.organization_name)
+    || trimText(item.position_name)
+    || trimText(item.responsibility_text)
+    || trimText(item.verifier_name)
+    || trimText(item.verifier_phone),
+  )
+}
+
+function ensurePracticeExperienceShape(items?: Array<Partial<PortalPracticeExperienceItem>> | null) {
+  const normalized = (items || [])
+    .map((item) => ({ ...createPractice(), ...item }))
+    .filter((item) => practiceItemHasContent(item))
+    .slice(0, 2)
+
+  return normalized.length ? normalized : [createPractice()]
+}
+
+function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
+  const meaningfulItems = (items || []).filter((item) => practiceItemHasContent(item))
+  if (meaningfulItems.length > 2) {
+    return '实践经历最多填写 2 条'
+  }
+
+  for (let index = 0; index < meaningfulItems.length; index += 1) {
+    const item = meaningfulItems[index]
+    if (!trimText(item.start_month) && !trimText(item.end_month)) {
+      continue
+    }
+
+    const missingFields: string[] = []
+    if (!trimText(item.start_month)) {
+      missingFields.push('开始年月')
+    }
+    if (!trimText(item.end_month)) {
+      missingFields.push('结束年月')
+    }
+    if (!trimText(item.organization_name)) {
+      missingFields.push('实习实践/工作单位')
+    }
+    if (!trimText(item.position_name)) {
+      missingFields.push('岗位')
+    }
+    if (!trimText(item.verifier_name)) {
+      missingFields.push('证明人姓名')
+    }
+    if (!trimText(item.verifier_phone)) {
+      missingFields.push('证明人手机')
+    }
+    if (missingFields.length) {
+      return `实践经历${index + 1}填写了开始年月或结束年月时，除职责外其余字段均必填：缺少${missingFields.join('、')}`
+    }
+  }
+
+  return ''
+}
+
 function createEnglish(): PortalEnglishProficiencyItem {
   return {
     exam_name: '',
     score_text: '',
     certificate_attachment_url: '',
   }
+}
+
+function englishItemHasContent(item: PortalEnglishProficiencyItem) {
+  return Boolean(
+    trimText(item.exam_name)
+    || trimText(item.score_text)
+    || trimText(item.certificate_attachment_url)
+    || trimText(item.certificate_attachment_name),
+  )
+}
+
+function ensureEnglishProficiencyShape(items?: Array<Partial<PortalEnglishProficiencyItem>> | null) {
+  const normalized = (items || [])
+    .map((item) => ({ ...createEnglish(), ...item }))
+    .filter((item) => englishItemHasContent(item))
+
+  return normalized.length ? normalized : [createEnglish()]
+}
+
+function validateEnglishRules(items?: PortalEnglishProficiencyItem[] | null, requireAtLeastOne = true) {
+  const meaningfulItems = (items || []).filter((item) => englishItemHasContent(item))
+
+  if (requireAtLeastOne && !meaningfulItems.length) {
+    return '请至少完整填写一条英语能力，并上传英语证明附件'
+  }
+
+  for (let index = 0; index < meaningfulItems.length; index += 1) {
+    const item = meaningfulItems[index]
+    if (trimText(item.exam_name) === 'CET-4') {
+      return '英语能力不再支持填写“CET-4”，请改填 CET-6、IELTS、TOEFL 或其他英语考试成绩'
+    }
+    if (!trimText(item.exam_name)) {
+      return `英语能力${index + 1}请先选择英语考试名称`
+    }
+    if (!trimText(item.certificate_attachment_url)) {
+      return `英语能力${index + 1}必须上传英语证明附件`
+    }
+  }
+
+  return ''
 }
 
 function createFamilyMember(relationType = '其他'): PortalFamilyMemberItem {
@@ -172,34 +349,213 @@ function createFamilyMember(relationType = '其他'): PortalFamilyMemberItem {
   }
 }
 
+function familyMemberHasContent(item: PortalFamilyMemberItem) {
+  return Boolean(
+    trimText(item.member_name)
+    || trimText(item.employer_name)
+    || trimText(item.job_title)
+    || trimText(item.contact_phone),
+  )
+}
+
+function hasCompletedParentFamilyMember(items?: PortalFamilyMemberItem[] | null) {
+  return Boolean(
+    (items || []).find(
+      (item) => ['父亲', '母亲'].includes(trimText(item.relation_type)) && trimText(item.member_name),
+    ),
+  )
+}
+
+function validateFamilyRules(items?: PortalFamilyMemberItem[] | null) {
+  if (!hasCompletedParentFamilyMember(items)) {
+    return '父母信息至少填写一方'
+  }
+
+  return ''
+}
+
 function createAchievement(): PortalAchievementRecordItem {
   return {
     achievement_type: '',
+    achievement_month: '',
     paper_title: '',
     author_order: '',
     journal_or_conference: '',
     publish_or_index_month: '',
     award_name: '',
+    award_rank: '',
+    award_certificate_attachment_url: '',
+    award_certificate_attachment_name: '',
     awarding_organization: '',
     award_level: '',
     award_year: '',
+    description_text: '',
     responsibility_text: '',
   }
+}
+
+function normalizeAchievementItem(item?: Partial<PortalAchievementRecordItem> | null): PortalAchievementRecordItem {
+  const normalized = {
+    ...createAchievement(),
+    ...item,
+  }
+  normalized.achievement_month = trimText(normalized.achievement_month) || trimText(normalized.publish_or_index_month)
+  normalized.award_rank = trimText(normalized.award_rank) || trimText(normalized.award_level)
+  normalized.description_text = trimText(normalized.description_text) || trimText(normalized.responsibility_text)
+  return normalized
+}
+
+function achievementItemHasContent(item: PortalAchievementRecordItem) {
+  return Boolean(
+    trimText(item.achievement_type)
+    || trimText(item.achievement_month)
+    || trimText(item.paper_title)
+    || trimText(item.author_order)
+    || trimText(item.journal_or_conference)
+    || trimText(item.publish_or_index_month)
+    || trimText(item.award_name)
+    || trimText(item.award_rank)
+    || trimText(item.award_certificate_attachment_url)
+    || trimText(item.awarding_organization)
+    || trimText(item.award_level)
+    || trimText(item.award_year)
+    || trimText(item.description_text)
+    || trimText(item.responsibility_text),
+  )
+}
+
+function ensureAchievementRecordShape(items?: Array<Partial<PortalAchievementRecordItem>> | null) {
+  return (items || [])
+    .map((item) => normalizeAchievementItem(item))
+    .filter((item) => achievementItemHasContent(item))
+    .slice(0, 4)
+}
+
+function validateAchievementRules(items?: PortalAchievementRecordItem[] | null) {
+  const meaningfulItems = (items || [])
+    .map((item) => normalizeAchievementItem(item))
+    .filter((item) => achievementItemHasContent(item))
+
+  if (meaningfulItems.length > 4) {
+    return '成果经历最多填写 4 条'
+  }
+
+  for (let index = 0; index < meaningfulItems.length; index += 1) {
+    const item = meaningfulItems[index]
+    const rowLabel = `成果经历${index + 1}`
+    const achievementType = trimText(item.achievement_type)
+    if (!achievementType) {
+      return `${rowLabel}请先选择类型`
+    }
+    if (!achievementTypeOptions.includes(achievementType)) {
+      return `${rowLabel}仅支持填写“论文发表”或“获奖经历”`
+    }
+
+    if (achievementType === '论文发表') {
+      const missingFields: string[] = []
+      if (!trimText(item.achievement_month)) {
+        missingFields.push('日期')
+      }
+      if (!trimText(item.paper_title)) {
+        missingFields.push('论文名称')
+      }
+      if (!trimText(item.author_order)) {
+        missingFields.push('作者序位')
+      }
+      if (!trimText(item.journal_or_conference)) {
+        missingFields.push('期刊名称')
+      }
+      if (!trimText(item.description_text)) {
+        missingFields.push('描述')
+      }
+      if (missingFields.length) {
+        return `${rowLabel}为论文发表时，以下字段必填：${missingFields.join('、')}`
+      }
+    }
+
+    if (achievementType === '获奖经历') {
+      const missingFields: string[] = []
+      if (!trimText(item.achievement_month)) {
+        missingFields.push('日期')
+      }
+      if (!trimText(item.award_name)) {
+        missingFields.push('奖项名称')
+      }
+      if (!trimText(item.award_rank)) {
+        missingFields.push('获奖名次')
+      }
+      if (!trimText(item.award_certificate_attachment_url)) {
+        missingFields.push('获奖证明')
+      }
+      if (!trimText(item.description_text)) {
+        missingFields.push('描述')
+      }
+      if (missingFields.length) {
+        return `${rowLabel}为获奖经历时，以下字段必填：${missingFields.join('、')}`
+      }
+    }
+  }
+
+  return ''
 }
 
 function createPersonalStatement(): PortalPersonalStatementData {
   return {
     personal_statement_text: '',
-    ai_problem_statement: '',
-    ai_industry_opinion: '',
+    growth_experience_text: '',
+    program_application_reason_text: '',
+    career_plan_text: '',
     resume_attachment_url: '',
+    resume_attachment_name: '',
+    supporting_material_attachment_url: '',
+    supporting_material_attachment_name: '',
   }
+}
+
+function personalStatementLength(text: string | null | undefined) {
+  return trimText(text).replace(/\s+/g, '').length
+}
+
+function buildPersonalStatementSummary(personalStatement?: PortalPersonalStatementData | null) {
+  const growth = trimText(personalStatement?.growth_experience_text)
+  const reason = trimText(personalStatement?.program_application_reason_text)
+  const careerPlan = trimText(personalStatement?.career_plan_text)
+  const sections = [
+    growth ? `个人成长经历：${growth}` : '',
+    reason ? `为何申报本项目或本专业：${reason}` : '',
+    careerPlan ? `未来职业发展规划：${careerPlan}` : '',
+  ].filter(Boolean)
+  return sections.join('\n\n')
+}
+
+function validatePersonalStatementRules(personalStatement?: PortalPersonalStatementData | null, requireComplete = false) {
+  if (!requireComplete) {
+    return ''
+  }
+
+  const growth = trimText(personalStatement?.growth_experience_text)
+  const reason = trimText(personalStatement?.program_application_reason_text)
+  const careerPlan = trimText(personalStatement?.career_plan_text)
+  if (!growth || !reason || !careerPlan) {
+    return '个人陈述需按主题完整填写“个人成长经历、为何申报本项目或本专业、未来职业发展规划”'
+  }
+
+  const summaryText = buildPersonalStatementSummary(personalStatement)
+  const length = personalStatementLength(summaryText)
+  if (length < 800 || length > 1200) {
+    return '个人陈述总字数需控制在 800-1200 字'
+  }
+  if (!trimText(personalStatement?.resume_attachment_url)) {
+    return '请先上传个人简历附件'
+  }
+
+  return ''
 }
 
 function createDeclaration(): PortalApplicationDeclarationData {
   return {
     has_read_declaration: false,
-    declaration_text: '我已同意并仔细阅读使用条款和隐私政策。',
+    declaration_text: declarationReminderText,
     progress_snapshot: null,
   }
 }
@@ -210,10 +566,10 @@ function createEmptyForm(): PortalApplicationUpsert {
     profile: createProfile(),
     source_channel: '',
     source_channel_other: '',
-    preferences: [createPreference(1, false)],
-    education_experiences: [createEducation(1)],
-    practice_experiences: [],
-    english_proficiencies: [],
+    preferences: [createPreference(1, false), createPreference(2, true)],
+    education_experiences: createDefaultEducationExperiences(),
+    practice_experiences: [createPractice()],
+    english_proficiencies: [createEnglish()],
     family_members: [createFamilyMember('父亲'), createFamilyMember('母亲')],
     achievement_records: [],
     personal_statement: createPersonalStatement(),
@@ -254,6 +610,21 @@ function normalizePreferenceOrders() {
     item.preference_order = index + 1
     item.is_optional = index > 0
   })
+}
+
+function ensureTwoPreferences(items?: Array<Partial<PortalApplicationPreferenceItem>> | null) {
+  const normalized = (items || []).slice(0, 2).map((item, index) => ({
+    ...createPreference(index + 1, index > 0),
+    ...item,
+    preference_order: index + 1,
+    is_optional: index > 0,
+  }))
+
+  while (normalized.length < 2) {
+    normalized.push(createPreference(normalized.length + 1, normalized.length > 0))
+  }
+
+  return normalized
 }
 
 function trimText(value: string | null | undefined) {
@@ -339,6 +710,30 @@ async function handleEnglishAttachmentUpload(index: number, event: Event) {
   }
 }
 
+async function handleAchievementAwardAttachmentUpload(index: number, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+
+  const key = buildAttachmentUploadKey('achievement', index, 'award-certificate')
+  attachmentUploading[key] = true
+  try {
+    const attachment = await uploadAttachmentAndResolveUrl(file, 'achievement_award_certificate', '获奖证明已上传')
+    const current = form.achievement_records?.[index]
+    if (current) {
+      current.award_certificate_attachment_url = attachment.url
+      current.award_certificate_attachment_name = attachment.file_name
+    }
+  } catch (error) {
+    await showPortalAlert(resolveRequestError(error, '附件上传失败'), '附件上传失败', 'error')
+  } finally {
+    attachmentUploading[key] = false
+    input.value = ''
+  }
+}
+
 async function handleResumeAttachmentUpload(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -353,6 +748,29 @@ async function handleResumeAttachmentUpload(event: Event) {
     if (form.personal_statement) {
       form.personal_statement.resume_attachment_url = attachment.url
       form.personal_statement.resume_attachment_name = attachment.file_name
+    }
+  } catch (error) {
+    await showPortalAlert(resolveRequestError(error, '附件上传失败'), '附件上传失败', 'error')
+  } finally {
+    attachmentUploading[key] = false
+    input.value = ''
+  }
+}
+
+async function handleSupportingMaterialAttachmentUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+
+  const key = buildAttachmentUploadKey('statement', 0, 'supporting-material')
+  attachmentUploading[key] = true
+  try {
+    const attachment = await uploadAttachmentAndResolveUrl(file, 'supporting_material', '其他支撑材料已上传')
+    if (form.personal_statement) {
+      form.personal_statement.supporting_material_attachment_url = attachment.url
+      form.personal_statement.supporting_material_attachment_name = attachment.file_name
     }
   } catch (error) {
     await showPortalAlert(resolveRequestError(error, '附件上传失败'), '附件上传失败', 'error')
@@ -384,8 +802,29 @@ async function handleProfilePhotoUpload(event: Event) {
   }
 }
 
+async function handleIdCardCollageUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+
+  const key = buildAttachmentUploadKey('profile', 0, 'id-card-collage')
+  attachmentUploading[key] = true
+  try {
+    const attachment = await uploadAttachmentAndResolveUrl(file, 'id_card_collage', '身份证拼图已上传')
+    if (form.profile) {
+      form.profile.id_card_collage_url = attachment.url
+    }
+  } catch (error) {
+    await showPortalAlert(resolveRequestError(error, '身份证拼图上传失败'), '身份证拼图上传失败', 'error')
+  } finally {
+    attachmentUploading[key] = false
+    input.value = ''
+  }
+}
+
 const primaryPreference = computed(() => (form.preferences && form.preferences[0] ? form.preferences[0] : null))
-const canAddPreference = computed(() => (form.preferences?.length || 0) < 2)
 
 function applyProfile(profile: PortalStudentRecord) {
   const draft = profile.application_draft
@@ -402,6 +841,7 @@ function applyProfile(profile: PortalStudentRecord) {
       ...createProfile(),
       ...profile.profile,
       profile_photo_url: profile.profile?.profile_photo_url || '',
+      id_card_collage_url: profile.profile?.id_card_collage_url || '',
       gender: profile.profile?.gender || profile.gender || '',
       birth_date: profile.profile?.birth_date || profile.birth_date || '',
       ethnic_group: profile.profile?.ethnic_group || profile.ethnic_group || '',
@@ -414,42 +854,50 @@ function applyProfile(profile: PortalStudentRecord) {
     },
     source_channel: draft?.source_channel || '',
     source_channel_other: draft?.source_channel_other || '',
-    preferences: draft?.preferences?.length
-      ? draft.preferences.map((item, index) => ({
-          preference_order: index + 1,
-          research_center_name: item.research_center_name || '',
-          advisor_name: item.advisor_name || '',
-          is_optional: index > 0,
-        }))
-      : [
-          {
-            preference_order: 1,
-            research_center_name: profile.selected_team_name || '',
-            advisor_name: profile.selected_advisor_name || '',
-            is_optional: false,
-          },
-        ],
-    education_experiences: draft?.education_experiences?.length
-      ? draft.education_experiences.map((item, index) => ({ ...createEducation(index + 1), ...item, sort_order: index + 1 }))
-      : fallbackEducation.length
-        ? fallbackEducation.map((item, index) => ({ ...createEducation(index + 1), ...item, sort_order: index + 1 }))
-        : [createEducation(1)],
-    practice_experiences: draft?.practice_experiences?.length
-      ? draft.practice_experiences.map((item) => ({ ...createPractice(), ...item }))
-      : fallbackPractice.map((item) => ({ ...createPractice(), ...item })),
-    english_proficiencies: draft?.english_proficiencies?.length
-      ? draft.english_proficiencies.map((item) => ({ ...createEnglish(), ...item }))
-      : profile.english_level
-        ? [{ ...createEnglish(), exam_name: profile.english_level }]
-        : [],
+    preferences: ensureTwoPreferences(
+      draft?.preferences?.length
+        ? draft.preferences.map((item) => ({
+            research_center_name: item.research_center_name || '',
+            advisor_name: item.advisor_name || '',
+          }))
+        : [
+            {
+              research_center_name: profile.selected_team_name || '',
+              advisor_name: profile.selected_advisor_name || '',
+            },
+          ],
+    ),
+    education_experiences: ensureEducationExperienceShape(
+      draft?.education_experiences?.length
+        ? draft.education_experiences.map((item) => ({ ...item }))
+        : fallbackEducation.length
+          ? fallbackEducation.map((item) => ({ ...item }))
+          : createDefaultEducationExperiences(),
+    ),
+    practice_experiences: ensurePracticeExperienceShape(
+      draft?.practice_experiences?.length
+        ? draft.practice_experiences.map((item) => ({ ...item }))
+        : fallbackPractice.length
+          ? fallbackPractice.map((item) => ({ ...item }))
+          : null,
+    ),
+    english_proficiencies: ensureEnglishProficiencyShape(
+      draft?.english_proficiencies?.length
+        ? draft.english_proficiencies.map((item) => ({ ...item }))
+        : profile.english_level
+          ? [{ ...createEnglish(), exam_name: profile.english_level }]
+          : null,
+    ),
     family_members: draft?.family_members?.length
       ? draft.family_members.map((item) => ({ ...createFamilyMember(item.relation_type || '其他'), ...item }))
       : fallbackFamily.length
         ? fallbackFamily.map((item) => ({ ...createFamilyMember(item.relation_type || '其他'), ...item }))
         : [createFamilyMember('父亲'), createFamilyMember('母亲')],
-    achievement_records: draft?.achievement_records?.length
-      ? draft.achievement_records.map((item) => ({ ...createAchievement(), ...item }))
-      : fallbackAchievements.map((item) => ({ ...createAchievement(), ...item })),
+    achievement_records: ensureAchievementRecordShape(
+      draft?.achievement_records?.length
+        ? draft.achievement_records.map((item) => ({ ...item }))
+        : fallbackAchievements.map((item) => ({ ...item })),
+    ),
     personal_statement: {
       ...createPersonalStatement(),
       ...draft?.personal_statement,
@@ -459,6 +907,7 @@ function applyProfile(profile: PortalStudentRecord) {
       ...createDeclaration(),
       ...draft?.declaration,
       has_read_declaration: draft?.declaration?.has_read_declaration ?? Boolean(profile.signed_agreement),
+      declaration_text: trimText(draft?.declaration?.declaration_text) || createDeclaration().declaration_text,
     },
   })
 
@@ -470,28 +919,20 @@ function choosePlan(planId: number) {
   form.plan_id = planId
 }
 
-function addPreference() {
-  if (!canAddPreference.value) {
-    return
-  }
-  form.preferences = [...(form.preferences || []), createPreference((form.preferences?.length || 0) + 1, true)]
-  normalizePreferenceOrders()
-}
-
-function removePreference(index: number) {
-  if (!form.preferences || index === 0) {
-    return
-  }
-  form.preferences.splice(index, 1)
-  normalizePreferenceOrders()
-}
-
 function addEducation() {
-  form.education_experiences = [...(form.education_experiences || []), createEducation((form.education_experiences?.length || 0) + 1)]
+  if ((form.education_experiences?.length || 0) >= 4) {
+    ElMessage.warning('教育经历最多填写 4 条')
+    return
+  }
+  form.education_experiences = [
+    ...(form.education_experiences || []),
+    createEducation((form.education_experiences?.length || 0) + 1, recommendedNextEducationStage(form.education_experiences)),
+  ]
 }
 
 function removeEducation(index: number) {
-  if ((form.education_experiences?.length || 0) <= 1) {
+  if ((form.education_experiences?.length || 0) <= 2) {
+    ElMessage.warning('教育经历至少保留 2 条')
     return
   }
   form.education_experiences?.splice(index, 1)
@@ -500,11 +941,27 @@ function removeEducation(index: number) {
   })
 }
 
-function addPractice() {
+function handleEducationStageChange(item: PortalEducationExperienceItem) {
+  normalizeEducationWhenStageChanges(item)
+}
+
+async function addPractice() {
+  if ((form.practice_experiences?.length || 0) >= 2) {
+    await showPortalAlert(
+      '实践经历最多填写 2 条。\n若有更多经历，请通过上传个人简历附件的方式进行详细说明。',
+      '实践经历提醒',
+      'warning',
+    )
+    return
+  }
   form.practice_experiences = [...(form.practice_experiences || []), createPractice()]
 }
 
-function removePractice(index: number) {
+async function removePractice(index: number) {
+  if ((form.practice_experiences?.length || 0) <= 1) {
+    await showPortalAlert('实践经历至少保留 1 条', '实践经历提醒', 'warning')
+    return
+  }
   form.practice_experiences?.splice(index, 1)
 }
 
@@ -512,7 +969,11 @@ function addEnglish() {
   form.english_proficiencies = [...(form.english_proficiencies || []), createEnglish()]
 }
 
-function removeEnglish(index: number) {
+async function removeEnglish(index: number) {
+  if ((form.english_proficiencies?.length || 0) <= 1) {
+    await showPortalAlert('英语能力至少保留 1 条', '英语能力提醒', 'warning')
+    return
+  }
   form.english_proficiencies?.splice(index, 1)
 }
 
@@ -527,8 +988,44 @@ function removeFamilyMember(index: number) {
   form.family_members?.splice(index, 1)
 }
 
-function addAchievement() {
+async function addAchievement() {
+  if ((form.achievement_records?.length || 0) >= 4) {
+    await showPortalAlert(
+      '成果经历最多填写 4 条。\n若有更多成果，请通过上传个人简历附件的方式进行详细说明。',
+      '成果经历提醒',
+      'warning',
+    )
+    return
+  }
   form.achievement_records = [...(form.achievement_records || []), createAchievement()]
+}
+
+function handleAchievementTypeChange(index: number) {
+  const current = form.achievement_records?.[index]
+  if (!current) {
+    return
+  }
+
+  const achievementType = trimText(current.achievement_type)
+  current.achievement_month = trimText(current.achievement_month) || trimText(current.publish_or_index_month)
+  current.description_text = trimText(current.description_text) || trimText(current.responsibility_text)
+
+  if (achievementType === '论文发表') {
+    current.award_name = ''
+    current.award_rank = ''
+    current.award_certificate_attachment_url = ''
+    current.award_certificate_attachment_name = ''
+    current.awarding_organization = ''
+    current.award_level = ''
+    current.award_year = ''
+    return
+  }
+
+  if (achievementType === '获奖经历') {
+    current.paper_title = ''
+    current.author_order = ''
+    current.journal_or_conference = ''
+  }
 }
 
 function removeAchievement(index: number) {
@@ -539,10 +1036,10 @@ function buildProgressSnapshot() {
   return {
     preference_count: (form.preferences || []).filter((item) => trimText(item.research_center_name)).length,
     education_count: (form.education_experiences || []).filter((item) => trimText(item.school_name)).length,
-    practice_count: (form.practice_experiences || []).filter((item) => trimText(item.organization_name)).length,
-    english_count: (form.english_proficiencies || []).filter((item) => trimText(item.exam_name)).length,
-    family_count: (form.family_members || []).filter((item) => trimText(item.member_name)).length,
-    achievement_count: (form.achievement_records || []).filter((item) => trimText(item.achievement_type)).length,
+    practice_count: (form.practice_experiences || []).filter((item) => practiceItemHasContent(item)).length,
+    english_count: (form.english_proficiencies || []).filter((item) => englishItemHasContent(item)).length,
+    family_count: (form.family_members || []).filter((item) => familyMemberHasContent(item)).length,
+    achievement_count: (form.achievement_records || []).filter((item) => achievementItemHasContent(normalizeAchievementItem(item))).length,
   }
 }
 
@@ -556,7 +1053,8 @@ function buildSectionStatuses(): PortalSectionStatus[] {
     || trimText(profileData.mailing_address)
     || trimText(profileData.emergency_contact_name)
     || trimText(profileData.emergency_contact_phone)
-    || trimText(profileData.profile_photo_url),
+    || trimText(profileData.profile_photo_url)
+    || trimText(profileData.id_card_collage_url),
   )
   const basicCompleted = Boolean(
     trimText(profileData.full_name_pinyin)
@@ -566,7 +1064,8 @@ function buildSectionStatuses(): PortalSectionStatus[] {
     && trimText(profileData.mailing_address)
     && trimText(profileData.emergency_contact_name)
     && trimText(profileData.emergency_contact_phone)
-    && trimText(profileData.profile_photo_url),
+    && trimText(profileData.profile_photo_url)
+    && trimText(profileData.id_card_collage_url),
   )
 
   const firstPreference = primaryPreference.value
@@ -579,32 +1078,36 @@ function buildSectionStatuses(): PortalSectionStatus[] {
   const applicationCompleted = Boolean(trimText(firstPreference?.research_center_name))
 
   const educationItems = form.education_experiences || []
-  const educationCompleted = educationItems.some((item) => trimText(item.education_stage) && trimText(item.school_name))
+  const completedEducationItems = getCompletedEducationExperiences(educationItems)
+  const educationCompleted = completedEducationItems.length >= 2 && !validateEducationRules(educationItems)
 
   const practiceItems = form.practice_experiences || []
-  const practiceCompleted = practiceItems.some((item) => trimText(item.organization_name))
+  const practiceStarted = practiceItems.some((item) => practiceItemHasContent(item))
+  const practiceCompleted = practiceStarted && !validatePracticeRules(practiceItems)
 
   const englishItems = form.english_proficiencies || []
-  const englishCompleted = englishItems.some((item) => trimText(item.exam_name))
+  const englishStarted = englishItems.some((item) => englishItemHasContent(item))
+  const englishCompleted = !validateEnglishRules(englishItems)
 
   const familyItems = form.family_members || []
-  const familyStarted = familyItems.some((item) => trimText(item.member_name) || trimText(item.relation_type))
-  const father = familyItems.find((item) => item.relation_type === '父亲' && trimText(item.member_name))
-  const mother = familyItems.find((item) => item.relation_type === '母亲' && trimText(item.member_name))
-  const familyCompleted = Boolean(father && mother)
+  const familyStarted = familyItems.some((item) => familyMemberHasContent(item))
+  const familyCompleted = !validateFamilyRules(familyItems)
 
   const achievementItems = form.achievement_records || []
-  const achievementCompleted = achievementItems.some((item) => trimText(item.achievement_type))
+  const achievementStarted = achievementItems.some((item) => achievementItemHasContent(normalizeAchievementItem(item)))
+  const achievementCompleted = achievementStarted && !validateAchievementRules(achievementItems)
 
   const statementText = trimText(form.personal_statement?.personal_statement_text)
   const statementStarted = Boolean(
     statementText
-    || trimText(form.personal_statement?.ai_problem_statement)
-    || trimText(form.personal_statement?.ai_industry_opinion)
+    || trimText(form.personal_statement?.growth_experience_text)
+    || trimText(form.personal_statement?.program_application_reason_text)
+    || trimText(form.personal_statement?.career_plan_text)
     || trimText(form.personal_statement?.resume_attachment_url)
+    || trimText(form.personal_statement?.supporting_material_attachment_url)
     || form.declaration?.has_read_declaration,
   )
-  const statementCompleted = Boolean(statementText)
+  const statementCompleted = statementStarted && !validatePersonalStatementRules(form.personal_statement, true)
 
   const createStatus = (id: string, label: string, started: boolean, completed: boolean): PortalSectionStatus => ({
     id,
@@ -617,10 +1120,10 @@ function buildSectionStatuses(): PortalSectionStatus[] {
     createStatus('basic-section', '基本信息', basicStarted, basicCompleted),
     createStatus('application-section', '报名信息', applicationStarted, applicationCompleted),
     createStatus('education-section', '教育经历', educationCompleted, educationCompleted),
-    createStatus('practice-section', '实践经历', practiceCompleted, practiceCompleted),
-    createStatus('english-section', '英语语言能力', englishCompleted, englishCompleted),
+    createStatus('practice-section', '实践经历', practiceStarted, practiceCompleted),
+    createStatus('english-section', '英语能力', englishStarted, englishCompleted),
     createStatus('family-section', '家庭情况', familyStarted, familyCompleted),
-    createStatus('achievement-section', '论文发表及获奖经历', achievementCompleted, achievementCompleted),
+    createStatus('achievement-section', '成果经历', achievementStarted, achievementCompleted),
     createStatus('statement-section', '个人陈述', statementStarted, statementCompleted),
   ]
 }
@@ -651,7 +1154,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       start_month: trimText(item.start_month) || null,
       end_month: trimText(item.end_month) || null,
       transcript_attachment_url: trimText(item.transcript_attachment_url) || null,
-      degree_certificate_attachment_url: trimText(item.degree_certificate_attachment_url) || null,
+      degree_certificate_attachment_url: isHighSchoolStage(item.education_stage) ? null : trimText(item.degree_certificate_attachment_url) || null,
     }))
     .filter((item) => item.education_stage && item.school_name)
 
@@ -666,7 +1169,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       start_month: trimText(item.start_month) || null,
       end_month: trimText(item.end_month) || null,
     }))
-    .filter((item) => item.organization_name)
+    .filter((item) => practiceItemHasContent(item))
 
   const englishProficiencies = (form.english_proficiencies || [])
     .map((item) => ({
@@ -675,7 +1178,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       score_text: trimText(item.score_text) || null,
       certificate_attachment_url: trimText(item.certificate_attachment_url) || null,
     }))
-    .filter((item) => item.exam_name)
+    .filter((item) => englishItemHasContent(item))
 
   const familyMembers = (form.family_members || [])
     .map((item) => ({
@@ -689,19 +1192,30 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     .filter((item) => item.member_name && item.relation_type)
 
   const achievementRecords = (form.achievement_records || [])
-    .map((item) => ({
-      ...item,
-      achievement_type: trimText(item.achievement_type),
-      paper_title: trimText(item.paper_title) || null,
-      author_order: trimText(item.author_order) || null,
-      journal_or_conference: trimText(item.journal_or_conference) || null,
-      publish_or_index_month: trimText(item.publish_or_index_month) || null,
-      award_name: trimText(item.award_name) || null,
-      awarding_organization: trimText(item.awarding_organization) || null,
-      award_level: trimText(item.award_level) || null,
-      award_year: trimText(item.award_year) || null,
-      responsibility_text: trimText(item.responsibility_text) || null,
-    }))
+    .map((item) => normalizeAchievementItem(item))
+    .map((item) => {
+      const achievementType = trimText(item.achievement_type)
+      const achievementMonth = trimText(item.achievement_month) || null
+      const descriptionText = trimText(item.description_text) || null
+      return {
+        ...item,
+        achievement_type: achievementType,
+        achievement_month: achievementMonth,
+        paper_title: achievementType === '论文发表' ? trimText(item.paper_title) || null : null,
+        author_order: achievementType === '论文发表' ? trimText(item.author_order) || null : null,
+        journal_or_conference: achievementType === '论文发表' ? trimText(item.journal_or_conference) || null : null,
+        publish_or_index_month: achievementType === '论文发表' ? achievementMonth : null,
+        award_name: achievementType === '获奖经历' ? trimText(item.award_name) || null : null,
+        award_rank: achievementType === '获奖经历' ? trimText(item.award_rank) || null : null,
+        award_certificate_attachment_url: achievementType === '获奖经历' ? trimText(item.award_certificate_attachment_url) || null : null,
+        award_certificate_attachment_name: achievementType === '获奖经历' ? trimText(item.award_certificate_attachment_name) || null : null,
+        awarding_organization: null,
+        award_level: achievementType === '获奖经历' ? trimText(item.award_rank) || null : null,
+        award_year: achievementType === '获奖经历' && achievementMonth ? achievementMonth.slice(0, 4) : null,
+        description_text: descriptionText,
+        responsibility_text: descriptionText,
+      }
+    })
     .filter((item) => item.achievement_type)
 
   const primaryPreferenceItem = orderedPreferences[0]
@@ -719,6 +1233,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       ...profileData,
       full_name_pinyin: trimText(profileData.full_name_pinyin) || null,
       profile_photo_url: trimText(profileData.profile_photo_url) || null,
+      id_card_collage_url: trimText(profileData.id_card_collage_url) || null,
       gender: trimText(profileData.gender) || null,
       birth_date: trimText(profileData.birth_date) || null,
       ethnic_group: trimText(profileData.ethnic_group) || null,
@@ -741,10 +1256,14 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     achievement_records: achievementRecords,
     personal_statement: {
       ...(form.personal_statement || createPersonalStatement()),
-      personal_statement_text: trimText(form.personal_statement?.personal_statement_text) || null,
-      ai_problem_statement: trimText(form.personal_statement?.ai_problem_statement) || null,
-      ai_industry_opinion: trimText(form.personal_statement?.ai_industry_opinion) || null,
+      personal_statement_text: buildPersonalStatementSummary(form.personal_statement) || null,
+      growth_experience_text: trimText(form.personal_statement?.growth_experience_text) || null,
+      program_application_reason_text: trimText(form.personal_statement?.program_application_reason_text) || null,
+      career_plan_text: trimText(form.personal_statement?.career_plan_text) || null,
       resume_attachment_url: trimText(form.personal_statement?.resume_attachment_url) || null,
+      resume_attachment_name: trimText(form.personal_statement?.resume_attachment_name) || null,
+      supporting_material_attachment_url: trimText(form.personal_statement?.supporting_material_attachment_url) || null,
+      supporting_material_attachment_name: trimText(form.personal_statement?.supporting_material_attachment_name) || null,
     },
     declaration,
     gender: trimText(profileData.gender) || null,
@@ -760,11 +1279,12 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     intended_field: primaryPreferenceItem?.research_center_name || '',
     political_status: trimText(profileData.political_status) || null,
     english_level: englishProficiencies[0]?.exam_name || null,
-    personal_statement_text: trimText(form.personal_statement?.personal_statement_text) || null,
+    material_list_attachment: trimText(form.personal_statement?.supporting_material_attachment_url) || null,
+    personal_statement_text: buildPersonalStatementSummary(form.personal_statement) || null,
     signed_agreement: declaration.has_read_declaration,
     selected_team_name: primaryPreferenceItem?.research_center_name || '',
     selected_advisor_name: primaryPreferenceItem?.advisor_name || null,
-    self_evaluation: trimText(form.personal_statement?.ai_industry_opinion) || null,
+    self_evaluation: trimText(form.personal_statement?.career_plan_text) || null,
   }
 }
 
@@ -777,21 +1297,48 @@ async function submitForm() {
     await showPortalAlert('请先上传个人照片后再提交申请表', '提交受阻', 'warning')
     return
   }
+  if (!trimText(form.profile?.id_card_collage_url)) {
+    await showPortalAlert('请先上传身份证拼图后再提交申请表', '提交受阻', 'warning')
+    return
+  }
   const primary = primaryPreference.value
   if (!trimText(primary?.research_center_name)) {
     await showPortalAlert('请至少选择第一志愿研究中心', '提交受阻', 'warning')
     return
   }
-  const firstEducation = (form.education_experiences || []).find((item) => trimText(item.education_stage) && trimText(item.school_name))
-  if (!firstEducation) {
-    await showPortalAlert('请至少填写一条教育经历', '提交受阻', 'warning')
+  const completedEducationItems = getCompletedEducationExperiences(form.education_experiences)
+  if (completedEducationItems.length < 2) {
+    await showPortalAlert('请至少完整填写两条教育经历', '提交受阻', 'warning')
     return
   }
-  const familyMembers = form.family_members || []
-  const father = familyMembers.find((item) => item.relation_type === '父亲' && trimText(item.member_name))
-  const mother = familyMembers.find((item) => item.relation_type === '母亲' && trimText(item.member_name))
-  if (!father || !mother) {
-    await showPortalAlert('请完整填写父亲和母亲信息', '提交受阻', 'warning')
+  const educationRuleMessage = validateEducationRules(form.education_experiences)
+  if (educationRuleMessage) {
+    await showPortalAlert(educationRuleMessage, '提交受阻', 'warning')
+    return
+  }
+  const practiceRuleMessage = validatePracticeRules(form.practice_experiences)
+  if (practiceRuleMessage) {
+    await showPortalAlert(practiceRuleMessage, '提交受阻', 'warning')
+    return
+  }
+  const englishRuleMessage = validateEnglishRules(form.english_proficiencies)
+  if (englishRuleMessage) {
+    await showPortalAlert(englishRuleMessage, '提交受阻', 'warning')
+    return
+  }
+  const familyRuleMessage = validateFamilyRules(form.family_members)
+  if (familyRuleMessage) {
+    await showPortalAlert(familyRuleMessage, '提交受阻', 'warning')
+    return
+  }
+  const personalStatementRuleMessage = validatePersonalStatementRules(form.personal_statement, true)
+  if (personalStatementRuleMessage) {
+    await showPortalAlert(personalStatementRuleMessage, '提交受阻', 'warning')
+    return
+  }
+  const achievementRuleMessage = validateAchievementRules(form.achievement_records)
+  if (achievementRuleMessage) {
+    await showPortalAlert(achievementRuleMessage, '提交受阻', 'warning')
     return
   }
   if (trimText(form.source_channel) === '其他' && !trimText(form.source_channel_other)) {
@@ -826,13 +1373,27 @@ async function submitForm() {
 }
 
 async function saveDraft(showSuccess = true) {
+  const educationRuleMessage = validateEducationRules(form.education_experiences)
+  if (educationRuleMessage) {
+    await showPortalAlert(educationRuleMessage, '草稿保存受阻', 'warning')
+    return false
+  }
+  const practiceRuleMessage = validatePracticeRules(form.practice_experiences)
+  if (practiceRuleMessage) {
+    await showPortalAlert(practiceRuleMessage, '草稿保存受阻', 'warning')
+    return false
+  }
+  const achievementRuleMessage = validateAchievementRules(form.achievement_records)
+  if (achievementRuleMessage) {
+    await showPortalAlert(achievementRuleMessage, '草稿保存受阻', 'warning')
+    return false
+  }
   savingDraft.value = true
   try {
     const response = await savePortalApplicationDraft(buildSubmitPayload())
     student.value = response.data.student
-    applyProfile(response.data.student)
     if (showSuccess) {
-      ElMessage.success(response.data.message || '草稿已保存')
+      await showPortalAlert(response.data.message || '报名草稿已保存，可稍后继续填写。', '保存成功', 'success')
     }
     return true
   } catch (error) {
@@ -919,9 +1480,11 @@ defineExpose({
         :political-status-options="politicalStatusOptions"
         :id-type-options="idTypeOptions"
         :profile-photo-attachment-accept="profilePhotoAttachmentAccept"
+        :id-card-collage-attachment-accept="idCardCollageAttachmentAccept"
         :is-attachment-uploading="isAttachmentUploading"
         :build-attachment-upload-key="buildAttachmentUploadKey"
         :handle-profile-photo-upload="handleProfilePhotoUpload"
+        :handle-id-card-collage-upload="handleIdCardCollageUpload"
       />
 
       <PortalApplicationSection
@@ -929,9 +1492,6 @@ defineExpose({
         :form="form"
         :teams="teams"
         :source-channel-options="sourceChannelOptions"
-        :can-add-preference="canAddPreference"
-        :add-preference="addPreference"
-        :remove-preference="removePreference"
         :advisors-for-center="advisorsForCenter"
         :handle-preference-center-change="handlePreferenceCenterChange"
       />
@@ -944,6 +1504,7 @@ defineExpose({
         :is-attachment-uploading="isAttachmentUploading"
         :build-attachment-upload-key="buildAttachmentUploadKey"
         :handle-education-attachment-upload="handleEducationAttachmentUpload"
+        :handle-education-stage-change="handleEducationStageChange"
         :add-education="addEducation"
         :remove-education="removeEducation"
       />
@@ -979,17 +1540,25 @@ defineExpose({
         v-else-if="activeSectionId === 'achievement-section'"
         :form="form"
         :achievement-type-options="achievementTypeOptions"
+        :achievement-award-attachment-accept="achievementAwardAttachmentAccept"
+        :is-attachment-uploading="isAttachmentUploading"
+        :build-attachment-upload-key="buildAttachmentUploadKey"
         :add-achievement="addAchievement"
+        :handle-achievement-type-change="handleAchievementTypeChange"
+        :handle-achievement-award-attachment-upload="handleAchievementAwardAttachmentUpload"
         :remove-achievement="removeAchievement"
       />
 
       <PortalStatementSection
         v-else-if="activeSectionId === 'statement-section'"
         :form="form"
+        :declaration-reminder-text="declarationReminderText"
         :resume-attachment-accept="resumeAttachmentAccept"
+        :supporting-material-attachment-accept="supportingMaterialAttachmentAccept"
         :is-attachment-uploading="isAttachmentUploading"
         :build-attachment-upload-key="buildAttachmentUploadKey"
         :handle-resume-attachment-upload="handleResumeAttachmentUpload"
+        :handle-supporting-material-attachment-upload="handleSupportingMaterialAttachmentUpload"
         :submit-form="submitForm"
         :submitting="submitting"
       />

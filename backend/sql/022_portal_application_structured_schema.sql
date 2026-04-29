@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_student_profiles (
     portal_student_id BIGINT PRIMARY KEY REFERENCES dtlms_portal_students(id) ON DELETE CASCADE,
     full_name_pinyin VARCHAR(128),
     profile_photo_url VARCHAR(255),
+    id_card_collage_url VARCHAR(255),
     gender VARCHAR(16),
     birth_date VARCHAR(32),
     ethnic_group VARCHAR(64),
@@ -100,10 +101,14 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_achievement_records (
     author_order VARCHAR(32),
     journal_or_conference VARCHAR(255),
     publish_or_index_month VARCHAR(16),
+    achievement_month VARCHAR(16),
     award_name VARCHAR(255),
+    award_rank VARCHAR(64),
+    award_certificate_attachment_url VARCHAR(512),
     awarding_organization VARCHAR(255),
     award_level VARCHAR(128),
     award_year VARCHAR(16),
+    description_text TEXT,
     responsibility_text TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -112,9 +117,13 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_achievement_records (
 CREATE TABLE IF NOT EXISTS dtlms_portal_application_personal_statements (
     application_id BIGINT PRIMARY KEY REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
     personal_statement_text TEXT,
+    growth_experience_text TEXT,
+    program_application_reason_text TEXT,
+    career_plan_text TEXT,
     ai_problem_statement TEXT,
     ai_industry_opinion TEXT,
     resume_attachment_url TEXT,
+    supporting_material_attachment_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -279,18 +288,26 @@ ON CONFLICT (application_id, preference_order) DO UPDATE SET
 INSERT INTO dtlms_portal_application_personal_statements (
     application_id,
     personal_statement_text,
+    growth_experience_text,
+    program_application_reason_text,
+    career_plan_text,
     ai_problem_statement,
     ai_industry_opinion,
     resume_attachment_url,
+    supporting_material_attachment_url,
     created_at,
     updated_at
 )
 SELECT
     ra.id,
     ra.personal_statement_text,
+    ra.personal_statement_text,
+    ra.research_problem,
+    ra.dissenting_view,
     ra.research_problem,
     ra.dissenting_view,
     ra.personal_statement_attachment,
+    ra.material_list_attachment,
     ra.created_at,
     ra.updated_at
 FROM dtlms_recruitment_applications AS ra
@@ -298,13 +315,18 @@ WHERE COALESCE(
         NULLIF(ra.personal_statement_text, ''),
         NULLIF(ra.research_problem, ''),
         NULLIF(ra.dissenting_view, ''),
-        NULLIF(ra.personal_statement_attachment, '')
+        NULLIF(ra.personal_statement_attachment, ''),
+        NULLIF(ra.material_list_attachment, '')
     ) IS NOT NULL
 ON CONFLICT (application_id) DO UPDATE SET
     personal_statement_text = EXCLUDED.personal_statement_text,
+    growth_experience_text = EXCLUDED.growth_experience_text,
+    program_application_reason_text = EXCLUDED.program_application_reason_text,
+    career_plan_text = EXCLUDED.career_plan_text,
     ai_problem_statement = EXCLUDED.ai_problem_statement,
     ai_industry_opinion = EXCLUDED.ai_industry_opinion,
     resume_attachment_url = EXCLUDED.resume_attachment_url,
+    supporting_material_attachment_url = EXCLUDED.supporting_material_attachment_url,
     updated_at = EXCLUDED.updated_at;
 
 INSERT INTO dtlms_portal_application_declarations (

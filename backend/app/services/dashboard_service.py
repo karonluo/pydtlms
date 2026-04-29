@@ -256,6 +256,10 @@ def send_portal_registration_email_code(email: str) -> PortalRegistrationEmailCo
     return store.send_portal_registration_email_code(email)
 
 
+def send_portal_login_email_code(email: str) -> PortalRegistrationEmailCodeResponse:
+    return store.send_portal_login_email_code(email)
+
+
 def validate_portal_registration_email_code(email: str, verification_code: str) -> None:
     store.validate_portal_registration_email_code(email, verification_code)
 
@@ -270,6 +274,10 @@ def register_portal_student(payload: PortalRegistrationRequest) -> PortalRegistr
 
 def login_portal_student(payload: PortalLoginRequest) -> PortalStudentRecord:
     return store.login_portal_student(payload)
+
+
+def login_portal_student_by_email_code(email: str, verification_code: str) -> PortalStudentRecord:
+    return store.login_portal_student_by_email_code(email, verification_code)
 
 
 def reset_portal_student_password(payload: PortalPasswordResetRequest) -> None:

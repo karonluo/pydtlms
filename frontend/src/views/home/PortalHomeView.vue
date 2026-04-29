@@ -166,7 +166,7 @@ const progressCards = computed<ProgressCard[]>(() => {
     createCard('practice', '实践经历', practiceStarted, practiceCompleted),
     createCard('english', '英语语言能力', englishStarted, englishCompleted),
     createCard('family', '家庭情况', familyStarted, familyCompleted),
-    createCard('achievement', '获奖经历', achievementStarted, achievementCompleted),
+    createCard('achievement', '成果经历', achievementStarted, achievementCompleted),
     createCard('statement', '个人陈述', statementStarted, statementCompleted),
     createCard('submit', '提交申请', Boolean(student?.submitted_at), Boolean(student?.submitted_at), '待提交'),
   ]
@@ -931,7 +931,7 @@ onMounted(() => {
 .portal-home-footer {
   margin-top: 52px;
   height: 412px;
-  background: url('/images/bottom_backgound.png') center/cover no-repeat;
+  background: url('/images/bottom_backgound.png?v=20260429') center/cover no-repeat;
 }
 
 .portal-home-footer__info img {

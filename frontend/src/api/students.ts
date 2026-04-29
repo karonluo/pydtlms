@@ -39,6 +39,8 @@ export type RegisteredPortalStudentRecord = {
   selected_plan_name?: string | null
   selected_center_name?: string | null
   selected_advisor_name?: string | null
+  recruitment_application_id?: number | null
+  recruitment_application_business_key?: string | null
   recruitment_application_status?: string | null
   registered_at?: string | null
   submitted_at?: string | null

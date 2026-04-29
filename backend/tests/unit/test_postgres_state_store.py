@@ -69,12 +69,28 @@ def test_ensure_schema_skips_sql_execution_when_schema_exists(monkeypatch, tmp_p
     monkeypatch.setattr(store, "ensure_database", lambda: None)
     monkeypatch.setattr(store, "_connect", lambda database_name, autocommit=False: connection)
     monkeypatch.setattr(store, "_schema_initialized", lambda cur: True)
-    monkeypatch.setattr(store, "MIGRATION_SQL_FILES", ())
+    monkeypatch.setattr(store, "_apply_pending_migrations", lambda cur: None)
 
     store.ensure_schema()
 
     assert store._schema_ready is True
     assert cursor.executed == []
+
+
+def test_apply_pending_migrations_bootstraps_legacy_registry_without_replaying_sql(monkeypatch, tmp_path: Path) -> None:
+    store = PostgresStateStore()
+    store._sql_dir = tmp_path
+    cursor = FakeCursor(fetchall_results=[[]])
+    recorded: list[str] = []
+
+    monkeypatch.setattr(store, "_ensure_migration_registry", lambda cur: None)
+    monkeypatch.setattr(store, "_mark_migration_applied", lambda cur, file_name: recorded.append(file_name))
+    monkeypatch.setattr(store, "MIGRATION_SQL_FILES", ("051_governance_training_degree_columnar.sql",))
+
+    store._apply_pending_migrations(cursor)
+
+    assert recorded == ["051_governance_training_degree_columnar.sql"]
+    assert cursor.executed == [(f"SELECT file_name FROM {store.MIGRATION_REGISTRY_TABLE}", None)]
 
 
 def test_ensure_schema_executes_sql_files_when_schema_missing(monkeypatch, tmp_path: Path) -> None:
@@ -152,6 +168,55 @@ def test_seed_portal_application_structures_uses_application_id_for_personal_sta
     assert attachment_rows == [
         (7, 15, "personal_statement", 15, "resume", "resume-a.pdf", "/portal-attachments/uploads/student-7/resume/resume-a.pdf", "pdf")
     ]
+
+
+def test_derive_portal_profile_includes_id_card_collage_url() -> None:
+    store = PostgresStateStore()
+
+    profile = store._derive_portal_profile(
+        {
+            "profile": {
+                "full_name_pinyin": "ZHANG SAN",
+                "id_card_collage_url": "/portal-attachments/uploads/student-7/id_card_collage/id-card.jpg",
+            }
+        }
+    )
+
+    assert profile is not None
+    assert profile["id_card_collage_url"].endswith("id-card.jpg")
+
+
+def test_seed_portal_students_persists_application_draft_payload() -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor()
+
+    store._seed_portal_students(
+        cursor,
+        {
+            "portal_students": [
+                {
+                    "id": 7,
+                    "full_name": "张三",
+                    "phone_number": "13800001111",
+                    "email": "zhangsan@example.com",
+                    "id_number": "32000019990101123X",
+                    "account_status": "启用",
+                    "application_draft": {
+                        "selected_plan_id": 3,
+                        "education_experiences": [
+                            {"sort_order": 1, "education_stage": "高中毕业", "school_name": "无锡市第一中学"}
+                        ],
+                    },
+                }
+            ]
+        },
+        {},
+    )
+
+    insert_sql, params = next((sql, params) for sql, params in cursor.executed if "INSERT INTO dtlms_portal_students" in sql)
+
+    assert "application_draft" in insert_sql
+    assert any(isinstance(item, str) and '"selected_plan_id": 3' in item for item in params)
 
 
 def test_seed_recruitment_normalizes_academic_year_range_for_plan_dates() -> None:

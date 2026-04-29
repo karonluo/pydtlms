@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     selected_team_name VARCHAR(128),
     selected_advisor_name VARCHAR(128),
     self_evaluation TEXT,
+    application_draft JSONB,
     submitted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

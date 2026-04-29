@@ -5,9 +5,6 @@ defineProps<{
   form: PortalApplicationUpsert
   teams: PortalTeamRecord[]
   sourceChannelOptions: string[]
-  canAddPreference: boolean
-  addPreference: () => void
-  removePreference: (index: number) => void
   advisorsForCenter: (centerName: string) => string[]
   handlePreferenceCenterChange: (item: PortalApplicationPreferenceItem) => void
 }>()
@@ -15,38 +12,20 @@ defineProps<{
 
 <template>
   <section class="section-page">
-    <div class="section-card">
-      <div class="section-grid">
-        <label>
-          <span>了解项目方式</span>
-          <select v-model="form.source_channel">
-            <option value="">请选择</option>
-            <option v-for="item in sourceChannelOptions" :key="item" :value="item">{{ item }}</option>
-          </select>
-        </label>
-        <label v-if="form.source_channel === '其他'" class="section-grid__wide">
-          <span><span class="required-mark">*</span>其他说明</span>
-          <input v-model="form.source_channel_other" placeholder="请补充获知渠道" />
-        </label>
-      </div>
-    </div>
-
     <div class="toolbar-card">
       <div>
-        <strong>研究中心志愿</strong>
-        <span>默认保留第一志愿，可追加第二志愿。</span>
+        <strong>研究领域选择</strong>
+        <span>第一志愿必填，第二志愿选填。</span>
       </div>
-      <button type="button" class="action-button" :disabled="!canAddPreference" @click="addPreference">添加第二志愿</button>
     </div>
 
     <div class="record-list">
       <section v-for="(item, index) in form.preferences" :key="`preference-${index}`" class="record-card">
         <div class="record-card__header">
           <div>
-            <strong>第 {{ item.preference_order }} 志愿</strong>
+            <strong>{{ index === 0 ? '第一志愿' : '第二志愿' }}</strong>
             <span>{{ index === 0 ? '必填' : '选填' }}</span>
           </div>
-          <button v-if="index > 0" type="button" class="link-button" @click="removePreference(index)">删除</button>
         </div>
 
         <div class="section-grid">
@@ -66,6 +45,26 @@ defineProps<{
           </label>
         </div>
       </section>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card__header">
+        <strong>了解项目方式</strong>
+        <!-- <span>该项位于研究中心志愿下方。</span> -->
+      </div>
+      <div class="section-grid">
+        <label>
+          <span>获知渠道</span>
+          <select v-model="form.source_channel">
+            <option value="">请选择</option>
+            <option v-for="item in sourceChannelOptions" :key="item" :value="item">{{ item }}</option>
+          </select>
+        </label>
+        <label v-if="form.source_channel === '其他'" class="section-grid__wide">
+          <span><span class="required-mark">*</span>其他说明</span>
+          <input v-model="form.source_channel_other" placeholder="请补充获知渠道" />
+        </label>
+      </div>
     </div>
   </section>
 </template>
@@ -87,13 +86,15 @@ defineProps<{
 }
 
 .record-card__header span,
-.toolbar-card span {
+.toolbar-card span,
+.section-card__header span {
   color: #627896;
   font-size: 12px;
 }
 
 .toolbar-card strong,
-.record-card__header strong {
+.record-card__header strong,
+.section-card__header strong {
   margin: 0;
   color: #173459;
 }
@@ -139,20 +140,10 @@ defineProps<{
   align-items: center;
 }
 
-.action-button {
-  min-height: 42px;
-  padding: 0 18px;
-  border: 1px solid #d4e0ef;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #edf4ff, #dceafe);
-  color: #1c4e92;
-}
-
-.link-button {
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: #c14d58;
+.section-card__header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
 }
 
 @media (max-width: 1180px) {

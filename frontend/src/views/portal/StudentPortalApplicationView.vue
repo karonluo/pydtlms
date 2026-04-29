@@ -1407,7 +1407,7 @@ defineExpose({
                     <label><span>就读专业</span><input v-model="item.major_name" placeholder="请输入就读专业" /></label>
                     <label><span>期间平均成绩</span><input v-model="item.average_score" placeholder="如 88.5" /></label>
                     <label><span>期间绩点</span><input v-model="item.gpa" placeholder="如 3.7/4.0" /></label>
-                    <label><span>平均成绩排名</span><input v-model="item.ranking" placeholder="如 5/120" /></label>
+                    <label><span>成绩排名</span><input v-model="item.ranking" placeholder="如 5/120" /></label>
                     <label><span>证明人姓名</span><input v-model="item.verifier_name" placeholder="请输入证明人姓名" /></label>
                     <label><span>证明人手机</span><input v-model="item.verifier_phone" placeholder="请输入证明人手机" /></label>
                   </div>

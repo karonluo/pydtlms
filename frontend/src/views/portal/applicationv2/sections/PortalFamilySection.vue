@@ -14,7 +14,7 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>家庭成员</strong>
-        <span>父亲与母亲信息请完整填写，其他成员可补充。</span>
+        <span>父母信息至少填写一方，其他成员可按需补充。</span>
       </div>
       <button type="button" class="action-button" @click="addFamilyMember">新增家庭成员</button>
     </div>
@@ -23,12 +23,12 @@ defineProps<{
       <section v-for="(item, index) in form.family_members" :key="`family-${index}`" class="record-card">
         <div class="record-card__header">
           <div><strong>家庭成员 {{ index + 1 }}</strong><span>{{ item.relation_type || '请选择关系' }}</span></div>
-          <button v-if="form.family_members!.length > 2" type="button" class="link-button" @click="removeFamilyMember(index)">删除</button>
+          <button v-if="(form.family_members?.length || 0) > 2" type="button" class="link-button" @click="removeFamilyMember(index)">删除</button>
         </div>
 
         <div class="section-grid">
-          <label><span><span v-if="index < 2" class="required-mark">*</span>与本人关系</span><select v-model="item.relation_type"><option value="">请选择</option><option v-for="relation in familyRelationOptions" :key="relation" :value="relation">{{ relation }}</option></select></label>
-          <label><span><span v-if="index < 2" class="required-mark">*</span>姓名</span><input v-model="item.member_name" placeholder="请输入姓名" /></label>
+          <label><span>与本人关系</span><select v-model="item.relation_type"><option value="">请选择</option><option v-for="relation in familyRelationOptions" :key="relation" :value="relation">{{ relation }}</option></select></label>
+          <label><span>姓名</span><input v-model="item.member_name" placeholder="请输入姓名" /></label>
           <label><span>联系电话</span><input v-model="item.contact_phone" placeholder="请输入联系电话" /></label>
           <label><span>工作单位</span><input v-model="item.employer_name" placeholder="请输入工作单位" /></label>
           <label><span>职务</span><input v-model="item.job_title" placeholder="请输入职务" /></label>
@@ -63,13 +63,6 @@ defineProps<{
 .record-card__header strong {
   margin: 0;
   color: #173459;
-}
-
-.required-mark {
-  margin-right: 4px;
-  color: #e34d59;
-  font-style: normal;
-  font-weight: 700;
 }
 
 .toolbar-card,

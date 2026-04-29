@@ -67,6 +67,8 @@ class RegisteredPortalStudentRecord(BaseModel):
     selected_plan_name: str | None = None
     selected_center_name: str | None = None
     selected_advisor_name: str | None = None
+    recruitment_application_id: int | None = None
+    recruitment_application_business_key: str | None = None
     recruitment_application_status: str | None = None
     registered_at: str | None = None
     submitted_at: str | None = None

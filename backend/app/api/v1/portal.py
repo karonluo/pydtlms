@@ -10,6 +10,8 @@ from app.schemas.portal import (
     PortalApplicationDraftSaveResponse,
     PortalApplicationDraftUpsert,
     PortalAttachmentUploadResponse,
+    PortalEmailCodeLoginRequest,
+    PortalLoginEmailCodeRequest,
     PortalPublicConfigResponse,
     PortalApplicationSubmissionResponse,
     PortalApplicationUpsert,
@@ -33,10 +35,12 @@ from app.services.dashboard_service import (
     get_public_recruitment_plans,
     get_public_teams,
     login_portal_student,
+    login_portal_student_by_email_code,
     clear_portal_registration_email_code,
     register_portal_student,
     reset_portal_student_password,
     save_portal_application_draft,
+    send_portal_login_email_code,
     send_portal_registration_email_code,
     submit_portal_application,
     validate_portal_registration_email_code,
@@ -50,22 +54,36 @@ PORTAL_ATTACHMENT_EXTENSIONS: dict[str, set[str]] = {
     "education_transcript": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "education_degree_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "english_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
+    "achievement_award_certificate": {".pdf", ".png", ".jpg", ".jpeg", ".webp"},
     "profile_photo": {".png", ".jpg", ".jpeg", ".webp"},
+    "id_card_collage": {".jpg", ".jpeg"},
     "resume": {".pdf", ".doc", ".docx"},
+    "supporting_material": {".zip", ".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".webp"},
 }
 PORTAL_ATTACHMENT_CONTENT_TYPES: dict[str, tuple[str, ...]] = {
     "education_transcript": ("application/pdf", "image/"),
     "education_degree_certificate": ("application/pdf", "image/"),
     "english_certificate": ("application/pdf", "image/"),
+    "achievement_award_certificate": ("application/pdf", "image/"),
     "profile_photo": ("image/",),
+    "id_card_collage": ("image/",),
     "resume": (
         "application/pdf",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ),
+    "supporting_material": (
+        "application/pdf",
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "image/",
+    ),
 }
 PORTAL_ATTACHMENT_MAX_SIZES: dict[str, int] = {
     "profile_photo": 1 * 1024 * 1024,
+    "id_card_collage": 5 * 1024 * 1024,
 }
 PORTAL_ATTACHMENT_DEFAULT_MAX_SIZE = 20 * 1024 * 1024
 PORTAL_ATTACHMENT_GENERIC_CONTENT_TYPES = {
@@ -142,10 +160,32 @@ def portal_send_registration_email_code(payload: PortalRegistrationEmailCodeRequ
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
+@router.post("/login/email-code/send", response_model=PortalRegistrationEmailCodeResponse)
+def portal_send_login_email_code(payload: PortalLoginEmailCodeRequest) -> PortalRegistrationEmailCodeResponse:
+    try:
+        return send_portal_login_email_code(payload.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
 @router.post("/login", response_model=PortalSessionResponse)
 def portal_login(payload: PortalLoginRequest) -> PortalSessionResponse:
     try:
         student = login_portal_student(payload)
+        return PortalSessionResponse(
+            access_token=create_portal_access_token(student_id=student.id, full_name=student.full_name),
+            student=student,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+@router.post("/login/email-code", response_model=PortalSessionResponse)
+def portal_login_by_email_code(payload: PortalEmailCodeLoginRequest) -> PortalSessionResponse:
+    try:
+        student = login_portal_student_by_email_code(payload.email, payload.email_verification_code)
         return PortalSessionResponse(
             access_token=create_portal_access_token(student_id=student.id, full_name=student.full_name),
             student=student,

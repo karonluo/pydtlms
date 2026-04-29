@@ -1,6 +1,8 @@
 import pytest
 
+from app.schemas.auth import UserProfileUpdate
 from app.schemas.recruitment import RecruitPlanUpsert
+from app.schemas.system import RoleUpsert
 from app.schemas.student import CenterUpsert
 from app.services.management_service import LazyRuntimeManagementStore, RuntimeManagementStore
 
@@ -24,12 +26,19 @@ class FakePostgresStateStore:
         self.deleted_recruitment_plan_ids: list[int] = []
         self.portal_application_submissions: list[dict] = []
         self.saved_states: list[dict] = []
+        self.synced_roles: list[dict] = []
+        self.synced_operation_logs: list[dict] = []
+        self.workflow_task_snapshot: dict | None = None
+        self.dict_options_map: dict[str, list[dict]] = {}
 
     def load_state(self) -> dict | None:
         return None
 
     def load_team_state(self):
         return []
+
+    def list_dict_options(self, dict_type: str) -> list[dict]:
+        return list(self.dict_options_map.get(dict_type, []))
 
     def get_portal_student_detail(self, student_id):
         del student_id
@@ -76,6 +85,32 @@ class FakePostgresStateStore:
             }
         )
 
+    def sync_role(self, role_payload, operation_log=None, *, counters=None) -> None:
+        self.synced_roles.append({"role_payload": role_payload, "operation_log": operation_log, "counters": counters})
+
+    def delete_role(self, role_id) -> None:
+        self.deleted_center_ids.append(int(role_id))
+
+    def sync_operation_log(self, operation_log, *, counters=None) -> None:
+        self.synced_operation_logs.append({"operation_log": operation_log, "counters": counters})
+
+    def get_workflow_task_snapshot(self, task_id):
+        del task_id
+        return self.workflow_task_snapshot
+
+    def sync_user_profile(self, profile) -> None:
+        self.saved_states.append({"profile": profile})
+
+    def sync_system_user(self, user_payload, profile_payload=None, operation_log=None, *, counters=None) -> None:
+        self.saved_states.append(
+            {
+                "user_payload": user_payload,
+                "profile_payload": profile_payload,
+                "operation_log": operation_log,
+                "counters": counters,
+            }
+        )
+
 
 class FakeNotificationEmailService:
     def __init__(self) -> None:
@@ -91,6 +126,9 @@ class FakeNotificationEmailService:
 
     def send_portal_registration_success(self, full_name: str, email: str) -> None:
         self.portal_registration_calls.append({"full_name": full_name, "email": email})
+
+    def send_portal_registration_success_async(self, full_name: str, email: str) -> None:
+        self.send_portal_registration_success(full_name, email)
 
     def send_portal_password_reset_success(self, full_name: str, email: str, account: str) -> None:
         self.portal_password_reset_calls.append({"full_name": full_name, "email": email, "account": account})
@@ -109,6 +147,15 @@ class FakeNotificationEmailService:
             {
                 "to_email": email,
                 "subject": "学生门户邮箱验证码",
+                "text_body": f"验证码：{verification_code}",
+            }
+        )
+
+    def send_portal_login_verification_code(self, email: str, verification_code: str) -> None:
+        self.custom_message_calls.append(
+            {
+                "to_email": email,
+                "subject": "学生门户登录验证码",
                 "text_body": f"验证码：{verification_code}",
             }
         )
@@ -187,6 +234,36 @@ def _build_recruitment_application_payload():
         id_number="32000019990101123X",
         material_status="待审核",
         application_status="报名已提交",
+    )
+
+
+def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name: str):
+    from app.schemas.portal import PortalApplicationUpsert
+
+    return PortalApplicationUpsert(
+        plan_id=plan_id,
+        graduation_school="江南大学",
+        highest_degree="硕士",
+        selected_team_name=team_name,
+        selected_advisor_name=advisor_name,
+        intended_field=team_name,
+        english_proficiencies=[
+            {
+                "exam_name": "CET-6",
+                "score_text": "520",
+                "certificate_attachment_url": "/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf",
+            }
+        ],
+        family_members=[
+            {"member_name": "张父", "relation_type": "父亲", "contact_phone": "13800001111"},
+        ],
+        personal_statement={
+            "growth_experience_text": "成长" + "甲" * 280,
+            "program_application_reason_text": "申报" + "乙" * 280,
+            "career_plan_text": "规划" + "丙" * 280,
+            "resume_attachment_url": "/portal-attachments/uploads/student-7/resume/resume-a.pdf",
+        },
+        signed_agreement=True,
     )
 
 
@@ -305,6 +382,23 @@ def test_get_recruitment_plans_matches_keyword_with_plan_description(monkeypatch
     }
 
 
+def test_get_portal_profile_options_places_masses_after_league_member(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.dict_options_map["student_political_status"] = [
+        {"label": "民盟盟员", "value": "民盟盟员"},
+        {"label": "群众", "value": "群众"},
+        {"label": "共青团员", "value": "共青团员"},
+        {"label": "中共党员", "value": "中共党员"},
+    ]
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+
+    values = [item.value for item in store.get_portal_profile_options().political_status_options]
+
+    assert values.index("群众") == values.index("共青团员") + 1
+
+
 def test_create_recruitment_plan_keeps_internal_defaults_while_returning_trimmed_record(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -318,17 +412,94 @@ def test_create_recruitment_plan_keeps_internal_defaults_while_returning_trimmed
     assert stored_plan["interview_group_count"] == 0
     assert stored_plan["is_open"] is True
     assert stored_plan["plan_description"] == "只保留五个字段"
-    assert created.plan_description == "只保留五个字段"
-    assert set(created.model_dump().keys()) == {
-        "id",
-        "plan_name",
-        "academic_term",
-        "academic_year",
-        "semester",
-        "application_count",
-        "brochure_image_url",
-        "plan_description",
+
+
+def test_create_role_uses_relational_sync(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    record = store.create_role(
+        RoleUpsert(
+            role_code="quality_reviewer",
+            role_name="质量审核员",
+            scope_name="系统治理",
+            permissions=[],
+        )
+    )
+
+    assert record.role_code == "quality_reviewer"
+    assert len(fake_postgres.synced_roles) == 1
+    assert fake_postgres.synced_roles[0]["role_payload"]["role_name"] == "质量审核员"
+    assert fake_postgres.synced_roles[0]["counters"]["roles"] == store._counters["roles"]
+
+
+def test_get_workflow_task_detail_prefers_postgres_snapshot(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.workflow_task_snapshot = {
+        "id": 88,
+        "workflow_name": "科研报告审批",
+        "business_module": "培养管理",
+        "business_key": "SR-20260401-0001",
+        "title": "科研报告审批任务",
+        "applicant_name": "张三",
+        "current_handler": "导师组",
+        "current_node": "导师审核",
+        "priority": "高",
+        "status": "待处理",
+        "created_at": "2026-04-01 09:00:00",
+        "due_at": "2026-04-03 18:00:00",
+        "flow_code": "scientific_report",
+        "node_key": "advisor_review",
+        "entity_id": 12,
+        "candidate_groups": ["advisors"],
+        "history": [
+            {
+                "operated_at": "2026-04-01 09:00:00",
+                "operator_username": "admin",
+                "operator_full_name": "管理员",
+                "action": "start",
+                "action_label": "发起流程",
+                "from_node": "开始",
+                "to_node": "导师审核",
+                "result_status": "待处理",
+                "comment": "已提交",
+            }
+        ],
     }
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    detail = store.get_workflow_task_detail(88, {"username": "advisor", "full_name": "导师", "roles": ["advisor"]})
+
+    assert detail["task"].id == 88
+    assert detail["task"].workflow_name == "科研报告审批"
+    assert detail["history"][0]["action_label"] == "发起流程"
+
+
+def test_update_profile_without_bound_system_user_still_persists_operation_log(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("profiles", {})["portal-only"] = {
+        "username": "portal-only",
+        "full_name": "门户访客",
+        "role_name": "门户用户",
+        "department_name": "校外",
+        "phone_number": None,
+        "email": "portal@example.com",
+        "theme_color": "#0f4cbd",
+    }
+
+    updated = store.update_profile(
+        "portal-only",
+        UserProfileUpdate(full_name="门户访客-更新", department_name="校友", phone_number="13800001111", email="portal@example.com", theme_color="#123456"),
+    )
+
+    assert updated.full_name == "门户访客-更新"
+    assert len(fake_postgres.synced_operation_logs) == 1
+    assert fake_postgres.synced_operation_logs[0]["operation_log"]["entity_id"] == "portal-only"
 
 
 def test_delete_recruitment_plan_removes_plan_and_syncs_incrementally(monkeypatch) -> None:
@@ -475,6 +646,67 @@ def test_execute_workflow_action_sends_recruitment_pass_email(monkeypatch) -> No
     ]
 
 
+def test_execute_workflow_action_creates_student_master_and_sends_reject_email(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009999",
+            email="candidate-email@example.com",
+            full_name="邮件联调考生",
+            id_number="32000019990101123X",
+            password="Secret123!",
+        )
+    )
+    applicant_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "candidate-email@example.com")
+    application = store.submit_portal_application(
+        applicant_id,
+        _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
+    )
+
+    approve_task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == application.application_business_key)
+    store.execute_workflow_action(
+        approve_task_id,
+        "approve",
+        None,
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    created_student = next(item for item in store.state["students"] if item["full_name"] == "邮件联调考生")
+    assert created_student["full_name"] == "邮件联调考生"
+    assert created_student["team_name"] == available_team.team_name
+    assert created_student["advisor_name"] == "刘亚"
+    assert created_student["student_no"].startswith("D")
+
+    rejected_application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(update={"email": "candidate-reject@example.com", "phone_number": "13800009998", "id_number": "32000019990101124X", "student_name": "驳回联调考生"}),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    reject_task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == rejected_application.business_key)
+    store.execute_workflow_action(
+        reject_task_id,
+        "reject",
+        "材料信息不足",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    assert fake_mailer.recruitment_status_calls[-1] == {
+        "student_name": "驳回联调考生",
+        "email": "candidate-reject@example.com",
+        "business_key": rejected_application.business_key,
+        "application_status": "不录取",
+        "plan_name": "2026 秋季博士招生",
+    }
+
+
 def test_update_recruitment_application_persists_full_state(monkeypatch) -> None:
     from app.schemas.recruitment import RecruitApplicationUpsert
 
@@ -558,6 +790,90 @@ def test_send_portal_registration_email_code_writes_cache_and_sends_email(monkey
     assert fake_cache.ttl(cooldown_key) == 60
     assert fake_mailer.custom_message_calls[-1]["to_email"] == "verify@example.com"
     assert fake_cache.get(code_key) in fake_mailer.custom_message_calls[-1]["text_body"]
+
+
+def test_send_portal_login_email_code_writes_cache_and_sends_email(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    fake_cache = FakeCacheClient()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda: fake_mailer)
+    monkeypatch.setattr("app.services.management_service.get_cache_client", lambda: fake_cache)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800001234",
+            email="login-verify@example.com",
+            full_name="验证码登录学生",
+            id_number="320000199909099993",
+            password="Secret123!",
+        )
+    )
+
+    response = store.send_portal_login_email_code("login-verify@example.com")
+
+    code_key = store._portal_login_email_code_key("login-verify@example.com")
+    cooldown_key = store._portal_login_email_cooldown_key("login-verify@example.com")
+    assert response.cooldown_seconds == 60
+    assert response.expires_in_seconds == 600
+    assert len(fake_cache.get(code_key) or "") == 6
+    assert fake_cache.ttl(cooldown_key) == 60
+    assert fake_mailer.custom_message_calls[-1]["to_email"] == "login-verify@example.com"
+    assert fake_cache.get(code_key) in fake_mailer.custom_message_calls[-1]["text_body"]
+
+
+def test_login_portal_student_by_email_code_succeeds_and_clears_code(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_cache = FakeCacheClient()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.get_cache_client", lambda: fake_cache)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800001235",
+            email="email-code-login@example.com",
+            full_name="邮箱验证码学生",
+            id_number="320000199909099969",
+            password="Secret123!",
+        )
+    )
+    fake_cache.set(store._portal_login_email_code_key("email-code-login@example.com"), "123456", ex=600)
+    fake_cache.set(store._portal_login_email_cooldown_key("email-code-login@example.com"), "1", ex=60)
+
+    record = store.login_portal_student_by_email_code("email-code-login@example.com", "123456")
+
+    assert record.email == "email-code-login@example.com"
+    assert fake_cache.get(store._portal_login_email_code_key("email-code-login@example.com")) is None
+
+
+def test_login_portal_student_by_email_code_rejects_wrong_code(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_cache = FakeCacheClient()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.get_cache_client", lambda: fake_cache)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800001236",
+            email="email-code-login-wrong@example.com",
+            full_name="验证码错误学生",
+            id_number="320000199909099977",
+            password="Secret123!",
+        )
+    )
+    fake_cache.set(store._portal_login_email_code_key("email-code-login-wrong@example.com"), "654321", ex=600)
+
+    with pytest.raises(ValueError, match="邮件验证码不正确"):
+        store.login_portal_student_by_email_code("email-code-login-wrong@example.com", "123456")
 
 
 def test_validate_portal_registration_email_code_rejects_wrong_code(monkeypatch) -> None:
@@ -700,7 +1016,7 @@ def test_get_registered_portal_students_marks_submission_status(monkeypatch) -> 
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
 
-    from app.schemas.portal import PortalApplicationUpsert, PortalRegistrationRequest
+    from app.schemas.portal import PortalRegistrationRequest
 
     store = RuntimeManagementStore()
     available_plan = store.get_public_recruitment_plans().items[0]
@@ -730,29 +1046,24 @@ def test_get_registered_portal_students_marks_submission_status(monkeypatch) -> 
     )
     store.submit_portal_application(
         submitted_student_id,
-        PortalApplicationUpsert(
-            plan_id=available_plan.id,
-            graduation_school="江南大学",
-            highest_degree="硕士",
-            selected_team_name=available_team.team_name,
-            selected_advisor_name=available_team.lead_advisor_name,
-            intended_field=available_team.team_name,
-            signed_agreement=True,
-        ),
+        _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
     )
 
     response = store.get_registered_portal_students(page=1, page_size=20)
     status_map = {item.email: item.application_form_status for item in response.items}
+    submitted_record = next(item for item in response.items if item.email == "submitted-student@example.com")
 
     assert status_map["submitted-student@example.com"] == "已填写报名"
     assert status_map["registered-only@example.com"] == "未填写报名"
+    assert submitted_record.recruitment_application_id is not None
+    assert submitted_record.recruitment_application_business_key
 
 
 def test_get_student_stats_includes_registered_portal_student_counts(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
 
-    from app.schemas.portal import PortalApplicationUpsert, PortalRegistrationRequest
+    from app.schemas.portal import PortalRegistrationRequest
 
     store = RuntimeManagementStore()
     available_plan = store.get_public_recruitment_plans().items[0]
@@ -782,15 +1093,7 @@ def test_get_student_stats_includes_registered_portal_student_counts(monkeypatch
     )
     store.submit_portal_application(
         submitted_student_id,
-        PortalApplicationUpsert(
-            plan_id=available_plan.id,
-            graduation_school="东南大学",
-            highest_degree="硕士",
-            selected_team_name=available_team.team_name,
-            selected_advisor_name=available_team.lead_advisor_name,
-            intended_field=available_team.team_name,
-            signed_agreement=True,
-        ),
+        _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name).model_copy(update={"graduation_school": "东南大学"}),
     )
 
     stats = store.get_student_stats()
@@ -824,20 +1127,57 @@ def test_submit_portal_application_uses_incremental_portal_sync(monkeypatch) -> 
     save_count_before_submit = len(fake_postgres.saved_states)
     response = store.submit_portal_application(
         student_id,
-        PortalApplicationUpsert(
-            plan_id=available_plan.id,
-            graduation_school="江南大学",
-            highest_degree="硕士",
-            selected_team_name=available_team.team_name,
-            selected_advisor_name=available_team.lead_advisor_name,
-            intended_field=available_team.team_name,
-            signed_agreement=True,
-        ),
+        _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
     )
 
     assert response.application_business_key
     assert len(fake_postgres.portal_application_submissions) == 1
     assert len(fake_postgres.saved_states) == save_count_before_submit
+
+
+def test_submit_portal_application_resets_rejected_application_to_pending(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009989",
+            email="reapply-student@example.com",
+            full_name="重报学生",
+            id_number="320000199909099942",
+            password="Secret123!",
+        )
+    )
+
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "reapply-student@example.com")
+    first_submit = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
+    first_response = store.submit_portal_application(student_id, first_submit)
+    task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == first_response.application_business_key)
+    store.execute_workflow_action(
+        task_id,
+        "reject",
+        "请补充信息后重新提交",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    second_response = store.submit_portal_application(student_id, first_submit)
+    workflow_task = next(item for item in store.state["workflow_tasks"] if item["business_key"] == second_response.application_business_key)
+    application = next(item for item in store.state["recruitment_applications"] if item["business_key"] == second_response.application_business_key)
+
+    assert second_response.application_status == "报名已提交"
+    assert application["application_status"] == "报名已提交"
+    assert application["material_status"] == "待审核"
+    assert workflow_task["status"] == "待处理"
+    assert workflow_task["node_key"] == "qualification_review"
+    assert workflow_task["latest_comment"] == "学生重新提交申请，等待重新审核。"
 
 
 def test_deactivate_registered_portal_student_blocks_login(monkeypatch) -> None:

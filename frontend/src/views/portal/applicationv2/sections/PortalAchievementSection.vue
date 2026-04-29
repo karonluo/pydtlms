@@ -1,10 +1,27 @@
 <script setup lang="ts">
 import type { PortalApplicationUpsert } from '../../../../api/portal'
 
+function trimText(value: string | null | undefined) {
+  return String(value || '').trim()
+}
+
+function isPaperAchievement(type: string | null | undefined) {
+  return trimText(type) === '论文发表'
+}
+
+function isAwardAchievement(type: string | null | undefined) {
+  return trimText(type) === '获奖经历'
+}
+
 defineProps<{
   form: PortalApplicationUpsert
   achievementTypeOptions: string[]
-  addAchievement: () => void
+  achievementAwardAttachmentAccept: string
+  isAttachmentUploading: (key: string) => boolean
+  buildAttachmentUploadKey: (section: string, index: number | string, field: string) => string
+  addAchievement: () => void | Promise<void>
+  handleAchievementTypeChange: (index: number) => void
+  handleAchievementAwardAttachmentUpload: (index: number, event: Event) => void | Promise<void>
   removeAchievement: (index: number) => void
 }>()
 </script>
@@ -13,32 +30,57 @@ defineProps<{
   <section class="section-page">
     <div class="toolbar-card">
       <div>
-        <strong>成果记录</strong>
-        <span>支持论文、科研项目、学生活动和获奖经历。</span>
+        <strong>成果经历</strong>
+        <span>最多填写 4 条，仅支持“论文发表”和“获奖经历”。若有更多成果，请通过上传个人简历附件的方式进行详细说明。</span>
       </div>
-      <button type="button" class="action-button" @click="addAchievement">新增成果记录</button>
+      <button type="button" class="action-button" @click="addAchievement">新增成果经历</button>
     </div>
 
-    <div v-if="!(form.achievement_records && form.achievement_records.length)" class="empty-card">当前未填写论文或获奖经历，可留空提交。</div>
+    <div v-if="!(form.achievement_records && form.achievement_records.length)" class="empty-card">当前未填写成果经历，可留空提交。</div>
 
     <div v-else class="record-list">
       <section v-for="(item, index) in form.achievement_records" :key="`achievement-${index}`" class="record-card">
         <div class="record-card__header">
-          <div><strong>成果记录 {{ index + 1 }}</strong><span>非必填</span></div>
+          <div><strong>成果经历 {{ index + 1 }}</strong><span>非必填</span></div>
           <button type="button" class="link-button" @click="removeAchievement(index)">删除</button>
         </div>
 
         <div class="section-grid">
-          <label><span>类型</span><select v-model="item.achievement_type"><option value="">请选择</option><option v-for="type in achievementTypeOptions" :key="type" :value="type">{{ type }}</option></select></label>
-          <label><span>论文名称</span><input v-model="item.paper_title" placeholder="论文发表时填写" /></label>
-          <label><span>作者序位</span><input v-model="item.author_order" placeholder="如 第一作者" /></label>
-          <label><span>期刊/会议名称</span><input v-model="item.journal_or_conference" placeholder="请输入期刊或会议名称" /></label>
-          <label><span>发表/收录日期</span><input v-model="item.publish_or_index_month" type="month" /></label>
-          <label><span>奖项名称</span><input v-model="item.award_name" placeholder="获奖时填写" /></label>
-          <label><span>颁发机构</span><input v-model="item.awarding_organization" placeholder="请输入颁发机构" /></label>
-          <label><span>获奖等级</span><input v-model="item.award_level" placeholder="如 全国一等奖" /></label>
-          <label><span>获奖年份</span><input v-model="item.award_year" placeholder="如 2025" /></label>
-          <label class="section-grid__full"><span>职责内容</span><textarea v-model="item.responsibility_text" rows="5" placeholder="请输入成果说明、职责或获奖背景" /></label>
+          <label>
+            <span>类型</span>
+            <select v-model="item.achievement_type" @change="handleAchievementTypeChange(index)">
+              <option value="">请选择</option>
+              <option v-for="type in achievementTypeOptions" :key="type" :value="type">{{ type }}</option>
+            </select>
+          </label>
+          <label><span>日期</span><input v-model="item.achievement_month" type="month" /></label>
+
+          <template v-if="isPaperAchievement(item.achievement_type)">
+            <label><span>论文名称</span><input v-model="item.paper_title" placeholder="请输入论文名称" /></label>
+            <label><span>作者序位</span><input v-model="item.author_order" placeholder="如 第一作者" /></label>
+            <label class="section-grid__full"><span>期刊名称</span><input v-model="item.journal_or_conference" placeholder="请输入期刊名称" /></label>
+            <label class="section-grid__full"><span>描述</span><textarea v-model="item.description_text" rows="5" placeholder="请输入论文发表相关说明" /></label>
+          </template>
+
+          <template v-else-if="isAwardAchievement(item.achievement_type)">
+            <label><span>奖项名称</span><input v-model="item.award_name" placeholder="请输入奖项名称" /></label>
+            <label><span>获奖名次</span><input v-model="item.award_rank" placeholder="如 一等奖 / 第1名" /></label>
+            <div class="upload-card section-grid__full">
+              <span>获奖证明上传</span>
+              <input :value="item.award_certificate_attachment_url || ''" readonly placeholder="请上传获奖证明附件" />
+              <input
+                class="upload-file"
+                type="file"
+                :accept="achievementAwardAttachmentAccept"
+                :disabled="isAttachmentUploading(buildAttachmentUploadKey('achievement', index, 'award-certificate'))"
+                @change="handleAchievementAwardAttachmentUpload(index, $event)"
+              />
+              <small>{{ isAttachmentUploading(buildAttachmentUploadKey('achievement', index, 'award-certificate')) ? '上传中...' : '支持 PDF/JPG/PNG/WEBP，单个文件不超过 20MB' }}</small>
+            </div>
+            <label class="section-grid__full"><span>描述</span><textarea v-model="item.description_text" rows="5" placeholder="请输入获奖背景或成果说明" /></label>
+          </template>
+
+          <p v-else class="section-grid__full section-hint">请选择成果类型后再填写对应字段。</p>
         </div>
       </section>
     </div>
@@ -97,7 +139,8 @@ defineProps<{
 
 .section-grid input,
 .section-grid select,
-.section-grid textarea {
+.section-grid textarea,
+.upload-card input {
   width: 100%;
   min-height: 46px;
   padding: 10px 14px;
@@ -112,6 +155,28 @@ defineProps<{
 
 .section-grid__full {
   grid-column: 1 / -1;
+}
+
+.upload-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px dashed #cbdcf5;
+  border-radius: 18px;
+  background: #f8fbff;
+  color: #4b607d;
+}
+
+.upload-card small,
+.section-hint {
+  color: #627896;
+  font-size: 12px;
+}
+
+.upload-file {
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .action-button {

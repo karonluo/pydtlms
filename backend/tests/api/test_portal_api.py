@@ -32,6 +32,19 @@ def _portal_student_record(student_id: int = 7) -> PortalStudentRecord:
     return PortalStudentRecord(**_portal_student_payload(student_id))
 
 
+def _build_personal_statement_payload(include_resume: bool = True, include_supporting_material: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        'growth_experience_text': '成长' + '甲' * 280,
+        'program_application_reason_text': '申报' + '乙' * 280,
+        'career_plan_text': '规划' + '丙' * 280,
+    }
+    if include_resume:
+        payload['resume_attachment_url'] = '/portal-attachments/uploads/student-7/resume/resume-a.pdf'
+    if include_supporting_material:
+        payload['supporting_material_attachment_url'] = '/portal-attachments/uploads/student-7/supporting_material/supporting-material.zip'
+    return payload
+
+
 def test_portal_register_returns_profile(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.validate_portal_registration_email_code', lambda email, verification_code: None)
@@ -82,6 +95,28 @@ def test_portal_send_registration_email_code_returns_message(monkeypatch) -> Non
         assert payload['cooldown_seconds'] == 60
 
 
+def test_portal_send_login_email_code_returns_message(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr(
+            'app.api.v1.portal.send_portal_login_email_code',
+            lambda email: PortalRegistrationEmailCodeResponse(
+                message='登录验证码已发送，请查收邮箱',
+                expires_in_seconds=600,
+                cooldown_seconds=60,
+            ),
+        )
+
+        response = client.post(
+            '/api/v1/portal/login/email-code/send',
+            json={'email': 'zhangsan@example.com'},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['message'] == '登录验证码已发送，请查收邮箱'
+        assert payload['cooldown_seconds'] == 60
+
+
 def test_portal_login_returns_session(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.login_portal_student', lambda payload: _portal_student_record())
@@ -92,6 +127,26 @@ def test_portal_login_returns_session(monkeypatch) -> None:
             json={
                 'account': '13800001111',
                 'password': 'Secret123!',
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['access_token'] == 'portal-7'
+        assert payload['token_type'] == 'bearer'
+        assert payload['student']['id'] == 7
+
+
+def test_portal_login_by_email_code_returns_session(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.login_portal_student_by_email_code', lambda email, verification_code: _portal_student_record())
+        monkeypatch.setattr('app.api.v1.portal.create_portal_access_token', lambda student_id, full_name: f'portal-{student_id}')
+
+        response = client.post(
+            '/api/v1/portal/login/email-code',
+            json={
+                'email': 'zhangsan@example.com',
+                'email_verification_code': '123456',
             },
         )
 
@@ -222,7 +277,17 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
                 'political_status': '中共党员',
                 'education_experience': '2017-2021 江南大学自动化本科；2021-2024 江南大学控制科学硕士',
                 'practice_experience': '参与工业视觉检测项目',
-                'personal_statement_text': '希望在智能制造方向继续深造',
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张父', 'relation_type': '父亲'},
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=True),
                 'signed_agreement': True,
                 'selected_team_name': '智能制造联合团队',
                 'selected_advisor_name': '刘亚',
@@ -252,6 +317,16 @@ def test_portal_application_submission_is_blocked_when_switch_is_enabled(monkeyp
                 'highest_degree': '硕士',
                 'selected_team_name': '智能制造联合团队',
                 'intended_field': '智能制造',
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=True),
             },
         )
 
@@ -295,6 +370,25 @@ def test_portal_attachment_upload_returns_public_url(monkeypatch, tmp_path: Path
         uploaded_files = list((tmp_path / 'student-7' / 'resume').glob('resume-*'))
         assert len(uploaded_files) == 1
         assert uploaded_files[0].read_bytes() == b'%PDF-1.7 mock file'
+
+
+def test_portal_id_card_collage_upload_accepts_jpg(monkeypatch, tmp_path: Path) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+
+        response = client.post(
+            '/api/v1/portal/attachments/upload',
+            headers={'Authorization': 'Bearer portal-token'},
+            data={'category': 'id_card_collage'},
+            files={'file': ('id-card.jpg', b'\xff\xd8\xff mock jpeg', 'image/jpeg')},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['category'] == 'id_card_collage'
+        assert payload['file_name'] == 'id-card.jpg'
+        assert payload['url'].startswith('/portal-attachments/uploads/student-7/id_card_collage/')
 
 
 def test_portal_attachment_upload_rejects_unsupported_file_type(monkeypatch, tmp_path: Path) -> None:
@@ -368,6 +462,7 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
             json={
                 'plan_id': 3,
                 'profile': {
+                    'id_card_collage_url': '/portal-attachments/uploads/student-7/id_card_collage/id-card.jpg',
                     'gender': '男',
                     'birth_date': '1999-01-01',
                     'native_place': '江苏无锡',
@@ -385,7 +480,12 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
                 'education_experiences': [
                     {
                         'sort_order': 1,
-                        'education_stage': '硕士',
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
                         'school_name': '江南大学',
                         'transcript_attachment_url': '/portal-attachments/uploads/student-7/education_transcript/transcript-a.pdf',
                         'degree_certificate_attachment_url': '/portal-attachments/uploads/student-7/education_degree_certificate/degree-a.pdf',
@@ -403,8 +503,7 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
                     {'member_name': '张母', 'relation_type': '母亲'},
                 ],
                 'personal_statement': {
-                    'personal_statement_text': '希望在智能制造方向继续深造',
-                    'resume_attachment_url': '/portal-attachments/uploads/student-7/resume/resume-a.pdf',
+                    **_build_personal_statement_payload(include_resume=True, include_supporting_material=True),
                 },
                 'declaration': {
                     'has_read_declaration': True,
@@ -417,10 +516,865 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
         assert response.json()['application_business_key'] == 'RECRUIT-20260421-0007'
         assert captured['student_id'] == 7
         payload = captured['payload']
-        assert payload['education_experiences'][0]['transcript_attachment_url'].endswith('transcript-a.pdf')
-        assert payload['education_experiences'][0]['degree_certificate_attachment_url'].endswith('degree-a.pdf')
+        assert payload['profile']['id_card_collage_url'].endswith('id-card.jpg')
+        assert payload['education_experiences'][1]['transcript_attachment_url'].endswith('transcript-a.pdf')
+        assert payload['education_experiences'][1]['degree_certificate_attachment_url'].endswith('degree-a.pdf')
         assert payload['english_proficiencies'][0]['certificate_attachment_url'].endswith('cet6-a.pdf')
+        assert payload['personal_statement']['growth_experience_text'].startswith('成长')
         assert payload['personal_statement']['resume_attachment_url'].endswith('resume-a.pdf')
+        assert payload['personal_statement']['supporting_material_attachment_url'].endswith('supporting-material.zip')
+        assert payload['material_list_attachment'].endswith('supporting-material.zip')
+
+
+def test_portal_application_submission_rejects_short_personal_statement(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '硕士在读',
+                        'school_name': '江南大学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科毕业',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张父', 'relation_type': '父亲'},
+                ],
+                'personal_statement': {
+                    'growth_experience_text': '成长经历过短',
+                    'program_application_reason_text': '申报理由过短',
+                    'career_plan_text': '发展规划过短',
+                    'resume_attachment_url': '/portal-attachments/uploads/student-7/resume/resume-a.pdf',
+                },
+            },
+        )
+
+        assert response.status_code == 422
+        assert '800-1200' in response.text
+
+
+def test_portal_application_submission_rejects_missing_resume_attachment(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '硕士在读',
+                        'school_name': '江南大学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科毕业',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张父', 'relation_type': '父亲'},
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=False),
+            },
+        )
+
+        assert response.status_code == 422
+        assert '简历附件' in response.text
+
+
+def test_portal_application_submission_rejects_bachelor_graduate_without_master_stage(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科毕业',
+                        'school_name': '江南大学',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '本科毕业' in response.text
+
+
+def test_portal_application_draft_rejects_bachelor_current_with_master_stage(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '硕士在读',
+                        'school_name': '上海人工智能实验室联培项目',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '本科在读' in response.text
+
+
+def test_portal_application_draft_rejects_bachelor_graduate_stage_without_master_stage(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科毕业',
+                        'school_name': '',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '本科毕业' in response.text
+
+
+def test_portal_application_draft_rejects_blank_second_education_experience(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '',
+                        'school_name': '',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '教育经历2' in response.text
+
+
+def test_portal_application_submission_rejects_non_bachelor_second_education_experience(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '硕士在读',
+                        'school_name': '上海人工智能实验室联培项目',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '教育经历2' in response.text
+
+
+def test_portal_application_draft_rejects_incomplete_practice_with_dates(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'practice_experiences': [
+                    {
+                        'start_month': '2023-07',
+                        'organization_name': '',
+                        'position_name': '',
+                        'responsibility_text': '参与现场测试',
+                        'verifier_name': '',
+                        'verifier_phone': '',
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '实践经历1' in response.text
+        assert '除职责外其余字段均必填' in response.text
+
+
+def test_portal_application_submission_rejects_more_than_two_practice_experiences(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'practice_experiences': [
+                    {
+                        'organization_name': '单位一',
+                    },
+                    {
+                        'organization_name': '单位二',
+                    },
+                    {
+                        'organization_name': '单位三',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '实践经历最多填写 2 条' in response.text
+
+
+def test_portal_application_submission_strips_blank_practice_placeholder(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_submit(student_id, payload):
+        captured['student_id'] = student_id
+        captured['payload'] = payload.model_dump(mode='json', exclude_none=True)
+        return {
+            'student': _portal_student_payload(student_id),
+            'application_business_key': 'RECRUIT-20260429-0007',
+            'application_status': '报名已提交',
+        }
+
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+        monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'practice_experiences': [
+                    {
+                        'start_month': '',
+                        'end_month': '',
+                        'organization_name': '',
+                        'position_name': '',
+                        'responsibility_text': '',
+                        'verifier_name': '',
+                        'verifier_phone': '',
+                    }
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'IELTS',
+                        'score_text': '7.0',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/ielts-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=True),
+            },
+        )
+
+        assert response.status_code == 200
+        payload = captured['payload']
+        assert payload['practice_experiences'] == []
+        assert 'practice_experience' not in payload
+
+
+def test_portal_application_submission_rejects_missing_english_proficiency(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '英语能力' in response.text
+
+
+def test_portal_application_submission_rejects_english_proficiency_without_attachment(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '英语证明附件' in response.text
+
+
+def test_portal_application_submission_rejects_missing_parent_family_member(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '', 'relation_type': '父亲'},
+                    {'member_name': '', 'relation_type': '母亲'},
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '父母信息至少填写一方' in response.text
+
+
+def test_portal_application_submission_accepts_single_parent_family_member(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_submit(student_id, payload):
+        captured['payload'] = payload.model_dump(mode='json', exclude_none=True)
+        return {
+            'student': _portal_student_payload(student_id),
+            'application_business_key': 'RECRUIT-20260429-0010',
+            'application_status': '报名已提交',
+        }
+
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+        monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'IELTS',
+                        'score_text': '7.0',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/ielts-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=True),
+            },
+        )
+
+        assert response.status_code == 200
+        payload = captured['payload']
+        assert payload['family_members'] == [{'member_name': '张母', 'relation_type': '母亲'}]
+
+
+def test_portal_application_submission_rejects_more_than_four_achievement_records(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'achievement_records': [
+                    {'achievement_type': '论文发表'},
+                    {'achievement_type': '科研项目'},
+                    {'achievement_type': '学生活动'},
+                    {'achievement_type': '获奖经历'},
+                    {'achievement_type': '论文发表'},
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '成果经历最多填写 4 条' in response.text
+
+
+def test_portal_application_submission_rejects_incomplete_paper_achievement(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'CET-6',
+                        'score_text': '520',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'achievement_records': [
+                    {
+                        'achievement_type': '论文发表',
+                        'achievement_month': '2025-03',
+                        'paper_title': '复杂工业系统中的诊断方法研究',
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '论文发表时' in response.text
+        assert '作者序位' in response.text
+
+
+def test_portal_application_submission_rejects_award_achievement_without_certificate(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'IELTS',
+                        'score_text': '7.0',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/ielts-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'achievement_records': [
+                    {
+                        'achievement_type': '获奖经历',
+                        'achievement_month': '2024-11',
+                        'award_name': '全国研究生数学建模竞赛',
+                        'award_rank': '一等奖',
+                        'description_text': '担任主要建模成员并完成答辩。',
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '获奖经历时' in response.text
+        assert '获奖证明' in response.text
+
+
+def test_portal_application_submission_accepts_structured_achievement_records(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_submit(student_id, payload):
+        captured['payload'] = payload.model_dump(mode='json', exclude_none=True)
+        return {
+            'student': _portal_student_payload(student_id),
+            'application_business_key': 'RECRUIT-20260429-0011',
+            'application_status': '报名已提交',
+        }
+
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
+        monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+
+        response = client.post(
+            '/api/v1/portal/applications',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'school_name': '江南大学',
+                    },
+                ],
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'IELTS',
+                        'score_text': '7.0',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/ielts-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张母', 'relation_type': '母亲'},
+                ],
+                'achievement_records': [
+                    {
+                        'achievement_type': '论文发表',
+                        'achievement_month': '2025-03',
+                        'paper_title': '复杂工业系统中的诊断方法研究',
+                        'author_order': '第一作者',
+                        'journal_or_conference': '控制与决策',
+                        'description_text': '围绕复杂工业系统的故障诊断方法展开研究。',
+                    },
+                    {
+                        'achievement_type': '获奖经历',
+                        'achievement_month': '2024-11',
+                        'award_name': '全国研究生数学建模竞赛',
+                        'award_rank': '一等奖',
+                        'award_certificate_attachment_url': '/portal-attachments/uploads/student-7/achievement_award_certificate/math-modeling.pdf',
+                        'description_text': '担任主要建模成员并完成答辩。',
+                    },
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=True),
+            },
+        )
+
+        assert response.status_code == 200
+        payload = captured['payload']
+        achievement_records = payload['achievement_records']
+        assert achievement_records[0]['achievement_month'] == '2025-03'
+        assert achievement_records[0]['publish_or_index_month'] == '2025-03'
+        assert achievement_records[0]['description_text'] == '围绕复杂工业系统的故障诊断方法展开研究。'
+        assert achievement_records[0]['responsibility_text'] == '围绕复杂工业系统的故障诊断方法展开研究。'
+        assert achievement_records[1]['award_rank'] == '一等奖'
+        assert achievement_records[1]['award_level'] == '一等奖'
+        assert achievement_records[1]['award_year'] == '2024'
+        assert achievement_records[1]['award_certificate_attachment_url'].endswith('math-modeling.pdf')
 
 
 def test_portal_application_submission_creates_new_record_without_deadlock(monkeypatch) -> None:
@@ -582,7 +1536,12 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
                 'education_experiences': [
                     {
                         'sort_order': 1,
-                        'education_stage': '硕士',
+                        'education_stage': '高中毕业',
+                        'school_name': '无锡市第一中学',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
                         'school_name': '江南大学',
                     }
                 ],
@@ -591,6 +1550,17 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
                     'birth_date': '1999-01-01',
                     'native_place': '江苏无锡',
                 },
+                'english_proficiencies': [
+                    {
+                        'exam_name': 'TOEFL',
+                        'score_text': '103',
+                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/toefl-a.pdf',
+                    }
+                ],
+                'family_members': [
+                    {'member_name': '张父', 'relation_type': '父亲'},
+                ],
+                'personal_statement': _build_personal_statement_payload(include_resume=True),
                 'declaration': {
                     'has_read_declaration': True,
                     'declaration_text': '本人承诺以上填写内容真实、准确。',

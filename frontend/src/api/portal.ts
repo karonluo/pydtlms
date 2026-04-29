@@ -8,6 +8,7 @@ const PORTAL_LONG_RUNNING_TIMEOUT = 60000
 export type PortalApplicantProfileData = {
   full_name_pinyin?: string | null
   profile_photo_url?: string | null
+  id_card_collage_url?: string | null
   gender?: string | null
   birth_date?: string | null
   ethnic_group?: string | null
@@ -73,14 +74,19 @@ export type PortalFamilyMemberItem = {
 
 export type PortalAchievementRecordItem = {
   achievement_type: string
+  achievement_month?: string | null
   paper_title?: string | null
   author_order?: string | null
   journal_or_conference?: string | null
   publish_or_index_month?: string | null
   award_name?: string | null
+  award_rank?: string | null
+  award_certificate_attachment_url?: string | null
+  award_certificate_attachment_name?: string | null
   awarding_organization?: string | null
   award_level?: string | null
   award_year?: string | null
+  description_text?: string | null
   responsibility_text?: string | null
 }
 
@@ -88,8 +94,13 @@ export type PortalPersonalStatementData = {
   personal_statement_text?: string | null
   ai_problem_statement?: string | null
   ai_industry_opinion?: string | null
+  growth_experience_text?: string | null
+  program_application_reason_text?: string | null
+  career_plan_text?: string | null
   resume_attachment_url?: string | null
   resume_attachment_name?: string | null
+  supporting_material_attachment_url?: string | null
+  supporting_material_attachment_name?: string | null
 }
 
 export type PortalApplicationDeclarationData = {
@@ -141,6 +152,8 @@ export type PortalStudentRecord = {
   personal_profile?: string | null
   recommendation_notes?: string | null
   personal_statement_text?: string | null
+  material_list_attachment?: string | null
+  material_list_attachment_name?: string | null
   signed_agreement?: boolean
   selected_plan_id?: number | null
   selected_team_name?: string | null
@@ -216,6 +229,15 @@ export type PortalLoginRequest = {
   password: string
 }
 
+export type PortalLoginEmailCodeRequest = {
+  email: string
+}
+
+export type PortalEmailCodeLoginRequest = {
+  email: string
+  email_verification_code: string
+}
+
 export type PortalPasswordResetRequest = {
   account: string
   id_number: string
@@ -257,6 +279,7 @@ export type PortalApplicationUpsert = {
   education_experience?: string | null
   practice_experience?: string | null
   personal_profile?: string | null
+  material_list_attachment?: string | null
   recommendation_notes?: string | null
   personal_statement_text?: string | null
   signed_agreement?: boolean
@@ -280,8 +303,11 @@ export type PortalAttachmentCategory =
   | 'education_transcript'
   | 'education_degree_certificate'
   | 'english_certificate'
+  | 'achievement_award_certificate'
   | 'profile_photo'
+  | 'id_card_collage'
   | 'resume'
+  | 'supporting_material'
 
 export type PortalAttachmentUploadResponse = {
   category: PortalAttachmentCategory
@@ -295,6 +321,8 @@ const portalHttp = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 10000,
 })
+
+const PORTAL_EMAIL_REQUEST_TIMEOUT_MS = 60000
 
 portalHttp.interceptors.request.use((config) => {
   const token = localStorage.getItem(PORTAL_TOKEN_KEY)
@@ -331,11 +359,23 @@ export function registerPortalStudent(payload: PortalRegistrationRequest) {
 }
 
 export function sendPortalRegistrationEmailCode(payload: PortalRegistrationEmailCodeRequest) {
-  return portalHttp.post<PortalRegistrationEmailCodeResponse>('/portal/register/email-code', payload)
+  return portalHttp.post<PortalRegistrationEmailCodeResponse>('/portal/register/email-code', payload, {
+    timeout: PORTAL_EMAIL_REQUEST_TIMEOUT_MS,
+  })
 }
 
 export function loginPortalStudent(payload: PortalLoginRequest) {
   return portalHttp.post<PortalSessionResponse>('/portal/login', payload)
+}
+
+export function sendPortalLoginEmailCode(payload: PortalLoginEmailCodeRequest) {
+  return portalHttp.post<PortalRegistrationEmailCodeResponse>('/portal/login/email-code/send', payload, {
+    timeout: PORTAL_EMAIL_REQUEST_TIMEOUT_MS,
+  })
+}
+
+export function loginPortalStudentByEmailCode(payload: PortalEmailCodeLoginRequest) {
+  return portalHttp.post<PortalSessionResponse>('/portal/login/email-code', payload)
 }
 
 export function resetPortalStudentPassword(payload: PortalPasswordResetRequest) {

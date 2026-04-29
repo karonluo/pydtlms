@@ -44,9 +44,9 @@ const formSections = [
   { id: 'application-section', label: '报名信息', description: '填写获知渠道、研究中心志愿和导师选择。', icon: OfficeBuilding },
   { id: 'education-section', label: '教育经历', description: '请按最高学历到高中的顺序填写教育背景与附件。', icon: School },
   { id: 'practice-section', label: '实践经历', description: '补充项目、实习、工程实践或工作经历。', icon: Briefcase },
-  { id: 'english-section', label: '英语语言能力', description: '支持填写多条英语考试记录及证明材料。', icon: Reading },
+  { id: 'english-section', label: '英语能力', description: '请至少填写 1 条英语考试记录并上传证明材料。', icon: Reading },
   { id: 'family-section', label: '家庭情况', description: '父母信息必填，其他成员可按需补充。', icon: House },
-  { id: 'achievement-section', label: '获奖经历', description: '可补充论文、科研、学生活动和获奖成果。', icon: Medal },
+  { id: 'achievement-section', label: '成果经历', description: '可补充论文发表与获奖经历，最多填写 4 条。', icon: Medal },
   { id: 'statement-section', label: '个人陈述', description: '填写个人陈述、AI 思考并完成提交确认。', icon: EditPen },
 ]
 
@@ -905,7 +905,7 @@ onMounted(async () => {
   inset: 0;
   background-image:
     linear-gradient(180deg, rgba(8, 48, 115, 0.08), rgba(8, 48, 115, 0.34)),
-    url('/images/bottom_backgound.png');
+    url('/images/bottom_backgound.png?v=20260429');
   background-repeat: no-repeat;
   background-position: center bottom;
   background-size: cover;

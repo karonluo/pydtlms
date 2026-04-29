@@ -13,18 +13,16 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>实践经历列表</strong>
-        <span>可填写项目、实习、工程实践或工作经历。</span>
+        <span>默认保留 1 条空白记录，最多 2 条；如有更多内容，请在个人陈述与附件中补充上传。</span>
       </div>
       <button type="button" class="action-button" @click="addPractice">新增实践经历</button>
     </div>
 
-    <div v-if="!(form.practice_experiences && form.practice_experiences.length)" class="empty-card">当前未填写实践经历，可跳过。</div>
-
-    <div v-else class="record-list">
+    <div class="record-list">
       <section v-for="(item, index) in form.practice_experiences" :key="`practice-${index}`" class="record-card">
         <div class="record-card__header">
           <div><strong>实践经历 {{ index + 1 }}</strong><span>非必填</span></div>
-          <button type="button" class="link-button" @click="removePractice(index)">删除</button>
+          <button v-if="(form.practice_experiences?.length || 0) > 1" type="button" class="link-button" @click="removePractice(index)">删除</button>
         </div>
 
         <div class="section-grid">

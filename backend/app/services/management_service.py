@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
+from time import perf_counter
 import secrets
 import string
 from threading import Lock, RLock
@@ -131,6 +132,7 @@ PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 ListItemT = TypeVar("ListItemT")
 logger = logging.getLogger(__name__)
 FINAL_WORKFLOW_STATUSES = {"已通过", "已驳回"}
+ADMITTED_RECRUITMENT_APPLICATION_STATUSES = {"资格审核通过", "材料评分中", "面试待安排", "面试完成", "预录取", "同意录取"}
 PORTAL_REGISTRATION_EMAIL_CODE_LENGTH = 6
 PORTAL_REGISTRATION_EMAIL_CODE_EXPIRES_SECONDS = 10 * 60
 PORTAL_REGISTRATION_EMAIL_CODE_COOLDOWN_SECONDS = 60
@@ -149,6 +151,12 @@ DEFAULT_PORTAL_POLITICAL_STATUS_VALUES = (
     "无党派人士",
     "群众",
 )
+PORTAL_POLITICAL_STATUS_PRIORITY = {
+    "中共党员": 10,
+    "中共预备党员": 20,
+    "共青团员": 30,
+    "群众": 31,
+}
 DEFAULT_PORTAL_ETHNIC_GROUP_VALUES = (
     "汉族",
     "蒙古族",
@@ -541,6 +549,13 @@ class RuntimeManagementStore:
         if "teams" not in self.state:
             self.state["teams"] = self._bootstrap_teams_from_students()
             changed = True
+        postgres_students = self._load_students_from_postgres()
+        if postgres_students:
+            state_student_ids = {int(item.get("id", 0)) for item in self.state.setdefault("students", [])}
+            postgres_student_ids = {int(item.get("id", 0)) for item in postgres_students}
+            if state_student_ids != postgres_student_ids:
+                self.state["students"] = postgres_students
+                changed = True
         postgres_teams = self._load_teams_from_postgres()
         if postgres_teams:
             state_team_ids = {int(item.get("id", 0)) for item in self.state.setdefault("teams", [])}
@@ -667,12 +682,31 @@ class RuntimeManagementStore:
 
         return changed
 
+    def _load_students_from_postgres(self) -> list[dict[str, Any]]:
+        try:
+            return self._postgres_store.load_student_state()
+        except Exception as exc:
+            logger.warning("Load students from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            return []
+
     def _load_teams_from_postgres(self) -> list[dict[str, Any]]:
         try:
             return self._postgres_store.load_team_state()
         except Exception as exc:
             logger.warning("Load teams from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return []
+
+    def _refresh_students_from_postgres(self) -> None:
+        postgres_students = self._load_students_from_postgres()
+        if postgres_students:
+            self.state["students"] = postgres_students
+            self._counters["students"] = max([item.get("id", 0) for item in postgres_students], default=0)
+
+    def _refresh_teams_from_postgres(self) -> None:
+        postgres_teams = self._load_teams_from_postgres()
+        if postgres_teams:
+            self.state["teams"] = postgres_teams
+            self._counters["teams"] = max([item.get("id", 0) for item in postgres_teams], default=0)
 
     def _normalize_recruitment_application_profiles(self) -> bool:
         changed = False
@@ -877,6 +911,81 @@ class RuntimeManagementStore:
         if payload.advisor_name not in team_advisors:
             raise ValueError("Selected advisor does not belong to the selected center")
 
+    def _generate_admitted_student_no(self, enrollment_year: int) -> str:
+        prefix = f"D{enrollment_year}"
+        next_sequence = 1
+        for item in self._list("students"):
+            student_no = str(item.get("student_no") or "").strip()
+            if not student_no.startswith(prefix):
+                continue
+            suffix = student_no[len(prefix):]
+            if suffix.isdigit():
+                next_sequence = max(next_sequence, int(suffix) + 1)
+        return f"{prefix}{next_sequence:04d}"
+
+    def _find_student_for_recruitment_application(self, application: dict[str, Any], phone_number: str | None = None) -> dict[str, Any] | None:
+        full_name = str(application.get("student_name") or application.get("full_name") or "").strip()
+        phone_value = str(phone_number or application.get("phone_number") or "").strip()
+        for item in self._list("students"):
+            if phone_value and str(item.get("phone_number") or "").strip() == phone_value:
+                return item
+            if full_name and str(item.get("full_name") or "").strip() == full_name:
+                return item
+        return None
+
+    def _sync_student_master_from_recruitment_application(self, application: dict[str, Any]) -> StudentRecord | None:
+        status = str(application.get("application_status") or "").strip()
+        if status not in ADMITTED_RECRUITMENT_APPLICATION_STATUSES:
+            return None
+
+        portal_student_id = int(application.get("portal_student_id") or 0)
+        portal_student = next((item for item in self._list("portal_students") if int(item.get("id") or 0) == portal_student_id), None)
+        center_name = str(
+            (portal_student or {}).get("selected_team_name")
+            or application.get("first_choice")
+            or application.get("intended_field")
+            or ""
+        ).strip()
+        if not center_name:
+            return None
+
+        center = next((item for item in self._list("teams") if str(item.get("team_name") or "").strip() == center_name), None)
+        if center is None:
+            return None
+
+        advisor_candidates = self._normalize_name_list(center.get("advisor_names", []), center.get("lead_advisor_name"))
+        advisor_name = str(
+            (portal_student or {}).get("selected_advisor_name")
+            or application.get("intended_advisor_name")
+            or center.get("lead_advisor_name")
+            or (advisor_candidates[0] if advisor_candidates else "")
+        ).strip()
+        if advisor_candidates and advisor_name not in advisor_candidates:
+            advisor_name = advisor_candidates[0]
+        if not advisor_name:
+            return None
+
+        applied_at = str(application.get("applied_at") or application.get("created_at") or "").strip()
+        enrollment_year = int(applied_at[:4]) if len(applied_at) >= 4 and applied_at[:4].isdigit() else datetime.now().year
+        full_name = str(application.get("student_name") or application.get("full_name") or (portal_student or {}).get("full_name") or "").strip()
+        phone_value = str((portal_student or {}).get("phone_number") or application.get("phone_number") or "").strip() or None
+        political_status = str((portal_student or {}).get("political_status") or application.get("political_status") or "").strip() or None
+        existing_student = self._find_student_for_recruitment_application(application, phone_number=phone_value)
+        payload = StudentUpsert(
+            student_no=str(existing_student.get("student_no") or "").strip() if existing_student else self._generate_admitted_student_no(enrollment_year),
+            full_name=full_name,
+            status="在校",
+            advisor_name=advisor_name,
+            center_name=center_name,
+            degree_type="工程博士",
+            enrollment_year=enrollment_year,
+            phone_number=phone_value,
+            political_status=political_status,
+        )
+        if existing_student is not None:
+            return self.update_student(int(existing_student["id"]), payload)
+        return self.create_student(payload)
+
     def _validate_center_payload(self, payload: CenterUpsert, current_center_id: int | None = None) -> dict[str, Any]:
         for item in self._list("teams"):
             if item["team_name"] == payload.center_name and item["id"] != current_center_id:
@@ -943,11 +1052,21 @@ class RuntimeManagementStore:
     def _dict_option_values(self, dict_type: str) -> list[str]:
         return [item.value for item in self._dict_options(dict_type)]
 
+    def _reorder_portal_political_status_options(self, options: list[SelectOption]) -> list[SelectOption]:
+        return sorted(
+            options,
+            key=lambda item: (
+                PORTAL_POLITICAL_STATUS_PRIORITY.get(str(item.value or item.label), 1000),
+                str(item.label or item.value),
+            ),
+        )
+
     def get_portal_profile_options(self) -> PortalProfileOptionsResponse:
         political_status_options = self._dict_options("student_political_status")
         ethnic_group_options = self._dict_options("student_ethnic_group")
         if not political_status_options:
             political_status_options = self._select_options_from_values(DEFAULT_PORTAL_POLITICAL_STATUS_VALUES)
+        political_status_options = self._reorder_portal_political_status_options(political_status_options)
         if not ethnic_group_options:
             ethnic_group_options = self._select_options_from_values(DEFAULT_PORTAL_ETHNIC_GROUP_VALUES)
         return PortalProfileOptionsResponse(
@@ -1033,6 +1152,12 @@ class RuntimeManagementStore:
     def _portal_registration_email_cooldown_key(self, email: str) -> str:
         return build_cache_key("portal", "register", "email-cooldown", self._portal_registration_email_cache_token(email))
 
+    def _portal_login_email_code_key(self, email: str) -> str:
+        return build_cache_key("portal", "login", "email-code", self._portal_registration_email_cache_token(email))
+
+    def _portal_login_email_cooldown_key(self, email: str) -> str:
+        return build_cache_key("portal", "login", "email-cooldown", self._portal_registration_email_cache_token(email))
+
     def send_portal_registration_email_code(self, email: str) -> PortalRegistrationEmailCodeResponse:
         normalized_email = str(email or "").strip()
         with self._lock:
@@ -1102,6 +1227,79 @@ class RuntimeManagementStore:
             )
         except Exception as exc:
             logger.warning("Clear portal registration email code failed: %s", exc)
+
+    def send_portal_login_email_code(self, email: str) -> PortalRegistrationEmailCodeResponse:
+        normalized_email = str(email or "").strip()
+        with self._lock:
+            student = next((item for item in self._list("portal_students") if item.get("email") == normalized_email), None)
+            if not student:
+                raise ValueError("该邮箱未注册，请先注册")
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，请联系管理员")
+
+        if not self._email_service.enabled():
+            raise RuntimeError("邮件服务未启用，暂无法发送邮箱验证码")
+
+        try:
+            client = get_cache_client()
+            cooldown_key = self._portal_login_email_cooldown_key(normalized_email)
+            if client.exists(cooldown_key):
+                remaining_seconds = int(client.ttl(cooldown_key) or 0)
+                if remaining_seconds <= 0:
+                    remaining_seconds = PORTAL_REGISTRATION_EMAIL_CODE_COOLDOWN_SECONDS
+                raise ValueError(f"验证码已发送，请{remaining_seconds}秒后重试")
+
+            verification_code = "".join(
+                secrets.choice(string.digits) for _ in range(PORTAL_REGISTRATION_EMAIL_CODE_LENGTH)
+            )
+            client.set(
+                self._portal_login_email_code_key(normalized_email),
+                verification_code,
+                ex=PORTAL_REGISTRATION_EMAIL_CODE_EXPIRES_SECONDS,
+            )
+            client.set(cooldown_key, "1", ex=PORTAL_REGISTRATION_EMAIL_CODE_COOLDOWN_SECONDS)
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise RuntimeError("验证码服务暂不可用，请稍后再试") from exc
+
+        self._email_service.send_portal_login_verification_code(normalized_email, verification_code)
+        return PortalRegistrationEmailCodeResponse(
+            message="登录验证码已发送，请查收邮箱",
+            expires_in_seconds=PORTAL_REGISTRATION_EMAIL_CODE_EXPIRES_SECONDS,
+            cooldown_seconds=PORTAL_REGISTRATION_EMAIL_CODE_COOLDOWN_SECONDS,
+        )
+
+    def validate_portal_login_email_code(self, email: str, verification_code: str) -> None:
+        normalized_email = str(email or "").strip()
+        normalized_code = str(verification_code or "").strip()
+        try:
+            client = get_cache_client()
+            cached_code = client.get(self._portal_login_email_code_key(normalized_email))
+        except Exception as exc:
+            raise RuntimeError("验证码服务暂不可用，请稍后再试") from exc
+
+        if not isinstance(cached_code, (str, bytes, bytearray)):
+            raise ValueError("邮件验证码已过期或不存在，请重新获取")
+        if isinstance(cached_code, (bytes, bytearray)):
+            cached_text = cached_code.decode("utf-8", errors="ignore").strip()
+        else:
+            cached_text = cached_code.strip()
+        if not cached_text:
+            raise ValueError("邮件验证码已过期或不存在，请重新获取")
+        if cached_text != normalized_code:
+            raise ValueError("邮件验证码不正确")
+
+    def clear_portal_login_email_code(self, email: str) -> None:
+        normalized_email = str(email or "").strip()
+        try:
+            client = get_cache_client()
+            client.delete(
+                self._portal_login_email_code_key(normalized_email),
+                self._portal_login_email_cooldown_key(normalized_email),
+            )
+        except Exception as exc:
+            logger.warning("Clear portal login email code failed: %s", exc)
 
     def _workflow_business_key(self, flow_code: str, entity_id: int, existing_key: str | None = None, created_at: str | None = None) -> str:
         if existing_key:
@@ -1424,6 +1622,7 @@ class RuntimeManagementStore:
         node_key = runtime["node_key"]
         task_status = runtime["task_status"]
         task = dict(existing_task or {})
+        previous_node_key = task.get("node_key")
         changed = False
         if not existing_task:
             task["id"] = self._next_id("workflow_tasks")
@@ -1451,7 +1650,7 @@ class RuntimeManagementStore:
             "status": task_status,
             "current_node": definition["nodes"][node_key]["label"] if node_key else "流程结束",
             "current_handler": self._workflow_handler_display(flow_code, node_key, item) if node_key else "流程结束",
-            "due_at": task.get("due_at") if not node_key else task.get("due_at") or self._workflow_due_at(flow_code, node_key),
+            "due_at": task.get("due_at") if not node_key else (self._workflow_due_at(flow_code, node_key) if not task.get("due_at") or not previous_node_key else task.get("due_at")),
             "form_summary": self._workflow_form_summary(flow_code, item),
             "latest_comment": task.get("latest_comment"),
             "flow_code": flow_code,
@@ -1514,13 +1713,13 @@ class RuntimeManagementStore:
             self._postgres_store.update_runtime_recruitment_application(entity_id, payload)
             return
         if dataset_name == "scientific_reports":
-            self._postgres_store.update_runtime_scientific_report(entity_id, payload)
+            self._postgres_store.sync_scientific_report(payload)
             return
         if dataset_name == "outbound_studies":
-            self._postgres_store.update_runtime_outbound_study(entity_id, payload)
+            self._postgres_store.sync_outbound_study(payload)
             return
         if dataset_name == "theses":
-            self._postgres_store.update_runtime_thesis(entity_id, payload)
+            self._postgres_store.sync_thesis(payload)
             return
         raise ValueError(f"Unsupported managed dataset: {dataset_name}")
 
@@ -1531,11 +1730,10 @@ class RuntimeManagementStore:
         *,
         update_student_counter: bool = False,
     ) -> None:
-        self._postgres_store.update_runtime_portal_student(int(student["id"]), student)
+        counters = {"operation_logs": int(self._counters.get("operation_logs", 0))}
         if update_student_counter:
-            self._postgres_store.update_runtime_counter("portal_students", int(self._counters.get("portal_students", 0)))
-        self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-        self._postgres_store.insert_runtime_operation_log(operation_log)
+            counters["portal_students"] = int(self._counters.get("portal_students", 0))
+        self._postgres_store.sync_portal_student(student, operation_log, counters=counters)
 
     def _persist_portal_application_submission(
         self,
@@ -1594,6 +1792,15 @@ class RuntimeManagementStore:
 
     def get_workflow_task_detail(self, task_id: int, principal: Any) -> dict[str, Any]:
         principal_summary = self._principal_summary(principal)
+        try:
+            task = self._postgres_store.get_workflow_task_snapshot(task_id)
+            if task is not None:
+                return {
+                    "task": self._build_workflow_task_record(task, principal_roles=principal_summary["roles"]),
+                    "history": [self._build_workflow_history_record(item) for item in task.get("history", [])],
+                }
+        except Exception as exc:
+            logger.warning("Load workflow task detail from PostgreSQL failed, fallback to in-memory state: %s", exc)
         _, task = self._find_required("workflow_tasks", task_id)
         return {
             "task": self._build_workflow_task_record(task, principal_roles=principal_summary["roles"]),
@@ -1603,6 +1810,7 @@ class RuntimeManagementStore:
     def execute_workflow_action(self, task_id: int, action: str, comment: str | None, principal: Any) -> dict[str, Any]:
         principal_summary = self._principal_summary(principal)
         notification_payload: dict[str, str] | None = None
+        sync_student_master = False
         with self._lock:
             index, task = self._find_required("workflow_tasks", task_id)
             flow_code = task.get("flow_code")
@@ -1654,17 +1862,22 @@ class RuntimeManagementStore:
             )
             try:
                 self._update_runtime_managed_entity(definition["business_dataset"], int(task["entity_id"]), updated_entity)
-                self._postgres_store.update_runtime_workflow_task(int(updated_task["id"]), updated_task)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_workflow_task(
+                    updated_task,
+                    operation_log,
+                    counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+                )
             except Exception:
                 self._save()
             if flow_code == "recruitment_application":
                 notification_payload = self._build_recruitment_email_notification(updated_entity)
+                sync_student_master = str(updated_entity.get("application_status") or "").strip() in ADMITTED_RECRUITMENT_APPLICATION_STATUSES
             result = {
                 "task": self._build_workflow_task_record(updated_task, principal_roles=principal_summary["roles"]),
                 "history": [self._build_workflow_history_record(item) for item in updated_task.get("history", [])],
             }
+            if sync_student_master:
+                self._sync_student_master_from_recruitment_application(updated_entity)
 
         if notification_payload is not None and self._email_service.enabled():
             self._email_service.send_recruitment_status_update(**notification_payload)
@@ -1672,7 +1885,7 @@ class RuntimeManagementStore:
 
     def _build_recruitment_email_notification(self, application: dict[str, Any]) -> dict[str, str] | None:
         status = str(application.get("application_status") or "").strip()
-        if status not in {"资格审核通过", "预录取", "同意录取"}:
+        if status not in {"资格审核通过", "预录取", "同意录取", "不录取"}:
             return None
 
         email = str(application.get("email") or "").strip()
@@ -2145,10 +2358,14 @@ class RuntimeManagementStore:
             self._list("recruitment_plans").insert(0, item)
             operation_log = self._record_operation("招生管理", "招生计划", str(item["id"]), "新增", f'新增招生计划 {item["plan_name"]}')
             try:
-                self._postgres_store.update_runtime_recruitment_plan(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("recruitment_plans", int(self._counters.get("recruitment_plans", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_recruitment_plan(
+                    item,
+                    operation_log,
+                    counters={
+                        "recruitment_plans": int(self._counters.get("recruitment_plans", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return self._build_recruit_plan_record(item)
@@ -2160,9 +2377,13 @@ class RuntimeManagementStore:
             self._list("recruitment_plans")[index] = updated
             operation_log = self._record_operation("招生管理", "招生计划", str(plan_id), "编辑", f'更新招生计划 {updated["plan_name"]}')
             try:
-                self._postgres_store.update_runtime_recruitment_plan(int(plan_id), updated)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_recruitment_plan(
+                    updated,
+                    operation_log,
+                    counters={
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return self._build_recruit_plan_record(updated)
@@ -2353,6 +2574,7 @@ class RuntimeManagementStore:
         return build_recruitment_template([])
 
     def register_portal_student(self, payload: PortalRegistrationRequest) -> PortalRegistrationResponse:
+        request_started_at = perf_counter()
         with self._lock:
             now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if any(item.get("phone_number") == payload.phone_number for item in self._list("portal_students")):
@@ -2364,11 +2586,14 @@ class RuntimeManagementStore:
 
             item = payload.model_dump()
             password = item.pop("password")
+            password_hash_started_at = perf_counter()
+            password_hash = PASSWORD_CONTEXT.hash(password)
+            password_hash_elapsed_ms = round((perf_counter() - password_hash_started_at) * 1000, 2)
             item.update(
                 {
                     "id": self._next_id("portal_students"),
                     "account_status": "启用",
-                    "password_hash": PASSWORD_CONTEXT.hash(password),
+                    "password_hash": password_hash,
                     "gender": None,
                     "birth_date": None,
                     "ethnic_group": None,
@@ -2400,14 +2625,30 @@ class RuntimeManagementStore:
             )
             self._list("portal_students").insert(0, item)
             operation_log = self._record_operation("学生门户", "门户注册", str(item["id"]), "注册", f'学生 {item["full_name"]} 完成门户注册', operator_username=item["phone_number"])
+            persist_started_at = perf_counter()
             try:
                 self._persist_portal_student_change(item, operation_log, update_student_counter=True)
-            except Exception:
+                persist_mode = "incremental"
+                persist_elapsed_ms = round((perf_counter() - persist_started_at) * 1000, 2)
+            except Exception as exc:
+                logger.warning("Portal register incremental persistence failed, fallback to full save: %s", exc, exc_info=True)
                 self._save()
+                persist_mode = "full_save_fallback"
+                persist_elapsed_ms = round((perf_counter() - persist_started_at) * 1000, 2)
             response = PortalRegistrationResponse(message="注册成功，请使用手机号或邮箱登录", student=self._build_portal_student_record(item))
 
+        total_elapsed_ms = round((perf_counter() - request_started_at) * 1000, 2)
+        logger.info(
+            "Portal register completed: student_id=%s mode=%s hash_ms=%s persist_ms=%s total_ms=%s",
+            item["id"],
+            persist_mode,
+            password_hash_elapsed_ms,
+            persist_elapsed_ms,
+            total_elapsed_ms,
+        )
+
         if self._email_service.enabled():
-            self._email_service.send_portal_registration_success(item["full_name"], item["email"])
+            self._email_service.send_portal_registration_success_async(item["full_name"], item["email"])
         return response
 
     def login_portal_student(self, payload: PortalLoginRequest) -> PortalStudentRecord:
@@ -2428,6 +2669,20 @@ class RuntimeManagementStore:
             if not password_hash or not PASSWORD_CONTEXT.verify(payload.password, password_hash):
                 raise ValueError("账号或密码错误")
             return self._build_portal_student_record(student)
+
+    def login_portal_student_by_email_code(self, email: str, verification_code: str) -> PortalStudentRecord:
+        normalized_email = str(email or "").strip()
+        self.validate_portal_login_email_code(normalized_email, verification_code)
+
+        with self._lock:
+            student = next((item for item in self._list("portal_students") if item.get("email") == normalized_email), None)
+            if not student:
+                raise ValueError("账号不存在")
+            if self._normalize_portal_account_status(student.get("account_status")) != "启用":
+                raise ValueError("账号已停用，请联系管理员")
+
+        self.clear_portal_login_email_code(normalized_email)
+        return self._build_portal_student_record(student)
 
     def reset_portal_student_password(self, payload: PortalPasswordResetRequest) -> None:
         account = payload.account.strip()
@@ -2582,6 +2837,8 @@ class RuntimeManagementStore:
             created_application = False
             created_workflow_task = False
             if existing_application:
+                previous_application_status = str(existing_application.get("application_status") or "").strip()
+                resubmitting_rejected_application = previous_application_status == "不录取"
                 existing_application.update(
                     {
                         "student_name": student["full_name"],
@@ -2613,12 +2870,30 @@ class RuntimeManagementStore:
                         "source_channel_other": payload.source_channel_other,
                         "portal_student_id": student_id,
                         "applied_at": submitted_at,
+                        "material_status": "待审核" if resubmitting_rejected_application else existing_application.get("material_status") or "待审核",
+                        "application_status": "报名已提交" if resubmitting_rejected_application else previous_application_status,
                     }
                 )
                 workflow_located = self._workflow_task_index_by_business_key(str(existing_application.get("business_key") or ""))
                 workflow_task = None
                 if workflow_located is not None:
                     workflow_task, task_changed = self._sync_managed_workflow_task("recruitment_application", existing_application, existing_task=workflow_located[1])
+                    if resubmitting_rejected_application:
+                        workflow_task["latest_comment"] = "学生重新提交申请，等待重新审核。"
+                        workflow_task.setdefault("history", []).append(
+                            {
+                                "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "operator_username": student["phone_number"],
+                                "operator_full_name": student["full_name"],
+                                "action": "resubmit",
+                                "action_label": "重新提交",
+                                "from_node": "流程结束",
+                                "to_node": workflow_task.get("current_node") or "资格审核",
+                                "result_status": workflow_task.get("status") or "待处理",
+                                "comment": workflow_task["latest_comment"],
+                            }
+                        )
+                        task_changed = True
                     if task_changed:
                         self._list("workflow_tasks")[workflow_located[0]] = workflow_task
                 else:
@@ -2996,6 +3271,8 @@ class RuntimeManagementStore:
                 selected_plan_name=plan_name_map.get(int(plan_id or 0)) if plan_id is not None else None,
                 selected_center_name=str(student.get("selected_team_name") or "") or None,
                 selected_advisor_name=str(student.get("selected_advisor_name") or "") or None,
+                recruitment_application_id=int(latest_application.get("id") or 0) if latest_application else None,
+                recruitment_application_business_key=(str(latest_application.get("business_key") or "") or None) if latest_application else None,
                 recruitment_application_status=application_status or None,
                 registered_at=str(student.get("created_at") or "") or None,
                 submitted_at=submitted_at or None,
@@ -3049,6 +3326,7 @@ class RuntimeManagementStore:
             operation_log = self._record_operation("学生管理", "学生主档", str(item["id"]), "新增", f'新增学生 {item["full_name"]}')
             try:
                 self._persist_student_change(item, operation_log, created=True)
+                self._refresh_students_from_postgres()
             except Exception as exc:
                 logger.warning("Incremental student create sync failed, fallback to full state save: %s", exc)
                 self._save()
@@ -3063,6 +3341,7 @@ class RuntimeManagementStore:
             operation_log = self._record_operation("学生管理", "学生主档", str(student_id), "编辑", f'更新学生 {updated["full_name"]}')
             try:
                 self._persist_student_change(updated, operation_log)
+                self._refresh_students_from_postgres()
             except Exception as exc:
                 logger.warning("Incremental student update sync failed, fallback to full state save: %s", exc)
                 self._save()
@@ -3082,6 +3361,7 @@ class RuntimeManagementStore:
                         "operation_logs": int(self._counters.get("operation_logs", 0)),
                     },
                 )
+                self._refresh_students_from_postgres()
             except Exception as exc:
                 logger.warning("Incremental student delete sync failed, fallback to full state save: %s", exc)
                 self._save()
@@ -3107,6 +3387,7 @@ class RuntimeManagementStore:
                         "operation_logs": int(self._counters.get("operation_logs", 0)),
                     },
                 )
+                self._refresh_teams_from_postgres()
             except Exception as exc:
                 logger.warning("Incremental center create sync failed, fallback to full state save: %s", exc)
                 self._save()
@@ -3114,10 +3395,8 @@ class RuntimeManagementStore:
 
     def update_center(self, center_id: int, payload: CenterUpsert) -> CenterRecord:
         with self._lock:
-            postgres_teams = self._load_teams_from_postgres()
-            if postgres_teams:
-                self.state["teams"] = postgres_teams
-                self._counters["teams"] = max([item.get("id", 0) for item in postgres_teams], default=0)
+            self._refresh_teams_from_postgres()
+            self._refresh_students_from_postgres()
             index, current = self._find_required("teams", center_id)
             validated = self._validate_center_payload(payload, current_center_id=center_id)
             affected_students: list[dict[str, Any]] = []
@@ -3141,6 +3420,8 @@ class RuntimeManagementStore:
                         "operation_logs": int(self._counters.get("operation_logs", 0)),
                     },
                 )
+                self._refresh_teams_from_postgres()
+                self._refresh_students_from_postgres()
             except Exception as exc:
                 logger.warning("Incremental center sync failed, fallback to full state save: %s", exc)
                 self._save()
@@ -3162,6 +3443,7 @@ class RuntimeManagementStore:
                         "operation_logs": int(self._counters.get("operation_logs", 0)),
                     },
                 )
+                self._refresh_teams_from_postgres()
             except Exception as exc:
                 logger.warning("Incremental center delete sync failed, fallback to full state save: %s", exc)
                 self._save()
@@ -3239,10 +3521,14 @@ class RuntimeManagementStore:
             self._list("training_plans").insert(0, item)
             operation_log = self._record_operation("培养管理", "培养方案", str(item["id"]), "登记方案", f'登记培养方案 {item["student_name"]}')
             try:
-                self._postgres_store.update_runtime_training_plan(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("training_plans", int(self._counters.get("training_plans", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_training_plan(
+                    item,
+                    operation_log,
+                    counters={
+                        "training_plans": int(self._counters.get("training_plans", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return TrainingPlanRecord(**item)
@@ -3254,9 +3540,7 @@ class RuntimeManagementStore:
             self._list("training_plans")[index] = updated
             operation_log = self._record_operation("培养管理", "培养方案", str(plan_id), "维护方案", f'维护培养方案 {updated["student_name"]}')
             try:
-                self._postgres_store.update_runtime_training_plan(int(plan_id), updated)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_training_plan(updated, operation_log)
             except Exception:
                 self._save()
             return TrainingPlanRecord(**updated)
@@ -3267,9 +3551,8 @@ class RuntimeManagementStore:
             self._list("training_plans").pop(index)
             operation_log = self._record_operation("培养管理", "培养方案", str(plan_id), "删除方案", f'删除培养方案 {item["student_name"]}')
             try:
-                self._postgres_store.delete_runtime_training_plan(int(plan_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_training_plan(int(plan_id))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -3326,13 +3609,17 @@ class RuntimeManagementStore:
             task_located = self._workflow_task_index_by_business_key(str(item.get("business_key") or ""))
             operation_log = self._record_operation("培养管理", "科研报告", str(item["id"]), "登记报告", f'登记科研报告 {item["student_name"]}', operator_username=operator["username"])
             try:
-                self._postgres_store.update_runtime_scientific_report(int(item["id"]), item)
+                self._postgres_store.sync_scientific_report(
+                    item,
+                    operation_log,
+                    counters={
+                        "scientific_reports": int(self._counters.get("scientific_reports", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                        **({"workflow_tasks": int(self._counters.get("workflow_tasks", 0))} if task_located is not None else {}),
+                    },
+                )
                 if task_located is not None:
-                    self._postgres_store.update_runtime_workflow_task(int(task_located[1]["id"]), task_located[1])
-                    self._postgres_store.update_runtime_counter("workflow_tasks", int(self._counters.get("workflow_tasks", 0)))
-                self._postgres_store.update_runtime_counter("scientific_reports", int(self._counters.get("scientific_reports", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_workflow_task(task_located[1])
             except Exception:
                 self._save()
             return ScientificReportRecord(**item)
@@ -3354,11 +3641,9 @@ class RuntimeManagementStore:
             self._list("scientific_reports")[index] = updated
             operation_log = self._record_operation("培养管理", "科研报告", str(report_id), "维护报告", f'维护科研报告 {updated["student_name"]}')
             try:
-                self._postgres_store.update_runtime_scientific_report(int(report_id), updated)
+                self._postgres_store.sync_scientific_report(updated, operation_log)
                 if task is not None:
-                    self._postgres_store.update_runtime_workflow_task(int(task["id"]), task)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_workflow_task(task)
             except Exception:
                 self._save()
             return ScientificReportRecord(**updated)
@@ -3366,12 +3651,14 @@ class RuntimeManagementStore:
     def delete_scientific_report(self, report_id: int) -> None:
         with self._lock:
             index, item = self._find_required("scientific_reports", report_id)
+            located = self._workflow_task_index_by_entity("scientific_report", report_id)
             self._list("scientific_reports").pop(index)
             operation_log = self._record_operation("培养管理", "科研报告", str(report_id), "删除报告", f'删除科研报告 {item["student_name"]}')
             try:
-                self._postgres_store.delete_runtime_scientific_report(int(report_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_scientific_report(int(report_id))
+                if located is not None:
+                    self._postgres_store.delete_workflow_task(int(located[1]["id"]), located[1].get("process_instance_id"))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -3432,13 +3719,17 @@ class RuntimeManagementStore:
             task_located = self._workflow_task_index_by_business_key(str(item.get("business_key") or ""))
             operation_log = self._record_operation("培养管理", "外出研修", str(item["id"]), "发起研修", f'发起外出研修 {item["student_name"]}', operator_username=operator["username"])
             try:
-                self._postgres_store.update_runtime_outbound_study(int(item["id"]), item)
+                self._postgres_store.sync_outbound_study(
+                    item,
+                    operation_log,
+                    counters={
+                        "outbound_studies": int(self._counters.get("outbound_studies", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                        **({"workflow_tasks": int(self._counters.get("workflow_tasks", 0))} if task_located is not None else {}),
+                    },
+                )
                 if task_located is not None:
-                    self._postgres_store.update_runtime_workflow_task(int(task_located[1]["id"]), task_located[1])
-                    self._postgres_store.update_runtime_counter("workflow_tasks", int(self._counters.get("workflow_tasks", 0)))
-                self._postgres_store.update_runtime_counter("outbound_studies", int(self._counters.get("outbound_studies", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_workflow_task(task_located[1])
             except Exception:
                 self._save()
             return OutboundStudyRecord(**item)
@@ -3460,11 +3751,9 @@ class RuntimeManagementStore:
             self._list("outbound_studies")[index] = updated
             operation_log = self._record_operation("培养管理", "外出研修", str(study_id), "维护研修", f'维护外出研修 {updated["student_name"]}')
             try:
-                self._postgres_store.update_runtime_outbound_study(int(study_id), updated)
+                self._postgres_store.sync_outbound_study(updated, operation_log)
                 if task is not None:
-                    self._postgres_store.update_runtime_workflow_task(int(task["id"]), task)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_workflow_task(task)
             except Exception:
                 self._save()
             return OutboundStudyRecord(**updated)
@@ -3472,12 +3761,14 @@ class RuntimeManagementStore:
     def delete_outbound_study(self, study_id: int) -> None:
         with self._lock:
             index, item = self._find_required("outbound_studies", study_id)
+            located = self._workflow_task_index_by_entity("outbound_study", study_id)
             self._list("outbound_studies").pop(index)
             operation_log = self._record_operation("培养管理", "外出研修", str(study_id), "删除研修", f'删除外出研修 {item["student_name"]}')
             try:
-                self._postgres_store.delete_runtime_outbound_study(int(study_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_outbound_study(int(study_id))
+                if located is not None:
+                    self._postgres_store.delete_workflow_task(int(located[1]["id"]), located[1].get("process_instance_id"))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -3522,6 +3813,20 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> ThesisListResponse:
+        try:
+            items, total = self._postgres_store.list_theses_page(
+                keyword=keyword,
+                degree_status=degree_status,
+                advisor_name=advisor_name,
+                thesis_status=thesis_status,
+                page=page,
+                page_size=page_size,
+            )
+            records = [ThesisRecord(**item) for item in items]
+            return ThesisListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query theses from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("theses"))
         if degree_status:
             items = [item for item in items if item["degree_status"] == degree_status]
@@ -3553,13 +3858,17 @@ class RuntimeManagementStore:
             task_located = self._workflow_task_index_by_business_key(str(item.get("business_key") or ""))
             operation_log = self._record_operation("学位管理", "论文主档", str(item["id"]), "新增", f'新增论文 {item["student_name"]}', operator_username=operator["username"])
             try:
-                self._postgres_store.update_runtime_thesis(int(item["id"]), item)
+                self._postgres_store.sync_thesis(
+                    item,
+                    operation_log,
+                    counters={
+                        "theses": int(self._counters.get("theses", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                        **({"workflow_tasks": int(self._counters.get("workflow_tasks", 0))} if task_located is not None else {}),
+                    },
+                )
                 if task_located is not None:
-                    self._postgres_store.update_runtime_workflow_task(int(task_located[1]["id"]), task_located[1])
-                    self._postgres_store.update_runtime_counter("workflow_tasks", int(self._counters.get("workflow_tasks", 0)))
-                self._postgres_store.update_runtime_counter("theses", int(self._counters.get("theses", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_workflow_task(task_located[1])
             except Exception:
                 self._save()
             return ThesisRecord(**item)
@@ -3581,11 +3890,9 @@ class RuntimeManagementStore:
             self._list("theses")[index] = updated
             operation_log = self._record_operation("学位管理", "论文主档", str(thesis_id), "编辑", f'更新论文 {updated["student_name"]}')
             try:
-                self._postgres_store.update_runtime_thesis(int(thesis_id), updated)
+                self._postgres_store.sync_thesis(updated, operation_log)
                 if task is not None:
-                    self._postgres_store.update_runtime_workflow_task(int(task["id"]), task)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_workflow_task(task)
             except Exception:
                 self._save()
             return ThesisRecord(**updated)
@@ -3593,12 +3900,14 @@ class RuntimeManagementStore:
     def delete_thesis(self, thesis_id: int) -> None:
         with self._lock:
             index, item = self._find_required("theses", thesis_id)
+            located = self._workflow_task_index_by_entity("thesis", thesis_id)
             self._list("theses").pop(index)
             operation_log = self._record_operation("学位管理", "论文主档", str(thesis_id), "删除", f'删除论文 {item["student_name"]}')
             try:
-                self._postgres_store.delete_runtime_thesis(int(thesis_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_thesis(int(thesis_id))
+                if located is not None:
+                    self._postgres_store.delete_workflow_task(int(located[1]["id"]), located[1].get("process_instance_id"))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -3611,6 +3920,20 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> ThesisReviewListResponse:
+        try:
+            items, total = self._postgres_store.list_thesis_reviews_page(
+                thesis_id=thesis_id,
+                keyword=keyword,
+                expert_name=expert_name,
+                review_status=review_status,
+                page=page,
+                page_size=page_size,
+            )
+            records = [ThesisReviewRecord(**item) for item in items]
+            return ThesisReviewListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query thesis reviews from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("thesis_reviews"))
         if thesis_id is not None:
             items = [item for item in items if item["thesis_id"] == thesis_id]
@@ -3631,10 +3954,14 @@ class RuntimeManagementStore:
             self._list("thesis_reviews").insert(0, item)
             operation_log = self._record_operation("学位管理", "盲审意见", str(item["id"]), "新增", f'新增盲审意见 {item["expert_name"]}')
             try:
-                self._postgres_store.update_runtime_thesis_review(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("thesis_reviews", int(self._counters.get("thesis_reviews", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_thesis_review(
+                    item,
+                    operation_log,
+                    counters={
+                        "thesis_reviews": int(self._counters.get("thesis_reviews", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return ThesisReviewRecord(**item)
@@ -3646,9 +3973,7 @@ class RuntimeManagementStore:
             self._list("thesis_reviews")[index] = updated
             operation_log = self._record_operation("学位管理", "盲审意见", str(review_id), "编辑", f'更新盲审意见 {updated["expert_name"]}')
             try:
-                self._postgres_store.update_runtime_thesis_review(int(review_id), updated)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_thesis_review(updated, operation_log)
             except Exception:
                 self._save()
             return ThesisReviewRecord(**updated)
@@ -3731,6 +4056,19 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> RoleListResponse:
+        try:
+            items, total = self._postgres_store.list_roles_page(
+                keyword=keyword,
+                scope_name=scope_name,
+                permission=permission,
+                page=page,
+                page_size=page_size,
+            )
+            records = [RoleRecord(**item) for item in items]
+            return RoleListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query roles from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("roles"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["role_code"], item["role_name"], item["scope_name"], keyword=keyword)]
@@ -3752,10 +4090,14 @@ class RuntimeManagementStore:
             self._list("roles").insert(0, item)
             operation_log = self._record_operation("系统治理", "角色", str(item["id"]), "新建角色", f'新建角色 {item["role_name"]}')
             try:
-                self._postgres_store.update_runtime_role(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("roles", int(self._counters.get("roles", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_role(
+                    item,
+                    operation_log,
+                    counters={
+                        "roles": int(self._counters.get("roles", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return self._build_role_record(item)
@@ -3790,13 +4132,13 @@ class RuntimeManagementStore:
                         affected_profiles.append((username, updated_profile))
             operation_log = self._record_operation("系统治理", "角色", str(role_id), "调整权限", f'更新角色 {updated["role_name"]} 的权限配置')
             try:
-                self._postgres_store.update_runtime_role(int(role_id), updated)
+                self._postgres_store.sync_role(updated, operation_log)
                 for affected_user in affected_users:
-                    self._postgres_store.update_runtime_system_user(int(affected_user["id"]), affected_user)
+                    affected_profile = self.state.setdefault("profiles", {}).get(affected_user["username"])
+                    self._postgres_store.sync_system_user(affected_user, affected_profile)
                 for username, affected_profile in affected_profiles:
-                    self._postgres_store.update_runtime_profile(username, affected_profile)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    if username not in {user["username"] for user in affected_users}:
+                        self._postgres_store.sync_user_profile(affected_profile)
             except Exception:
                 self._save()
             return self._build_role_record(updated)
@@ -3810,9 +4152,8 @@ class RuntimeManagementStore:
             self._list("roles").pop(index)
             operation_log = self._record_operation("系统治理", "角色", str(role_id), "删除角色", f'删除角色 {item["role_name"]}')
             try:
-                self._postgres_store.delete_runtime_role(int(role_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_role(int(role_id))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -3881,11 +4222,15 @@ class RuntimeManagementStore:
             profile = self.state["profiles"][item["username"]]
             operation_log = self._record_operation("系统治理", "系统用户", str(item["id"]), "新建账号", f'新建系统账号 {item["full_name"]}')
             try:
-                self._postgres_store.update_runtime_system_user(int(item["id"]), item)
-                self._postgres_store.update_runtime_profile(item["username"], profile)
-                self._postgres_store.update_runtime_counter("system_users", int(self._counters.get("system_users", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_system_user(
+                    item,
+                    profile,
+                    operation_log,
+                    counters={
+                        "system_users": int(self._counters.get("system_users", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return self._build_system_user_record(item)
@@ -3920,12 +4265,9 @@ class RuntimeManagementStore:
             current_profile = self.state["profiles"][updated["username"]]
             operation_log = self._record_operation("系统治理", "系统用户", str(user_id), action_name, f'更新系统账号 {updated["full_name"]}')
             try:
-                self._postgres_store.update_runtime_system_user(int(user_id), updated)
-                self._postgres_store.update_runtime_profile(updated["username"], current_profile)
+                self._postgres_store.sync_system_user(updated, current_profile, operation_log)
                 if item["username"] != updated["username"]:
-                    self._postgres_store.delete_runtime_profile(item["username"])
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.delete_user_profile(item["username"])
             except Exception:
                 self._save()
             return self._build_system_user_record(updated)
@@ -3939,10 +4281,8 @@ class RuntimeManagementStore:
             self.state.setdefault("profiles", {}).pop(item["username"], None)
             operation_log = self._record_operation("系统治理", "系统用户", str(user_id), "删除账号", f'删除系统账号 {item["full_name"]}')
             try:
-                self._postgres_store.delete_runtime_system_user(int(user_id))
-                self._postgres_store.delete_runtime_profile(item["username"])
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_system_user(int(user_id), item["username"])
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -3954,6 +4294,18 @@ class RuntimeManagementStore:
         return BulkActionResponse(success_count=success_count)
 
     def get_audit_policy_records(self, keyword: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> AuditPolicyListResponse:
+        try:
+            items, total = self._postgres_store.list_audit_policies_page(
+                keyword=keyword,
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
+            records = [AuditPolicyRecord(**item) for item in items]
+            return AuditPolicyListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query audit policies from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("audit_policies"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["item"], item["policy"], keyword=keyword)]
@@ -3970,10 +4322,14 @@ class RuntimeManagementStore:
             self._list("audit_policies").insert(0, item)
             operation_log = self._record_operation("系统治理", "审计策略", str(item["id"]), "新建策略", f'新建审计策略 {item["item"]}')
             try:
-                self._postgres_store.update_runtime_audit_policy(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("audit_policies", int(self._counters.get("audit_policies", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_audit_policy(
+                    item,
+                    operation_log,
+                    counters={
+                        "audit_policies": int(self._counters.get("audit_policies", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return AuditPolicyRecord(**item)
@@ -3985,9 +4341,7 @@ class RuntimeManagementStore:
             self._list("audit_policies")[index] = updated
             operation_log = self._record_operation("系统治理", "审计策略", str(policy_id), "维护策略", f'更新审计策略 {updated["item"]}')
             try:
-                self._postgres_store.update_runtime_audit_policy(int(policy_id), updated)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_audit_policy(updated, operation_log)
             except Exception:
                 self._save()
             return AuditPolicyRecord(**updated)
@@ -3998,9 +4352,8 @@ class RuntimeManagementStore:
             self._list("audit_policies").pop(index)
             operation_log = self._record_operation("系统治理", "审计策略", str(policy_id), "删除策略", f'删除审计策略 {item["item"]}')
             try:
-                self._postgres_store.delete_runtime_audit_policy(int(policy_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_audit_policy(int(policy_id))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -4019,6 +4372,19 @@ class RuntimeManagementStore:
         page: int = 1,
         page_size: int = 10,
     ) -> IntegrationListResponse:
+        try:
+            items, total = self._postgres_store.list_integrations_page(
+                keyword=keyword,
+                status=status,
+                direction=direction,
+                page=page,
+                page_size=page_size,
+            )
+            records = [IntegrationRecord(**item) for item in items]
+            return IntegrationListResponse(items=records, total=total, page=page, page_size=page_size)
+        except Exception as exc:
+            logger.warning("Query integrations from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
+
         items = list(self._list("integrations"))
         if keyword:
             items = [item for item in items if self._matches_keyword(item["name"], item["owner"], item["direction"], keyword=keyword)]
@@ -4037,10 +4403,14 @@ class RuntimeManagementStore:
             self._list("integrations").insert(0, item)
             operation_log = self._record_operation("系统治理", "集成链路", str(item["id"]), "新建链路", f'新建集成链路 {item["name"]}')
             try:
-                self._postgres_store.update_runtime_integration(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("integrations", int(self._counters.get("integrations", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_integration(
+                    item,
+                    operation_log,
+                    counters={
+                        "integrations": int(self._counters.get("integrations", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return IntegrationRecord(**item)
@@ -4052,9 +4422,7 @@ class RuntimeManagementStore:
             self._list("integrations")[index] = updated
             operation_log = self._record_operation("系统治理", "集成链路", str(integration_id), "维护链路", f'更新集成链路 {updated["name"]}')
             try:
-                self._postgres_store.update_runtime_integration(int(integration_id), updated)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_integration(updated, operation_log)
             except Exception:
                 self._save()
             return IntegrationRecord(**updated)
@@ -4065,9 +4433,8 @@ class RuntimeManagementStore:
             self._list("integrations").pop(index)
             operation_log = self._record_operation("系统治理", "集成链路", str(integration_id), "删除链路", f'删除集成链路 {item["name"]}')
             try:
-                self._postgres_store.delete_runtime_integration(int(integration_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_integration(int(integration_id), item["name"])
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -4205,10 +4572,14 @@ class RuntimeManagementStore:
             self._list("workflow_tasks").insert(0, item)
             operation_log = self._record_operation("审批中心", "审批任务", str(item["id"]), "新增", f'新增审批任务 {item["title"]}')
             try:
-                self._postgres_store.update_runtime_workflow_task(int(item["id"]), item)
-                self._postgres_store.update_runtime_counter("workflow_tasks", int(self._counters.get("workflow_tasks", 0)))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_workflow_task(
+                    item,
+                    operation_log,
+                    counters={
+                        "workflow_tasks": int(self._counters.get("workflow_tasks", 0)),
+                        "operation_logs": int(self._counters.get("operation_logs", 0)),
+                    },
+                )
             except Exception:
                 self._save()
             return WorkflowTaskRecord(**item)
@@ -4223,9 +4594,7 @@ class RuntimeManagementStore:
             self._list("workflow_tasks")[index] = updated
             operation_log = self._record_operation("审批中心", "审批任务", str(task_id), "编辑", f'更新审批任务 {updated["title"]}')
             try:
-                self._postgres_store.update_runtime_workflow_task(int(task_id), updated)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.sync_workflow_task(updated, operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
             return WorkflowTaskRecord(**updated)
@@ -4238,9 +4607,8 @@ class RuntimeManagementStore:
             self._list("workflow_tasks").pop(index)
             operation_log = self._record_operation("审批中心", "审批任务", str(task_id), "删除", f'删除审批任务 {item["title"]}')
             try:
-                self._postgres_store.delete_runtime_workflow_task(int(task_id))
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                self._postgres_store.delete_workflow_task(int(task_id), item.get("process_instance_id"))
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
 
@@ -4257,6 +4625,16 @@ class RuntimeManagementStore:
         )
 
     def get_profile(self, username: str) -> UserProfile:
+        profile = None
+        try:
+            profile = self._postgres_store.get_user_profile(username)
+        except Exception as exc:
+            logger.warning("Load profile from PostgreSQL failed for %s: %s", username, exc)
+
+        if profile:
+            self.state.setdefault("profiles", {})[username] = profile
+            return UserProfile(**profile)
+
         profile = self.state.setdefault("profiles", {}).get(username)
         if not profile:
             fallback = next((item for item in self._list("system_users") if item["username"] == username), None)
@@ -4274,7 +4652,7 @@ class RuntimeManagementStore:
             }
             self.state.setdefault("profiles", {})[username] = profile
             try:
-                self._postgres_store.update_runtime_profile(username, profile)
+                self._postgres_store.sync_user_profile(profile)
             except Exception as exc:
                 logger.warning("Profile fallback runtime sync failed for %s: %s", username, exc)
         return UserProfile(**profile)
@@ -4292,11 +4670,11 @@ class RuntimeManagementStore:
                     break
             operation_log = self._record_operation("个人空间", "个人资料", username, "编辑", f'更新个人资料 {updated["full_name"]}', operator_username=username)
             try:
-                self._postgres_store.update_runtime_profile(username, updated)
+                self._postgres_store.sync_user_profile(updated)
                 if updated_user is not None:
-                    self._postgres_store.update_runtime_system_user(int(updated_user["id"]), updated_user)
-                self._postgres_store.update_runtime_counter("operation_logs", int(self._counters.get("operation_logs", 0)))
-                self._postgres_store.insert_runtime_operation_log(operation_log)
+                    self._postgres_store.sync_system_user(updated_user, updated, operation_log)
+                else:
+                    self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()
             return UserProfile(**updated)

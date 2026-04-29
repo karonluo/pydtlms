@@ -5,10 +5,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute } from 'vue-router'
 
+import RecruitmentApplicationReviewDrawer from '../../components/recruitment/RecruitmentApplicationReviewDrawer.vue'
 import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
 import { useServerPagination } from '../../composables/useServerPagination'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
+import { getRecruitmentApplicationDetail, type RecruitApplicationRecord } from '../../api/recruitment'
 import {
   activateRegisteredPortalStudent,
   batchDeleteCenters,
@@ -37,6 +39,7 @@ import {
   type StudentStats,
   type StudentUpsert,
 } from '../../api/students'
+import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
 
 const route = useRoute()
 const loading = ref(false)
@@ -57,6 +60,11 @@ const portalEmailResult = ref<RegisteredPortalStudentActionResponse | null>(null
 const portalEmailResultContext = ref<{ recipient: string; subject: string } | null>(null)
 const resetPasswordTarget = ref<RegisteredPortalStudentRecord | null>(null)
 const resetPasswordResult = ref<RegisteredPortalStudentActionResponse | null>(null)
+const portalApplicationDetailVisible = ref(false)
+const portalViewingApplication = ref<RecruitApplicationRecord | null>(null)
+const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
+const portalWorkflowTaskLoading = ref(false)
+const portalWorkflowActionSubmitting = ref(false)
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -690,8 +698,106 @@ function openRegisteredPortalStudentEmailDialog(row: RegisteredPortalStudentReco
   portalEmailDialogVisible.value = true
 }
 
+function canViewRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
+  return row.application_form_status === '已填写报名' && !!row.recruitment_application_id
+}
+
+function canReviewRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
+  return canViewRegisteredPortalApplication(row)
+    && !!row.recruitment_application_business_key
+    && row.recruitment_application_status === '报名已提交'
+}
+
+async function loadPortalViewingWorkflowTask(businessKey?: string | null) {
+  const normalizedKey = String(businessKey || '').trim()
+  if (!normalizedKey) {
+    portalViewingWorkflowTask.value = null
+    return
+  }
+  portalWorkflowTaskLoading.value = true
+  try {
+    const response = await listWorkflowTasks({ page: 1, page_size: 20, module: '招生管理', keyword: normalizedKey })
+    portalViewingWorkflowTask.value = response.data.items.find((item) => item.business_key === normalizedKey) || null
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载审批任务失败'
+    ElMessage.error(message)
+    portalViewingWorkflowTask.value = null
+  } finally {
+    portalWorkflowTaskLoading.value = false
+  }
+}
+
+async function openRegisteredPortalApplicationDetail(row: RegisteredPortalStudentRecord) {
+  if (!canViewRegisteredPortalApplication(row) || !row.recruitment_application_id) {
+    ElMessage.warning('当前学生尚未完成申报，无法查看填报内容')
+    return
+  }
+  try {
+    const response = await getRecruitmentApplicationDetail(row.recruitment_application_id)
+    portalViewingApplication.value = response.data
+    portalApplicationDetailVisible.value = true
+    await loadPortalViewingWorkflowTask(row.recruitment_application_business_key || response.data.business_key)
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载填报详情失败'
+    ElMessage.error(message)
+  }
+}
+
+async function refreshPortalViewingApplication() {
+  if (!portalViewingApplication.value?.id) {
+    return
+  }
+  const response = await getRecruitmentApplicationDetail(portalViewingApplication.value.id)
+  portalViewingApplication.value = response.data
+  await loadPortalViewingWorkflowTask(response.data.business_key)
+}
+
+async function handlePortalWorkflowAction(action: WorkflowActionOption) {
+  if (!portalViewingWorkflowTask.value) {
+    ElMessage.warning('当前未找到可执行的审批任务')
+    return
+  }
+  const promptResult = await ElMessageBox.prompt(`请输入“${action.label}”审批意见，可留空。`, '审批处理', {
+    inputValue: '',
+    inputPlaceholder: '审批意见（可选）',
+    confirmButtonText: action.label,
+    cancelButtonText: '取消',
+  }).catch(() => null)
+  if (!promptResult) {
+    return
+  }
+  portalWorkflowActionSubmitting.value = true
+  try {
+    await executeWorkflowTaskAction(portalViewingWorkflowTask.value.id, {
+      action: action.action,
+      comment: promptResult.value?.trim() || undefined,
+    })
+    ElMessage.success(`${action.label}已完成`)
+    await Promise.all([refreshAfterMutation(), refreshPortalViewingApplication()])
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : `${action.label}失败`
+    ElMessage.error(message)
+  } finally {
+    portalWorkflowActionSubmitting.value = false
+  }
+}
+
 function registeredPortalMainActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
   return [
+    {
+      key: 'view-application',
+      label: '查看填报',
+      type: 'info',
+      disabled: !canViewRegisteredPortalApplication(row),
+      onClick: openRegisteredPortalApplicationDetail,
+    },
+    {
+      key: 'review-application',
+      label: '审批',
+      type: 'primary',
+      disabled: !canReviewRegisteredPortalApplication(row),
+      onClick: openRegisteredPortalApplicationDetail,
+    },
     {
       key: row.account_status === '启用' ? 'deactivate' : 'activate',
       label: row.account_status === '启用' ? '停用账号' : '启用账号',
@@ -933,7 +1039,7 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column prop="registered_at" label="注册时间" width="160" show-overflow-tooltip />
-          <el-table-column label="操作" width="170" align="left">
+          <el-table-column label="操作" width="230" align="left">
             <template #default="scope">
               <TableRowActions
                 :row="scope.row"
@@ -978,6 +1084,15 @@ onMounted(() => {
         </div>
       </div>
     </article>
+
+    <RecruitmentApplicationReviewDrawer
+      v-model="portalApplicationDetailVisible"
+      :application="portalViewingApplication"
+      :workflow-task="portalViewingWorkflowTask"
+      :workflow-task-loading="portalWorkflowTaskLoading"
+      :action-loading="portalWorkflowActionSubmitting"
+      @execute-action="handlePortalWorkflowAction"
+    />
 
     <el-dialog
       v-if="canMutateSection"

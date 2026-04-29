@@ -55,9 +55,303 @@ def _parse_model_list(value: Any, model_cls: type[BaseModel]) -> list[BaseModel]
     return items
 
 
+def _normalize_education_items(items: Sequence["PortalEducationExperienceItem"]) -> list["PortalEducationExperienceItem"]:
+    normalized = sorted(items, key=lambda item: item.sort_order)
+    return [item for item in normalized if _first_non_empty(item.education_stage, item.school_name)]
+
+
+def _practice_item_has_content(item: "PortalPracticeExperienceItem") -> bool:
+    return bool(
+        _first_non_empty(
+            item.start_month,
+            item.end_month,
+            item.organization_name,
+            item.position_name,
+            item.responsibility_text,
+            item.verifier_name,
+            item.verifier_phone,
+        )
+    )
+
+
+def _normalize_practice_items(items: Sequence["PortalPracticeExperienceItem"]) -> list["PortalPracticeExperienceItem"]:
+    return [item for item in items if _practice_item_has_content(item)]
+
+
+def _validate_portal_practice_rules(items: Sequence["PortalPracticeExperienceItem"]) -> None:
+    normalized = _normalize_practice_items(items)
+    if len(normalized) > 2:
+        raise ValueError("实践经历最多填写 2 条")
+
+    for index, item in enumerate(normalized, start=1):
+        if not _first_non_empty(item.start_month, item.end_month):
+            continue
+
+        missing_fields: list[str] = []
+        if not _first_non_empty(item.start_month):
+            missing_fields.append("开始年月")
+        if not _first_non_empty(item.end_month):
+            missing_fields.append("结束年月")
+        if not _first_non_empty(item.organization_name):
+            missing_fields.append("实习实践/工作单位")
+        if not _first_non_empty(item.position_name):
+            missing_fields.append("岗位")
+        if not _first_non_empty(item.verifier_name):
+            missing_fields.append("证明人姓名")
+        if not _first_non_empty(item.verifier_phone):
+            missing_fields.append("证明人手机")
+        if missing_fields:
+            raise ValueError(
+                f"实践经历{index}填写了开始年月或结束年月时，除职责外其余字段均必填：缺少{'、'.join(missing_fields)}"
+            )
+
+
+def _english_item_has_content(item: "PortalEnglishProficiencyItem") -> bool:
+    return bool(
+        _first_non_empty(
+            item.exam_name,
+            item.score_text,
+            item.certificate_attachment_url,
+            item.certificate_attachment_name,
+        )
+    )
+
+
+def _normalize_english_items(items: Sequence["PortalEnglishProficiencyItem"]) -> list["PortalEnglishProficiencyItem"]:
+    return [item for item in items if _english_item_has_content(item)]
+
+
+def _validate_portal_english_rules(items: Sequence["PortalEnglishProficiencyItem"], require_at_least_one: bool) -> None:
+    normalized = _normalize_english_items(items)
+    if require_at_least_one and not normalized:
+        raise ValueError("请至少完整填写一条英语能力，并上传英语证明附件")
+
+    for index, item in enumerate(normalized, start=1):
+        exam_name = _first_non_empty(item.exam_name)
+        if exam_name == "CET-4":
+            raise ValueError("英语能力不再支持填写“CET-4”，请改填 CET-6、IELTS、TOEFL 或其他英语考试成绩")
+        if not exam_name:
+            raise ValueError(f"英语能力{index}请先选择英语考试名称")
+        if not _first_non_empty(item.certificate_attachment_url):
+            raise ValueError(f"英语能力{index}必须上传英语证明附件")
+
+
+def _validate_portal_family_rules(items: Sequence["PortalFamilyMemberItem"], require_at_least_one_parent: bool) -> None:
+    if not require_at_least_one_parent:
+        return
+
+    has_parent = any(
+        _first_non_empty(item.relation_type) in {"父亲", "母亲"} and _first_non_empty(item.member_name)
+        for item in items
+    )
+    if not has_parent:
+        raise ValueError("父母信息至少填写一方")
+
+
+def _achievement_item_has_content(item: "PortalAchievementRecordItem") -> bool:
+    return bool(
+        _first_non_empty(
+            item.achievement_type,
+            item.achievement_month,
+            item.paper_title,
+            item.author_order,
+            item.journal_or_conference,
+            item.publish_or_index_month,
+            item.award_name,
+            item.award_rank,
+            item.award_certificate_attachment_url,
+            item.awarding_organization,
+            item.award_level,
+            item.award_year,
+            item.description_text,
+            item.responsibility_text,
+        )
+    )
+
+
+def _normalize_achievement_items(items: Sequence["PortalAchievementRecordItem"]) -> list["PortalAchievementRecordItem"]:
+    return [item for item in items if _achievement_item_has_content(item)]
+
+
+def _populate_achievement_legacy_fields(items: Sequence["PortalAchievementRecordItem"]) -> list["PortalAchievementRecordItem"]:
+    normalized = _normalize_achievement_items(items)
+    for item in normalized:
+        achievement_month = _first_non_empty(item.achievement_month, item.publish_or_index_month)
+        description_text = _first_non_empty(item.description_text, item.responsibility_text)
+        award_rank = _first_non_empty(item.award_rank, item.award_level)
+
+        item.achievement_month = achievement_month
+        item.publish_or_index_month = achievement_month
+        item.description_text = description_text
+        item.responsibility_text = description_text
+        item.award_rank = award_rank
+        item.award_level = award_rank
+        if achievement_month and not _first_non_empty(item.award_year):
+            item.award_year = achievement_month[:4]
+    return normalized
+
+
+def _validate_portal_achievement_rules(items: Sequence["PortalAchievementRecordItem"]) -> None:
+    normalized = _normalize_achievement_items(items)
+    if len(normalized) > 4:
+        raise ValueError("成果经历最多填写 4 条")
+
+    for index, item in enumerate(normalized, start=1):
+        achievement_type = _first_non_empty(item.achievement_type)
+        if achievement_type not in {"论文发表", "获奖经历"}:
+            raise ValueError(f"成果经历{index}仅支持填写“论文发表”或“获奖经历”")
+
+        achievement_month = _first_non_empty(item.achievement_month, item.publish_or_index_month)
+        description_text = _first_non_empty(item.description_text, item.responsibility_text)
+
+        if achievement_type == "论文发表":
+            missing_fields: list[str] = []
+            if not achievement_month:
+                missing_fields.append("日期")
+            if not _first_non_empty(item.paper_title):
+                missing_fields.append("论文名称")
+            if not _first_non_empty(item.author_order):
+                missing_fields.append("作者序位")
+            if not _first_non_empty(item.journal_or_conference):
+                missing_fields.append("期刊名称")
+            if not description_text:
+                missing_fields.append("描述")
+            if missing_fields:
+                raise ValueError(f"成果经历{index}为论文发表时，以下字段必填：{'、'.join(missing_fields)}")
+
+        if achievement_type == "获奖经历":
+            missing_fields = []
+            if not achievement_month:
+                missing_fields.append("日期")
+            if not _first_non_empty(item.award_name):
+                missing_fields.append("奖项名称")
+            if not _first_non_empty(item.award_rank, item.award_level):
+                missing_fields.append("获奖名次")
+            if not _first_non_empty(item.award_certificate_attachment_url):
+                missing_fields.append("获奖证明")
+            if not description_text:
+                missing_fields.append("描述")
+            if missing_fields:
+                raise ValueError(f"成果经历{index}为获奖经历时，以下字段必填：{'、'.join(missing_fields)}")
+
+
+def _validate_portal_education_rules(items: Sequence["PortalEducationExperienceItem"], require_minimum_two: bool) -> None:
+    if not items:
+        return
+
+    ordered = sorted(items, key=lambda item: item.sort_order)
+    second_item = ordered[1] if len(ordered) > 1 else None
+    if second_item is None or not _first_non_empty(second_item.education_stage) or not _first_non_empty(second_item.school_name):
+        raise ValueError("教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”")
+    if _first_non_empty(second_item.education_stage) not in {"本科在读", "本科毕业"}:
+        raise ValueError("教育经历2必须完整填写，且教育阶段应为“本科在读”或“本科毕业”")
+
+    normalized = _normalize_education_items(items)
+    completed = [item for item in normalized if _first_non_empty(item.education_stage) and _first_non_empty(item.school_name)]
+    stage_selected = [item for item in normalized if _first_non_empty(item.education_stage)]
+
+    if len(normalized) > 4:
+        raise ValueError("教育经历最多填写 4 条")
+    if require_minimum_two and len(completed) < 2:
+        raise ValueError("请至少完整填写两条教育经历")
+
+    stages = {_first_non_empty(item.education_stage) for item in stage_selected}
+    if "本科毕业" in stages and not ({"硕士在读", "硕士毕业"} & stages):
+        raise ValueError("填写“本科毕业”时，必须同时填写“硕士在读”或“硕士毕业”教育经历")
+    if "本科在读" in stages and ({"硕士在读", "硕士毕业"} & stages):
+        raise ValueError("填写“本科在读”时，不能同时填写“硕士在读”或“硕士毕业”教育经历")
+
+
+def _portal_statement_length(value: str | None) -> int:
+    if not isinstance(value, str):
+        return 0
+    return len("".join(value.split()))
+
+
+def _build_personal_statement_summary(personal_statement: "PortalPersonalStatementData") -> str | None:
+    sections = [
+        ("个人成长经历", _first_non_empty(personal_statement.growth_experience_text)),
+        ("为何申报本项目或本专业", _first_non_empty(personal_statement.program_application_reason_text)),
+        ("未来职业发展规划", _first_non_empty(personal_statement.career_plan_text)),
+    ]
+    summary_parts = [f"{label}：{value}" for label, value in sections if value]
+    return "\n\n".join(summary_parts) if summary_parts else None
+
+
+def _populate_personal_statement_legacy_fields(personal_statement: "PortalPersonalStatementData") -> "PortalPersonalStatementData":
+    personal_statement.growth_experience_text = _first_non_empty(
+        personal_statement.growth_experience_text,
+        personal_statement.personal_statement_text,
+    )
+    personal_statement.program_application_reason_text = _first_non_empty(
+        personal_statement.program_application_reason_text,
+        personal_statement.ai_problem_statement,
+    )
+    personal_statement.career_plan_text = _first_non_empty(
+        personal_statement.career_plan_text,
+        personal_statement.ai_industry_opinion,
+    )
+    personal_statement.personal_statement_text = _first_non_empty(
+        personal_statement.personal_statement_text,
+        _build_personal_statement_summary(personal_statement),
+    )
+    personal_statement.ai_problem_statement = _first_non_empty(
+        personal_statement.ai_problem_statement,
+        personal_statement.program_application_reason_text,
+    )
+    personal_statement.ai_industry_opinion = _first_non_empty(
+        personal_statement.ai_industry_opinion,
+        personal_statement.career_plan_text,
+    )
+    return personal_statement
+
+
+def _validate_portal_personal_statement_rules(
+    personal_statement: "PortalPersonalStatementData | None",
+    require_complete: bool,
+) -> None:
+    if personal_statement is None:
+        if require_complete:
+            raise ValueError("请填写个人陈述")
+        return
+
+    growth = _first_non_empty(personal_statement.growth_experience_text)
+    program_reason = _first_non_empty(personal_statement.program_application_reason_text)
+    career_plan = _first_non_empty(personal_statement.career_plan_text)
+    resume_attachment_url = _first_non_empty(personal_statement.resume_attachment_url)
+
+    has_any_content = bool(
+        growth
+        or program_reason
+        or career_plan
+        or _first_non_empty(personal_statement.personal_statement_text)
+        or resume_attachment_url
+        or _first_non_empty(personal_statement.supporting_material_attachment_url)
+    )
+    if not has_any_content:
+        if require_complete:
+            raise ValueError("请填写个人陈述")
+        return
+
+    if not require_complete:
+        return
+
+    if not growth or not program_reason or not career_plan:
+        raise ValueError("个人陈述需按主题完整填写“个人成长经历、为何申报本项目或本专业、未来职业发展规划”")
+
+    summary_text = _build_personal_statement_summary(personal_statement)
+    length = _portal_statement_length(summary_text)
+    if length < 800 or length > 1200:
+        raise ValueError("个人陈述总字数需控制在 800-1200 字")
+
+    if not resume_attachment_url:
+        raise ValueError("请上传个人简历附件")
+
+
 class PortalApplicantProfileData(BaseModel):
     full_name_pinyin: str | None = None
     profile_photo_url: str | None = None
+    id_card_collage_url: str | None = None
     gender: str | None = None
     birth_date: str | None = None
     ethnic_group: str | None = None
@@ -123,14 +417,19 @@ class PortalFamilyMemberItem(BaseModel):
 
 class PortalAchievementRecordItem(BaseModel):
     achievement_type: str
+    achievement_month: str | None = None
     paper_title: str | None = None
     author_order: str | None = None
     journal_or_conference: str | None = None
     publish_or_index_month: str | None = None
     award_name: str | None = None
+    award_rank: str | None = None
+    award_certificate_attachment_url: str | None = None
+    award_certificate_attachment_name: str | None = None
     awarding_organization: str | None = None
     award_level: str | None = None
     award_year: str | None = None
+    description_text: str | None = None
     responsibility_text: str | None = None
 
 
@@ -138,8 +437,13 @@ class PortalPersonalStatementData(BaseModel):
     personal_statement_text: str | None = None
     ai_problem_statement: str | None = None
     ai_industry_opinion: str | None = None
+    growth_experience_text: str | None = None
+    program_application_reason_text: str | None = None
+    career_plan_text: str | None = None
     resume_attachment_url: str | None = None
     resume_attachment_name: str | None = None
+    supporting_material_attachment_url: str | None = None
+    supporting_material_attachment_name: str | None = None
 
 
 class PortalApplicationDeclarationData(BaseModel):
@@ -176,6 +480,33 @@ class PortalRegistrationEmailCodeResponse(BaseModel):
     message: str
     expires_in_seconds: int
     cooldown_seconds: int
+
+
+class PortalLoginEmailCodeRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str) -> str:
+        return validate_email(value)
+
+
+class PortalEmailCodeLoginRequest(BaseModel):
+    email: str
+    email_verification_code: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("email_verification_code")
+    @classmethod
+    def validate_email_verification_code_field(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if len(normalized) != 6 or not normalized.isdigit():
+            raise ValueError("邮件验证码格式不正确，请输入 6 位数字验证码")
+        return normalized
 
 
 class PortalRegistrationRequest(BaseModel):
@@ -285,6 +616,7 @@ class PortalStudentRecord(BaseModel):
         if data.get("profile") is None:
             profile_payload = {
                 "profile_photo_url": data.get("profile_photo_url"),
+                "id_card_collage_url": data.get("id_card_collage_url"),
                 "gender": data.get("gender"),
                 "birth_date": data.get("birth_date"),
                 "ethnic_group": data.get("ethnic_group"),
@@ -421,6 +753,7 @@ class PortalApplicationUpsert(BaseModel):
     education_experience: str | None = None
     practice_experience: str | None = None
     personal_profile: str | None = None
+    material_list_attachment: str | None = None
     recommendation_notes: str | None = None
     personal_statement_text: str | None = None
     signed_agreement: bool = False
@@ -430,6 +763,12 @@ class PortalApplicationUpsert(BaseModel):
 
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "PortalApplicationUpsert":
+        self.practice_experiences = _normalize_practice_items(self.practice_experiences)
+        self.english_proficiencies = _normalize_english_items(self.english_proficiencies)
+        self.achievement_records = _populate_achievement_legacy_fields(self.achievement_records)
+        if self.personal_statement is not None:
+            self.personal_statement = _populate_personal_statement_legacy_fields(self.personal_statement)
+
         if self.profile is not None:
             self.gender = self.gender or self.profile.gender
             self.birth_date = self.birth_date or self.profile.birth_date
@@ -472,9 +811,26 @@ class PortalApplicationUpsert(BaseModel):
 
         if self.personal_statement is not None:
             self.personal_statement_text = self.personal_statement_text or self.personal_statement.personal_statement_text
+            self.material_list_attachment = self.material_list_attachment or self.personal_statement.supporting_material_attachment_url
+
+        if self.personal_statement is not None and not self.personal_profile:
+            self.personal_profile = self.personal_statement.growth_experience_text
+
+        if self.personal_statement is not None and not self.self_evaluation:
+            self.self_evaluation = self.personal_statement.career_plan_text
 
         if self.declaration is not None:
             self.signed_agreement = self.signed_agreement or self.declaration.has_read_declaration
+
+        _validate_portal_education_rules(
+            self.education_experiences,
+            require_minimum_two=bool(self.education_experiences),
+        )
+        _validate_portal_practice_rules(self.practice_experiences)
+        _validate_portal_english_rules(self.english_proficiencies, require_at_least_one=True)
+        _validate_portal_family_rules(self.family_members, require_at_least_one_parent=True)
+        _validate_portal_achievement_rules(self.achievement_records)
+        _validate_portal_personal_statement_rules(self.personal_statement, require_complete=True)
 
         if not _first_non_empty(self.graduation_school):
             raise ValueError("缺少毕业院校/就读学校信息")
@@ -517,6 +873,7 @@ class PortalApplicationDraftUpsert(BaseModel):
     education_experience: str | None = None
     practice_experience: str | None = None
     personal_profile: str | None = None
+    material_list_attachment: str | None = None
     recommendation_notes: str | None = None
     personal_statement_text: str | None = None
     signed_agreement: bool = False
@@ -526,6 +883,12 @@ class PortalApplicationDraftUpsert(BaseModel):
 
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "PortalApplicationDraftUpsert":
+        self.practice_experiences = _normalize_practice_items(self.practice_experiences)
+        self.english_proficiencies = _normalize_english_items(self.english_proficiencies)
+        self.achievement_records = _populate_achievement_legacy_fields(self.achievement_records)
+        if self.personal_statement is not None:
+            self.personal_statement = _populate_personal_statement_legacy_fields(self.personal_statement)
+
         if self.profile is not None:
             self.gender = self.gender or self.profile.gender
             self.birth_date = self.birth_date or self.profile.birth_date
@@ -568,9 +931,24 @@ class PortalApplicationDraftUpsert(BaseModel):
 
         if self.personal_statement is not None:
             self.personal_statement_text = self.personal_statement_text or self.personal_statement.personal_statement_text
+            self.material_list_attachment = self.material_list_attachment or self.personal_statement.supporting_material_attachment_url
+
+        if self.personal_statement is not None and not self.personal_profile:
+            self.personal_profile = self.personal_statement.growth_experience_text
+
+        if self.personal_statement is not None and not self.self_evaluation:
+            self.self_evaluation = self.personal_statement.career_plan_text
 
         if self.declaration is not None:
             self.signed_agreement = self.signed_agreement or self.declaration.has_read_declaration
+
+        _validate_portal_education_rules(
+            self.education_experiences,
+            require_minimum_two=False,
+        )
+        _validate_portal_practice_rules(self.practice_experiences)
+        _validate_portal_achievement_rules(self.achievement_records)
+        _validate_portal_personal_statement_rules(self.personal_statement, require_complete=False)
 
         return self
 

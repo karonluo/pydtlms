@@ -9,7 +9,7 @@ defineProps<{
   buildAttachmentUploadKey: (section: string, index: number | string, field: string) => string
   handleEnglishAttachmentUpload: (index: number, event: Event) => void | Promise<void>
   addEnglish: () => void
-  removeEnglish: (index: number) => void
+  removeEnglish: (index: number) => void | Promise<void>
 }>()
 </script>
 
@@ -18,18 +18,16 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>英语能力列表</strong>
-        <span>可填写 CET、IELTS、TOEFL 等成绩。</span>
+        <span>该章节必填，请至少填写 1 条英语考试记录并上传英语证明附件。</span>
       </div>
       <button type="button" class="action-button" @click="addEnglish">新增英语成绩</button>
     </div>
 
-    <div v-if="!(form.english_proficiencies && form.english_proficiencies.length)" class="empty-card">当前未填写英语成绩，可后续补充。</div>
-
-    <div v-else class="record-list">
+    <div class="record-list">
       <section v-for="(item, index) in form.english_proficiencies" :key="`english-${index}`" class="record-card">
         <div class="record-card__header">
           <div><strong>英语成绩 {{ index + 1 }}</strong><span>支持多条</span></div>
-          <button type="button" class="link-button" @click="removeEnglish(index)">删除</button>
+          <button v-if="(form.english_proficiencies?.length || 0) > 1" type="button" class="link-button" @click="removeEnglish(index)">删除</button>
         </div>
 
         <div class="section-grid">
@@ -39,7 +37,7 @@ defineProps<{
 
         <div class="upload-card">
           <span>英语证明附件</span>
-          <input :value="item.certificate_attachment_url || ''" readonly placeholder="未上传时可留空" />
+          <input :value="item.certificate_attachment_url || ''" readonly placeholder="英语证明附件必传" />
           <input
             class="upload-file"
             type="file"
