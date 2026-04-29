@@ -43,7 +43,7 @@ RECRUITMENT_TEMPLATE_COLUMNS: list[tuple[str, str]] = [
     ("research_status_analysis", "上述问题现在全球科研界完成到了什么阶段以及有什么局限性？你觉得是否有新方法可以解决？"),
     ("research_impact", "上述问题如果解决了，对于技术进步、技术普及（e.g.成本大幅降低）、以及日常生活会带来什么影响？"),
     ("ai_society_impact", "你认为AI未来最能在什么环节或者场景影响/改变/优化/威胁人类社会？"),
-    ("dissenting_view", "请陈述一个目前AI行业基本形成共识，但你不同意的观点，可以适当展开。"),
+    ("dissenting_view", "请陈述一个目前AI行业基本形成共识，但你不同意的观点，可以适当展开（选填）。"),
     ("family_info", "家庭情况"),
     ("education_experience", "教育经历"),
     ("practice_experience", "实践经历"),
