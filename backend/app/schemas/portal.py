@@ -814,6 +814,7 @@ class PortalApplicationUpsert(BaseModel):
         if self.personal_statement is not None and not self.self_evaluation:
             self.self_evaluation = _first_non_empty(
                 self.personal_statement.ai_industry_opinion,
+                self.personal_statement.personal_statement_text,
                 self.personal_statement.career_plan_text,
             )
 
@@ -937,6 +938,7 @@ class PortalApplicationDraftUpsert(BaseModel):
         if self.personal_statement is not None and not self.self_evaluation:
             self.self_evaluation = _first_non_empty(
                 self.personal_statement.ai_industry_opinion,
+                self.personal_statement.personal_statement_text,
                 self.personal_statement.career_plan_text,
             )
 
