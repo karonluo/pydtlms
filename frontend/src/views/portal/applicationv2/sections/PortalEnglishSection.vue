@@ -37,7 +37,15 @@ defineProps<{
 
         <div class="upload-card">
           <span>英语证明附件</span>
-          <input :value="item.certificate_attachment_url || ''" readonly placeholder="英语证明附件必传" />
+          <a
+            v-if="item.certificate_attachment_url && item.certificate_attachment_name"
+            class="upload-link-input"
+            :href="item.certificate_attachment_url"
+            target="_blank"
+            rel="noopener noreferrer"
+            :title="item.certificate_attachment_name || ''"
+          >{{ item.certificate_attachment_name }}</a>
+          <input v-else :value="''" readonly placeholder="英语证明附件必传" />
           <input
             class="upload-file"
             type="file"
@@ -106,13 +114,27 @@ defineProps<{
 
 .section-grid input,
 .section-grid select,
-.upload-card input {
+.upload-card input,
+.upload-link-input {
   width: 100%;
   min-height: 46px;
   padding: 10px 14px;
   border: 1px solid #d6e0ee;
   border-radius: 14px;
   background: #fff;
+}
+
+.upload-link-input {
+  display: flex;
+  align-items: center;
+  color: #173459;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.upload-link-input:hover {
+  border-color: rgba(20, 75, 147, 0.38);
+  background: rgba(236, 245, 255, 0.72);
 }
 
 .upload-card {

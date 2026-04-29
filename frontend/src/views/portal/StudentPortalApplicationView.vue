@@ -1415,7 +1415,15 @@ defineExpose({
                     <div class="upload-field">
                       <span class="upload-field__label">成绩单附件</span>
                       <div class="upload-field__controls">
-                        <input :value="item.transcript_attachment_url || ''" readonly placeholder="未上传时可留空" />
+                        <a
+                          v-if="item.transcript_attachment_url && item.transcript_attachment_name"
+                          class="upload-link-input"
+                          :href="item.transcript_attachment_url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :title="item.transcript_attachment_name || ''"
+                        >{{ item.transcript_attachment_name }}</a>
+                        <input v-else :value="''" readonly placeholder="未上传时可留空" />
                         <input
                           class="upload-file-input"
                           type="file"
@@ -1429,7 +1437,15 @@ defineExpose({
                     <div class="upload-field">
                       <span class="upload-field__label">学位证附件</span>
                       <div class="upload-field__controls">
-                        <input :value="item.degree_certificate_attachment_url || ''" readonly placeholder="未上传时可留空" />
+                        <a
+                          v-if="item.degree_certificate_attachment_url && item.degree_certificate_attachment_name"
+                          class="upload-link-input"
+                          :href="item.degree_certificate_attachment_url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :title="item.degree_certificate_attachment_name || ''"
+                        >{{ item.degree_certificate_attachment_name }}</a>
+                        <input v-else :value="''" readonly placeholder="未上传时可留空" />
                         <input
                           class="upload-file-input"
                           type="file"
@@ -1518,7 +1534,15 @@ defineExpose({
                     <div class="upload-field">
                       <span class="upload-field__label">英语证明附件</span>
                       <div class="upload-field__controls">
-                        <input :value="item.certificate_attachment_url || ''" readonly placeholder="未上传时可留空" />
+                        <a
+                          v-if="item.certificate_attachment_url && item.certificate_attachment_name"
+                          class="upload-link-input"
+                          :href="item.certificate_attachment_url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :title="item.certificate_attachment_name || ''"
+                        >{{ item.certificate_attachment_name }}</a>
+                        <input v-else :value="''" readonly placeholder="未上传时可留空" />
                         <input
                           class="upload-file-input"
                           type="file"
@@ -1633,7 +1657,15 @@ defineExpose({
                 <div class="upload-field">
                   <span class="upload-field__label">个人简历附件</span>
                   <div class="upload-field__controls">
-                    <input :value="form.personal_statement!.resume_attachment_url || ''" readonly placeholder="支持 PDF / Word 简历" />
+                    <a
+                      v-if="form.personal_statement!.resume_attachment_url && form.personal_statement!.resume_attachment_name"
+                      class="upload-link-input"
+                      :href="form.personal_statement!.resume_attachment_url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      :title="form.personal_statement!.resume_attachment_name || ''"
+                    >{{ form.personal_statement!.resume_attachment_name }}</a>
+                    <input v-else :value="''" readonly placeholder="支持 PDF / Word 简历" />
                     <input
                       class="upload-file-input"
                       type="file"
@@ -2758,6 +2790,25 @@ textarea {
 .upload-field__controls {
   display: grid;
   gap: 10px;
+}
+
+.upload-link-input {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid #d6e0ee;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #173459;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.upload-link-input:hover {
+  border-color: rgba(20, 75, 147, 0.38);
+  background: rgba(236, 245, 255, 0.72);
 }
 
 .upload-file-input {

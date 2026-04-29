@@ -2226,7 +2226,7 @@ class PostgresStateStore:
                             publish_or_index_month, achievement_month, award_name, award_rank,
                             award_certificate_attachment_url, awarding_organization, award_level,
                             award_year, description_text, responsibility_text
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
@@ -4080,7 +4080,7 @@ class PostgresStateStore:
                         publish_or_index_month, achievement_month, award_name, award_rank,
                         award_certificate_attachment_url, awarding_organization, award_level,
                         award_year, description_text, responsibility_text
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -5641,7 +5641,7 @@ class PostgresStateStore:
         where_sql = " AND ".join(where_clauses)
         latest_application_sql = """
             LEFT JOIN LATERAL (
-                SELECT ra.application_status, ra.applied_at
+                SELECT ra.id, ra.business_key, ra.application_status, ra.applied_at
                 FROM dtlms_recruitment_applications ra
                 WHERE ra.is_deleted = FALSE AND ra.portal_student_id = ps.id
                 ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
@@ -5676,6 +5676,8 @@ class PostgresStateStore:
                         ps.selected_advisor_name,
                         ps.created_at,
                         ps.submitted_at,
+                        latest_application.id AS recruitment_application_id,
+                        latest_application.business_key AS recruitment_application_business_key,
                         latest_application.application_status,
                         latest_application.applied_at
                     FROM dtlms_portal_students ps
@@ -6756,6 +6758,8 @@ class PostgresStateStore:
             "selected_plan_name": row.get("selected_plan_name"),
             "selected_center_name": row.get("selected_team_name"),
             "selected_advisor_name": row.get("selected_advisor_name"),
+            "recruitment_application_id": int(row.get("recruitment_application_id") or 0) or None,
+            "recruitment_application_business_key": (str(row.get("recruitment_application_business_key") or "") or None),
             "recruitment_application_status": cls._application_status_label(row.get("application_status")) if row.get("application_status") else None,
             "registered_at": cls._stringify_datetime(row.get("created_at")),
             "submitted_at": submitted_at,

@@ -170,6 +170,107 @@ def test_seed_portal_application_structures_uses_application_id_for_personal_sta
     ]
 
 
+def test_seed_portal_application_structures_achievement_insert_placeholder_count_matches_params() -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchone_results=[(31,)])
+    state = {
+        "portal_students": [
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "application_draft": {
+                    "preferences": [],
+                    "education_experiences": [],
+                    "practice_experiences": [],
+                    "english_proficiencies": [],
+                    "family_members": [],
+                    "achievement_records": [
+                        {
+                            "achievement_type": "获奖经历",
+                            "paper_title": None,
+                            "author_order": None,
+                            "journal_or_conference": None,
+                            "publish_or_index_month": None,
+                            "achievement_month": "2024-08",
+                            "award_name": "数学建模竞赛",
+                            "award_rank": "一等奖",
+                            "award_certificate_attachment_url": "/portal-attachments/uploads/student-7/achievement_award_certificate/math-modeling.pdf",
+                            "award_certificate_attachment_name": "math-modeling.pdf",
+                            "awarding_organization": "教育部",
+                            "award_level": "国家级",
+                            "award_year": "2024",
+                            "description_text": "获奖描述",
+                            "responsibility_text": "承担算法设计",
+                        }
+                    ],
+                    "personal_statement": {},
+                    "declaration": {},
+                },
+            }
+        ],
+        "recruitment_applications": [
+            {
+                "id": 15,
+                "portal_student_id": 7,
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "personal_statement_attachment": None,
+                "material_list_attachment": None,
+            }
+        ],
+    }
+
+    store._seed_portal_application_structures(cursor, state)
+
+    achievement_sql, achievement_params = next(
+        (sql, params)
+        for sql, params in cursor.executed
+        if "INSERT INTO dtlms_portal_application_achievement_records" in sql
+    )
+
+    assert achievement_sql.count("%s") == len(achievement_params)
+    assert len(achievement_params) == 15
+
+
+def test_list_registered_portal_students_page_returns_application_identifiers(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[{"total": 1}],
+        fetchall_results=[[
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "id_number": "32000019990101123X",
+                "account_status": "启用",
+                "selected_plan_name": "2026博士招生",
+                "selected_team_name": "智能制造联合团队",
+                "selected_advisor_name": "刘亚",
+                "created_at": "2026-04-01 10:00:00",
+                "submitted_at": "2026-04-20 10:00:00",
+                "recruitment_application_id": 15,
+                "recruitment_application_business_key": "RECRUIT-20260420-0015",
+                "application_status": "submitted",
+                "applied_at": "2026-04-20 10:00:00",
+            }
+        ]],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    items, total = store.list_registered_portal_students_page(page=1, page_size=10)
+
+    assert total == 1
+    assert items[0]["recruitment_application_id"] == 15
+    assert items[0]["recruitment_application_business_key"] == "RECRUIT-20260420-0015"
+    assert items[0]["application_form_status"] == "已填写报名"
+
+
 def test_derive_portal_profile_includes_id_card_collage_url() -> None:
     store = PostgresStateStore()
 

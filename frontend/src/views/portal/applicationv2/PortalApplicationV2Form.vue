@@ -502,9 +502,8 @@ function validateAchievementRules(items?: PortalAchievementRecordItem[] | null) 
 function createPersonalStatement(): PortalPersonalStatementData {
   return {
     personal_statement_text: '',
-    growth_experience_text: '',
-    program_application_reason_text: '',
-    career_plan_text: '',
+    ai_problem_statement: '',
+    ai_industry_opinion: '',
     resume_attachment_url: '',
     resume_attachment_name: '',
     supporting_material_attachment_url: '',
@@ -517,15 +516,7 @@ function personalStatementLength(text: string | null | undefined) {
 }
 
 function buildPersonalStatementSummary(personalStatement?: PortalPersonalStatementData | null) {
-  const growth = trimText(personalStatement?.growth_experience_text)
-  const reason = trimText(personalStatement?.program_application_reason_text)
-  const careerPlan = trimText(personalStatement?.career_plan_text)
-  const sections = [
-    growth ? `个人成长经历：${growth}` : '',
-    reason ? `为何申报本项目或本专业：${reason}` : '',
-    careerPlan ? `未来职业发展规划：${careerPlan}` : '',
-  ].filter(Boolean)
-  return sections.join('\n\n')
+  return trimText(personalStatement?.personal_statement_text)
 }
 
 function validatePersonalStatementRules(personalStatement?: PortalPersonalStatementData | null, requireComplete = false) {
@@ -533,17 +524,14 @@ function validatePersonalStatementRules(personalStatement?: PortalPersonalStatem
     return ''
   }
 
-  const growth = trimText(personalStatement?.growth_experience_text)
-  const reason = trimText(personalStatement?.program_application_reason_text)
-  const careerPlan = trimText(personalStatement?.career_plan_text)
-  if (!growth || !reason || !careerPlan) {
-    return '个人陈述需按主题完整填写“个人成长经历、为何申报本项目或本专业、未来职业发展规划”'
+  const statementText = buildPersonalStatementSummary(personalStatement)
+  if (!statementText) {
+    return '请填写个人陈述第 1 题'
   }
 
-  const summaryText = buildPersonalStatementSummary(personalStatement)
-  const length = personalStatementLength(summaryText)
+  const length = personalStatementLength(statementText)
   if (length < 800 || length > 1200) {
-    return '个人陈述总字数需控制在 800-1200 字'
+    return '个人陈述第 1 题总字数需控制在 800-1200 字'
   }
   if (!trimText(personalStatement?.resume_attachment_url)) {
     return '请先上传个人简历附件'
@@ -907,7 +895,7 @@ function applyProfile(profile: PortalStudentRecord) {
       ...createDeclaration(),
       ...draft?.declaration,
       has_read_declaration: draft?.declaration?.has_read_declaration ?? Boolean(profile.signed_agreement),
-      declaration_text: trimText(draft?.declaration?.declaration_text) || createDeclaration().declaration_text,
+      declaration_text: createDeclaration().declaration_text,
     },
   })
 
@@ -1100,9 +1088,8 @@ function buildSectionStatuses(): PortalSectionStatus[] {
   const statementText = trimText(form.personal_statement?.personal_statement_text)
   const statementStarted = Boolean(
     statementText
-    || trimText(form.personal_statement?.growth_experience_text)
-    || trimText(form.personal_statement?.program_application_reason_text)
-    || trimText(form.personal_statement?.career_plan_text)
+    || trimText(form.personal_statement?.ai_problem_statement)
+    || trimText(form.personal_statement?.ai_industry_opinion)
     || trimText(form.personal_statement?.resume_attachment_url)
     || trimText(form.personal_statement?.supporting_material_attachment_url)
     || form.declaration?.has_read_declaration,
@@ -1223,7 +1210,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
   const declaration = {
     ...(form.declaration || createDeclaration()),
     has_read_declaration: Boolean(form.declaration?.has_read_declaration),
-    declaration_text: trimText(form.declaration?.declaration_text) || createDeclaration().declaration_text,
+    declaration_text: createDeclaration().declaration_text,
     progress_snapshot: buildProgressSnapshot(),
   }
 
@@ -1257,9 +1244,8 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     personal_statement: {
       ...(form.personal_statement || createPersonalStatement()),
       personal_statement_text: buildPersonalStatementSummary(form.personal_statement) || null,
-      growth_experience_text: trimText(form.personal_statement?.growth_experience_text) || null,
-      program_application_reason_text: trimText(form.personal_statement?.program_application_reason_text) || null,
-      career_plan_text: trimText(form.personal_statement?.career_plan_text) || null,
+      ai_problem_statement: trimText(form.personal_statement?.ai_problem_statement) || null,
+      ai_industry_opinion: trimText(form.personal_statement?.ai_industry_opinion) || null,
       resume_attachment_url: trimText(form.personal_statement?.resume_attachment_url) || null,
       resume_attachment_name: trimText(form.personal_statement?.resume_attachment_name) || null,
       supporting_material_attachment_url: trimText(form.personal_statement?.supporting_material_attachment_url) || null,
@@ -1284,7 +1270,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     signed_agreement: declaration.has_read_declaration,
     selected_team_name: primaryPreferenceItem?.research_center_name || '',
     selected_advisor_name: primaryPreferenceItem?.advisor_name || null,
-    self_evaluation: trimText(form.personal_statement?.career_plan_text) || null,
+    self_evaluation: trimText(form.personal_statement?.ai_industry_opinion) || null,
   }
 }
 

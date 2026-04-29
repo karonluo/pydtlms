@@ -34,9 +34,9 @@ def _portal_student_record(student_id: int = 7) -> PortalStudentRecord:
 
 def _build_personal_statement_payload(include_resume: bool = True, include_supporting_material: bool = False) -> dict[str, object]:
     payload: dict[str, object] = {
-        'growth_experience_text': '成长' + '甲' * 280,
-        'program_application_reason_text': '申报' + '乙' * 280,
-        'career_plan_text': '规划' + '丙' * 280,
+        'personal_statement_text': '个人成长经历、自我个性、申报动机与职业规划' + '甲' * 380,
+        'ai_problem_statement': '我最希望解决具备可靠因果推理能力的通用智能问题。',
+        'ai_industry_opinion': '我不同意只靠扩大参数规模就能持续逼近通用智能这一行业共识。',
     }
     if include_resume:
         payload['resume_attachment_url'] = '/portal-attachments/uploads/student-7/resume/resume-a.pdf'
@@ -520,7 +520,7 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
         assert payload['education_experiences'][1]['transcript_attachment_url'].endswith('transcript-a.pdf')
         assert payload['education_experiences'][1]['degree_certificate_attachment_url'].endswith('degree-a.pdf')
         assert payload['english_proficiencies'][0]['certificate_attachment_url'].endswith('cet6-a.pdf')
-        assert payload['personal_statement']['growth_experience_text'].startswith('成长')
+        assert payload['personal_statement']['personal_statement_text'].startswith('个人成长经历')
         assert payload['personal_statement']['resume_attachment_url'].endswith('resume-a.pdf')
         assert payload['personal_statement']['supporting_material_attachment_url'].endswith('supporting-material.zip')
         assert payload['material_list_attachment'].endswith('supporting-material.zip')
@@ -567,9 +567,7 @@ def test_portal_application_submission_rejects_short_personal_statement(monkeypa
                     {'member_name': '张父', 'relation_type': '父亲'},
                 ],
                 'personal_statement': {
-                    'growth_experience_text': '成长经历过短',
-                    'program_application_reason_text': '申报理由过短',
-                    'career_plan_text': '发展规划过短',
+                    'personal_statement_text': '主陈述过短',
                     'resume_attachment_url': '/portal-attachments/uploads/student-7/resume/resume-a.pdf',
                 },
             },

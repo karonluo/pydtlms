@@ -269,13 +269,7 @@ def _portal_statement_length(value: str | None) -> int:
 
 
 def _build_personal_statement_summary(personal_statement: "PortalPersonalStatementData") -> str | None:
-    sections = [
-        ("个人成长经历", _first_non_empty(personal_statement.growth_experience_text)),
-        ("为何申报本项目或本专业", _first_non_empty(personal_statement.program_application_reason_text)),
-        ("未来职业发展规划", _first_non_empty(personal_statement.career_plan_text)),
-    ]
-    summary_parts = [f"{label}：{value}" for label, value in sections if value]
-    return "\n\n".join(summary_parts) if summary_parts else None
+    return _first_non_empty(personal_statement.personal_statement_text)
 
 
 def _populate_personal_statement_legacy_fields(personal_statement: "PortalPersonalStatementData") -> "PortalPersonalStatementData":
@@ -315,16 +309,16 @@ def _validate_portal_personal_statement_rules(
             raise ValueError("请填写个人陈述")
         return
 
-    growth = _first_non_empty(personal_statement.growth_experience_text)
-    program_reason = _first_non_empty(personal_statement.program_application_reason_text)
-    career_plan = _first_non_empty(personal_statement.career_plan_text)
+    statement_text = _first_non_empty(personal_statement.personal_statement_text)
     resume_attachment_url = _first_non_empty(personal_statement.resume_attachment_url)
 
     has_any_content = bool(
-        growth
-        or program_reason
-        or career_plan
-        or _first_non_empty(personal_statement.personal_statement_text)
+        statement_text
+        or _first_non_empty(personal_statement.ai_problem_statement)
+        or _first_non_empty(personal_statement.ai_industry_opinion)
+        or _first_non_empty(personal_statement.growth_experience_text)
+        or _first_non_empty(personal_statement.program_application_reason_text)
+        or _first_non_empty(personal_statement.career_plan_text)
         or resume_attachment_url
         or _first_non_empty(personal_statement.supporting_material_attachment_url)
     )
@@ -336,13 +330,12 @@ def _validate_portal_personal_statement_rules(
     if not require_complete:
         return
 
-    if not growth or not program_reason or not career_plan:
-        raise ValueError("个人陈述需按主题完整填写“个人成长经历、为何申报本项目或本专业、未来职业发展规划”")
+    if not statement_text:
+        raise ValueError("请填写个人陈述第 1 题")
 
-    summary_text = _build_personal_statement_summary(personal_statement)
-    length = _portal_statement_length(summary_text)
+    length = _portal_statement_length(statement_text)
     if length < 800 or length > 1200:
-        raise ValueError("个人陈述总字数需控制在 800-1200 字")
+        raise ValueError("个人陈述第 1 题总字数需控制在 800-1200 字")
 
     if not resume_attachment_url:
         raise ValueError("请上传个人简历附件")

@@ -67,7 +67,15 @@ defineProps<{
             <label><span>获奖名次</span><input v-model="item.award_rank" placeholder="如 一等奖 / 第1名" /></label>
             <div class="upload-card section-grid__full">
               <span>获奖证明上传</span>
-              <input :value="item.award_certificate_attachment_url || ''" readonly placeholder="请上传获奖证明附件" />
+              <a
+                v-if="item.award_certificate_attachment_url && item.award_certificate_attachment_name"
+                class="upload-link-input"
+                :href="item.award_certificate_attachment_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="item.award_certificate_attachment_name || ''"
+              >{{ item.award_certificate_attachment_name }}</a>
+              <input v-else :value="''" readonly placeholder="请上传获奖证明附件" />
               <input
                 class="upload-file"
                 type="file"
@@ -140,13 +148,27 @@ defineProps<{
 .section-grid input,
 .section-grid select,
 .section-grid textarea,
-.upload-card input {
+.upload-card input,
+.upload-link-input {
   width: 100%;
   min-height: 46px;
   padding: 10px 14px;
   border: 1px solid #d6e0ee;
   border-radius: 14px;
   background: #fff;
+}
+
+.upload-link-input {
+  display: flex;
+  align-items: center;
+  color: #173459;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.upload-link-input:hover {
+  border-color: rgba(20, 75, 147, 0.38);
+  background: rgba(236, 245, 255, 0.72);
 }
 
 .section-grid textarea {

@@ -50,7 +50,15 @@ defineProps<{
         <div class="upload-grid">
           <div v-if="item.education_stage !== '高中毕业'" class="upload-card">
             <span>成绩单附件</span>
-            <input :value="item.transcript_attachment_url || ''" readonly placeholder="未上传时可留空" />
+            <a
+              v-if="item.transcript_attachment_url && item.transcript_attachment_name"
+              class="upload-link-input"
+              :href="item.transcript_attachment_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              :title="item.transcript_attachment_name || ''"
+            >{{ item.transcript_attachment_name }}</a>
+            <input v-else :value="''" readonly placeholder="未上传时可留空" />
             <input
               class="upload-file"
               type="file"
@@ -62,7 +70,15 @@ defineProps<{
           </div>
           <div v-if="item.education_stage !== '高中毕业'" class="upload-card">
             <span>学位证附件</span>
-            <input :value="item.degree_certificate_attachment_url || ''" readonly placeholder="未上传时可留空" />
+            <a
+              v-if="item.degree_certificate_attachment_url && item.degree_certificate_attachment_name"
+              class="upload-link-input"
+              :href="item.degree_certificate_attachment_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              :title="item.degree_certificate_attachment_name || ''"
+            >{{ item.degree_certificate_attachment_name }}</a>
+            <input v-else :value="''" readonly placeholder="未上传时可留空" />
             <input
               class="upload-file"
               type="file"
@@ -142,13 +158,27 @@ defineProps<{
 
 .section-grid input,
 .section-grid select,
-.upload-card input {
+.upload-card input,
+.upload-link-input {
   width: 100%;
   min-height: 46px;
   padding: 10px 14px;
   border: 1px solid #d6e0ee;
   border-radius: 14px;
   background: #fff;
+}
+
+.upload-link-input {
+  display: flex;
+  align-items: center;
+  color: #173459;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.upload-link-input:hover {
+  border-color: rgba(20, 75, 147, 0.38);
+  background: rgba(236, 245, 255, 0.72);
 }
 
 .upload-grid {

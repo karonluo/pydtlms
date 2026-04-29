@@ -20,18 +20,26 @@ defineProps<{
     <div class="section-card">
       <div class="section-intro">
         <strong>个人陈述与附件</strong>
-        <p>请围绕“个人成长经历、为何申报本项目或本专业、未来职业发展规划”三个主题填写。个人陈述总字数需控制在 800-1200 字，中英文皆可。</p>
+        <p>请围绕“个人成长经历、为何申报本项目或本专业、未来职业发展规划”三个主题填写。</p>
       </div>
 
       <div class="section-grid">
-        <label class="section-grid__full"><span><span class="required-mark">*</span>个人成长经历</span><textarea v-model="form.personal_statement!.growth_experience_text" rows="6" placeholder="请结合学习、科研、实践或重要阶段经历进行说明" /></label>
-        <label class="section-grid__full"><span><span class="required-mark">*</span>为何申报本项目或本专业</span><textarea v-model="form.personal_statement!.program_application_reason_text" rows="6" placeholder="请说明申报动机、研究兴趣、与项目方向的匹配度等" /></label>
-        <label class="section-grid__full"><span><span class="required-mark">*</span>未来职业发展规划</span><textarea v-model="form.personal_statement!.career_plan_text" rows="6" placeholder="请说明未来职业目标、发展路径和阶段规划" /></label>
+        <label class="section-grid__full"><span><span class="required-mark">*</span>个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等</span><textarea v-model="form.personal_statement!.personal_statement_text" rows="7" placeholder="请结合个人成长经历、自我个性、申报动机与未来职业发展规划进行陈述" /></label>
+        <label class="section-grid__full"><span>你认为目前 AI 技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？</span><textarea v-model="form.personal_statement!.ai_problem_statement" rows="5" placeholder="选填，请填写你最关注、未来希望作为科研目标解决的 AI 关键问题" /></label>
+        <label class="section-grid__full"><span>请陈述一个目前 AI 行业基本形成共识，但你不同意的观点，可以适当展开</span><textarea v-model="form.personal_statement!.ai_industry_opinion" rows="5" placeholder="选填，请填写你不同意的行业共识观点及理由" /></label>
       </div>
 
       <div class="upload-card">
         <span><span class="required-mark">*</span>个人简历附件</span>
-        <input :value="form.personal_statement!.resume_attachment_url || ''" readonly placeholder="支持 PDF / Word 简历" />
+        <a
+          v-if="form.personal_statement!.resume_attachment_url && form.personal_statement!.resume_attachment_name"
+          class="upload-link-input"
+          :href="form.personal_statement!.resume_attachment_url"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="form.personal_statement!.resume_attachment_name || ''"
+        >{{ form.personal_statement!.resume_attachment_name }}</a>
+        <input v-else :value="''" readonly placeholder="支持 PDF / Word 简历" />
         <input
           class="upload-file"
           type="file"
@@ -44,7 +52,15 @@ defineProps<{
 
       <div class="upload-card">
         <span>其他支撑材料（选填）</span>
-        <input :value="form.personal_statement!.supporting_material_attachment_url || ''" readonly placeholder="建议上传 zip 压缩包，单文件上传" />
+        <a
+          v-if="form.personal_statement!.supporting_material_attachment_url && form.personal_statement!.supporting_material_attachment_name"
+          class="upload-link-input"
+          :href="form.personal_statement!.supporting_material_attachment_url"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="form.personal_statement!.supporting_material_attachment_name || ''"
+        >{{ form.personal_statement!.supporting_material_attachment_name }}</a>
+        <input v-else :value="''" readonly placeholder="建议上传 zip 压缩包，单文件上传" />
         <input
           class="upload-file"
           type="file"
@@ -57,7 +73,7 @@ defineProps<{
 
       <label class="agreement-row">
         <input v-model="form.declaration!.has_read_declaration" type="checkbox" />
-        <span class="agreement-row__text"><span class="required-mark">*</span>{{ form.declaration!.declaration_text || declarationReminderText }}</span>
+        <span class="agreement-row__text"><span class="required-mark">*</span>本表及证明材料仅作为申请上海人工智能实验室联培博士项目的参考依据，并承诺提交材料的所有内容均真实、准确、完整。所提供的材料中如有任何不实信息，将被取消录取资格。</span>
       </label>
 
       <div class="submit-row">
@@ -121,13 +137,27 @@ defineProps<{
 }
 
 .section-grid textarea,
-.upload-card input {
+.upload-card input,
+.upload-link-input {
   width: 100%;
   min-height: 52px;
   padding: 10px 14px;
   border: 1px solid #d6e0ee;
   border-radius: 14px;
   background: #fff;
+}
+
+.upload-link-input {
+  display: flex;
+  align-items: center;
+  color: #173459;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.upload-link-input:hover {
+  border-color: rgba(20, 75, 147, 0.38);
+  background: rgba(236, 245, 255, 0.72);
 }
 
 .section-grid textarea {
@@ -157,8 +187,9 @@ defineProps<{
 }
 
 .agreement-row input {
-  margin-top: 0;
+  margin: 0;
   flex: 0 0 auto;
+  align-self: center;
 }
 
 .submit-row {

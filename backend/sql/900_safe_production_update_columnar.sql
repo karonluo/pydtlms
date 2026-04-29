@@ -1194,4 +1194,20 @@ BEGIN
     END IF;
 END $$;
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'dtlms_portal_application_declarations'
+    ) THEN
+        UPDATE public.dtlms_portal_application_declarations
+        SET declaration_text = '本表及证明材料仅作为申请上海人工智能实验室联培博士项目的参考依据，并承诺提交材料的所有内容均真实、准确、完整。所提供的材料中如有任何不实信息，将被取消录取资格。'
+        WHERE declaration_text IS NULL
+           OR declaration_text = ''
+           OR declaration_text = '我已同意并仔细阅读使用条款和隐私政策。';
+    END IF;
+END $$;
+
 COMMIT;
