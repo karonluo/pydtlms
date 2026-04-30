@@ -6,7 +6,7 @@ from typing import Any, Sequence
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import SelectOption
-from app.schemas.contact import validate_email, validate_phone_number
+from app.schemas.contact import validate_email, validate_optional_phone_number, validate_phone_number
 from app.schemas.identity import validate_china_resident_id_number
 
 
@@ -386,6 +386,52 @@ def _validate_portal_personal_statement_rules(
         raise ValueError("请上传个人简历附件")
 
 
+def _validate_portal_basic_profile_rules(
+    profile: "PortalApplicantProfileData | None",
+    *,
+    gender: str | None,
+    ethnic_group: str | None,
+    political_status: str | None,
+    mailing_address: str | None,
+    require_complete: bool,
+) -> None:
+    emergency_contact_phone = profile.emergency_contact_phone if profile is not None else None
+    if emergency_contact_phone:
+        validate_phone_number(emergency_contact_phone, "紧急联系人手机")
+
+    if not require_complete:
+        return
+
+    missing_fields: list[str] = []
+    required_fields = [
+        ("姓名拼音", profile.full_name_pinyin if profile is not None else None),
+        ("个人照片", profile.profile_photo_url if profile is not None else None),
+        ("身份证拼图", profile.id_card_collage_url if profile is not None else None),
+        ("性别", gender),
+        ("民族", ethnic_group),
+        ("政治面貌", political_status),
+        ("紧急联系人姓名", profile.emergency_contact_name if profile is not None else None),
+        ("紧急联系人手机", emergency_contact_phone),
+        ("通讯地址", mailing_address),
+    ]
+    for field_label, value in required_fields:
+        if not _first_non_empty(value):
+            missing_fields.append(field_label)
+
+    if missing_fields:
+        raise ValueError(f"基本信息以下字段必填：{'、'.join(missing_fields)}")
+
+
+def _validate_portal_source_channel_rules(source_channel: str | None, source_channel_other: str | None) -> None:
+    if _first_non_empty(source_channel) == "其他" and not _first_non_empty(source_channel_other):
+        raise ValueError("选择“其他”来源时，请补充说明")
+
+
+def _validate_portal_declaration_rules(signed_agreement: bool) -> None:
+    if not signed_agreement:
+        raise ValueError("请先确认提交声明")
+
+
 class PortalApplicantProfileData(BaseModel):
     full_name_pinyin: str | None = None
     profile_photo_url: str | None = None
@@ -401,6 +447,11 @@ class PortalApplicantProfileData(BaseModel):
     mailing_address: str | None = None
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
+
+    @field_validator("emergency_contact_phone")
+    @classmethod
+    def validate_emergency_contact_phone_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value, "紧急联系人手机")
 
 
 class PortalApplicationPreferenceItem(BaseModel):
@@ -871,6 +922,16 @@ class PortalApplicationUpsert(BaseModel):
         _validate_portal_family_rules(self.family_members, require_at_least_one_parent=True)
         _validate_portal_achievement_rules(self.achievement_records)
         _validate_portal_personal_statement_rules(self.personal_statement, require_complete=True)
+        _validate_portal_basic_profile_rules(
+            self.profile,
+            gender=self.gender,
+            ethnic_group=self.ethnic_group,
+            political_status=self.political_status,
+            mailing_address=self.mailing_address,
+            require_complete=True,
+        )
+        _validate_portal_source_channel_rules(self.source_channel, self.source_channel_other)
+        _validate_portal_declaration_rules(self.signed_agreement)
 
         if not _first_non_empty(self.graduation_school):
             raise ValueError("缺少毕业院校/就读学校信息")
@@ -984,12 +1045,32 @@ class PortalApplicationDraftUpsert(BaseModel):
 
         _validate_portal_education_rules(
             self.education_experiences,
-            require_minimum_two=False,
+            require_minimum_two=bool(self.education_experiences),
         )
         _validate_portal_practice_rules(self.practice_experiences)
+        _validate_portal_english_rules(self.english_proficiencies, require_at_least_one=True)
         _validate_portal_family_rules(self.family_members, require_at_least_one_parent=True)
         _validate_portal_achievement_rules(self.achievement_records)
-        _validate_portal_personal_statement_rules(self.personal_statement, require_complete=False)
+        _validate_portal_personal_statement_rules(self.personal_statement, require_complete=True)
+        _validate_portal_basic_profile_rules(
+            self.profile,
+            gender=self.gender,
+            ethnic_group=self.ethnic_group,
+            political_status=self.political_status,
+            mailing_address=self.mailing_address,
+            require_complete=True,
+        )
+        _validate_portal_source_channel_rules(self.source_channel, self.source_channel_other)
+        _validate_portal_declaration_rules(self.signed_agreement)
+
+        if not _first_non_empty(self.graduation_school):
+            raise ValueError("缺少毕业院校/就读学校信息")
+        if not _first_non_empty(self.highest_degree):
+            raise ValueError("缺少最高学历/教育阶段信息")
+        if not _first_non_empty(self.selected_team_name):
+            raise ValueError("缺少第一志愿研究中心信息")
+        if not _first_non_empty(self.intended_field):
+            self.intended_field = self.selected_team_name
 
         return self
 

@@ -242,6 +242,17 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
 
     return PortalApplicationUpsert(
         plan_id=plan_id,
+        profile={
+            "full_name_pinyin": "zhangsan",
+            "profile_photo_url": "/portal-attachments/uploads/student-7/profile_photo/photo-a.jpg",
+            "id_card_collage_url": "/portal-attachments/uploads/student-7/id_card_collage/id-card-a.jpg",
+            "gender": "男",
+            "ethnic_group": "汉族",
+            "political_status": "共青团员",
+            "mailing_address": "上海市徐汇区某路 100 号",
+            "emergency_contact_name": "张家长",
+            "emergency_contact_phone": "13800002222",
+        },
         graduation_school="江南大学",
         highest_degree="硕士",
         selected_team_name=team_name,
@@ -258,10 +269,14 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
             {"member_name": "张父", "relation_type": "父亲", "contact_phone": "13800001111"},
         ],
         personal_statement={
+            "personal_statement_text": "个人陈述" + "丁" * 280,
             "growth_experience_text": "成长" + "甲" * 280,
             "program_application_reason_text": "申报" + "乙" * 280,
             "career_plan_text": "规划" + "丙" * 280,
             "resume_attachment_url": "/portal-attachments/uploads/student-7/resume/resume-a.pdf",
+        },
+        declaration={
+            "has_read_declaration": True,
         },
         signed_agreement=True,
     )
@@ -1130,16 +1145,17 @@ def test_submit_portal_application_uses_incremental_portal_sync(monkeypatch) -> 
         _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
     )
 
-    assert response.application_business_key
+    assert response.application_business_key.startswith("PJ")
+    assert response.application_business_key[2:6].isdigit()
+    assert response.application_business_key[6:].isdigit()
+    assert len(response.application_business_key) == 10
     assert len(fake_postgres.portal_application_submissions) == 1
     assert len(fake_postgres.saved_states) == save_count_before_submit
 
 
-def test_submit_portal_application_resets_rejected_application_to_pending(monkeypatch) -> None:
+def test_submit_portal_application_blocks_modification_after_submission(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
-    fake_mailer = FakeNotificationEmailService()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
-    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda: fake_mailer)
 
     from app.schemas.portal import PortalRegistrationRequest
 
@@ -1159,25 +1175,38 @@ def test_submit_portal_application_resets_rejected_application_to_pending(monkey
 
     student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "reapply-student@example.com")
     first_submit = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
-    first_response = store.submit_portal_application(student_id, first_submit)
-    task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == first_response.application_business_key)
-    store.execute_workflow_action(
-        task_id,
-        "reject",
-        "请补充信息后重新提交",
-        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    store.submit_portal_application(student_id, first_submit)
+
+    with pytest.raises(ValueError, match="当前仅支持只读浏览"):
+        store.submit_portal_application(student_id, first_submit)
+
+
+def test_save_portal_application_draft_blocks_modification_after_submission(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.portal import PortalApplicationDraftUpsert, PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009987",
+            email="readonly-student@example.com",
+            full_name="只读学生",
+            id_number="320000199909099934",
+            password="Secret123!",
+        )
     )
 
-    second_response = store.submit_portal_application(student_id, first_submit)
-    workflow_task = next(item for item in store.state["workflow_tasks"] if item["business_key"] == second_response.application_business_key)
-    application = next(item for item in store.state["recruitment_applications"] if item["business_key"] == second_response.application_business_key)
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "readonly-student@example.com")
+    payload = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
+    store.submit_portal_application(student_id, payload)
 
-    assert second_response.application_status == "报名已提交"
-    assert application["application_status"] == "报名已提交"
-    assert application["material_status"] == "待审核"
-    assert workflow_task["status"] == "待处理"
-    assert workflow_task["node_key"] == "qualification_review"
-    assert workflow_task["latest_comment"] == "学生重新提交申请，等待重新审核。"
+    with pytest.raises(ValueError, match="当前仅支持只读浏览"):
+        store.save_portal_application_draft(student_id, PortalApplicationDraftUpsert.model_validate(payload.model_dump(mode="python")))
 
 
 def test_deactivate_registered_portal_student_blocks_login(monkeypatch) -> None:
@@ -1445,3 +1474,66 @@ def test_system_user_upsert_rejects_invalid_phone_number() -> None:
             account_status="启用",
             password="Secret123!",
         )
+
+
+def test_portal_application_upsert_rejects_missing_basic_required_fields() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["profile"]["full_name_pinyin"] = ""
+    payload["profile"]["emergency_contact_name"] = None
+
+    with pytest.raises(ValidationError, match="基本信息以下字段必填：姓名拼音、紧急联系人姓名"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
+def test_portal_application_upsert_rejects_invalid_emergency_contact_phone() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["profile"]["emergency_contact_phone"] = "12345"
+
+    with pytest.raises(ValidationError, match="紧急联系人手机格式不正确"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
+def test_portal_application_upsert_requires_source_channel_other_when_needed() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["source_channel"] = "其他"
+    payload["source_channel_other"] = ""
+
+    with pytest.raises(ValidationError, match="选择“其他”来源时，请补充说明"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
+def test_portal_application_upsert_requires_submission_declaration() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["signed_agreement"] = False
+    payload["declaration"]["has_read_declaration"] = False
+
+    with pytest.raises(ValidationError, match="请先确认提交声明"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
+def test_portal_application_draft_upsert_rejects_missing_required_fields() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationDraftUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["profile"]["full_name_pinyin"] = ""
+
+    with pytest.raises(ValidationError, match="基本信息以下字段必填：姓名拼音"):
+        PortalApplicationDraftUpsert.model_validate(payload)

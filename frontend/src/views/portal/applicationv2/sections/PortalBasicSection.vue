@@ -33,7 +33,7 @@ defineProps<{
         <div class="upload-panel__content">
           <div>
             <strong><span class="required-mark">*</span>个人照片</strong>
-            <p>保持原有上传方式，作为报名资料随个人信息一并提交。</p>
+            <p>纯色背景的近期免冠证件照</p>
           </div>
           <div class="upload-box">
             <input
@@ -58,7 +58,7 @@ defineProps<{
         <div class="upload-panel__content">
           <div>
             <strong><span class="required-mark">*</span>身份证拼图</strong>
-            <p>请上传一张 JPG 拼图，上半部分为身份证正面，下半部分为身份证背面。</p>
+            <p>请上传一张拼图，上半部分为身份证正面，下半部分为身份证背面。</p>
           </div>
           <div class="upload-box">
             <input

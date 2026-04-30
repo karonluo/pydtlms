@@ -3,6 +3,7 @@ import axios from 'axios'
 export type PortalAlertType = 'success' | 'warning' | 'error'
 
 type PortalAlertBodyMode = 'text' | 'html'
+type PortalDialogResult = 'confirm' | 'cancel'
 
 const PORTAL_ALERT_STYLE_ID = 'portal-alert-styles'
 
@@ -112,6 +113,23 @@ function ensurePortalAlertStyles() {
       font-weight: 700;
       cursor: pointer;
     }
+
+    .portal-alert-dialog__cancel {
+      min-width: 92px;
+      min-height: 38px;
+      padding: 0 18px;
+      border: 1px solid #c9d7eb;
+      border-radius: 10px;
+      background: #fff;
+      color: #36527a;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .portal-alert-dialog__actions--dual {
+      gap: 10px;
+    }
   `
   document.head.appendChild(style)
 }
@@ -209,6 +227,101 @@ export async function showPortalAlert(message: string, title: string, type: Port
 
 export async function showPortalAlertHtml(message: string, title: string, type: PortalAlertType = 'warning') {
   await showPortalAlertCore(message, title, type, 'html')
+}
+
+export async function showPortalConfirm(
+  message: string,
+  title: string,
+  confirmText = '确定',
+  cancelText = '取消',
+) {
+  ensurePortalAlertStyles()
+
+  return await new Promise<boolean>((resolve) => {
+    const overlay = document.createElement('div')
+    overlay.className = 'portal-alert-overlay'
+
+    const dialog = document.createElement('div')
+    dialog.className = 'portal-alert-dialog'
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('aria-modal', 'true')
+    dialog.setAttribute('aria-label', title)
+
+    const header = document.createElement('div')
+    header.className = 'portal-alert-dialog__header'
+
+    const titleWrap = document.createElement('div')
+    titleWrap.className = 'portal-alert-dialog__title-wrap'
+
+    const badge = document.createElement('span')
+    badge.className = 'portal-alert-dialog__badge portal-alert-dialog__badge--warning'
+
+    const titleNode = document.createElement('strong')
+    titleNode.className = 'portal-alert-dialog__title'
+    titleNode.textContent = title
+
+    const closeButton = document.createElement('button')
+    closeButton.type = 'button'
+    closeButton.className = 'portal-alert-dialog__close'
+    closeButton.setAttribute('aria-label', '关闭提示')
+    closeButton.textContent = '×'
+
+    const body = document.createElement('div')
+    body.className = 'portal-alert-dialog__body'
+    body.textContent = message
+
+    const actions = document.createElement('div')
+    actions.className = 'portal-alert-dialog__actions portal-alert-dialog__actions--dual'
+
+    const cancelButton = document.createElement('button')
+    cancelButton.type = 'button'
+    cancelButton.className = 'portal-alert-dialog__cancel'
+    cancelButton.textContent = cancelText
+
+    const confirmButton = document.createElement('button')
+    confirmButton.type = 'button'
+    confirmButton.className = 'portal-alert-dialog__confirm'
+    confirmButton.textContent = confirmText
+
+    const cleanup = (result: PortalDialogResult) => {
+      document.removeEventListener('keydown', handleKeydown)
+      overlay.remove()
+      resolve(result === 'confirm')
+    }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        cleanup('cancel')
+      }
+    }
+
+    closeButton.addEventListener('click', () => cleanup('cancel'))
+    cancelButton.addEventListener('click', () => cleanup('cancel'))
+    confirmButton.addEventListener('click', () => cleanup('confirm'))
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) {
+        cleanup('cancel')
+      }
+    })
+
+    document.addEventListener('keydown', handleKeydown)
+
+    titleWrap.appendChild(badge)
+    titleWrap.appendChild(titleNode)
+    header.appendChild(titleWrap)
+    header.appendChild(closeButton)
+    actions.appendChild(cancelButton)
+    actions.appendChild(confirmButton)
+
+    dialog.appendChild(header)
+    dialog.appendChild(body)
+    dialog.appendChild(actions)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+
+    cancelButton.focus()
+  })
 }
 
 export function resolveRequestError(error: unknown, fallback: string) {

@@ -1109,6 +1109,14 @@ class RuntimeManagementStore:
                 return date_part
         return datetime.now().strftime("%Y%m%d")
 
+    def _workflow_business_key_year(self, created_at: str | None = None) -> str:
+        text = str(created_at or "").strip()
+        if len(text) >= 4:
+            year_part = text[:4]
+            if year_part.isdigit():
+                return year_part
+        return datetime.now().strftime("%Y")
+
     def _next_workflow_business_sequence(self, workflow_code: str, business_date: str) -> int:
         cache_key = build_cache_key("workflow", "business-key", workflow_code, business_date)
         try:
@@ -1138,6 +1146,15 @@ class RuntimeManagementStore:
         while True:
             sequence = self._next_workflow_business_sequence(workflow_code, business_date)
             business_key = f"{workflow_code}{business_date}{sequence:04d}"
+            if not self._workflow_business_key_exists(business_key):
+                return business_key
+
+    def _generate_recruitment_application_business_key(self, created_at: str | None = None) -> str:
+        business_year = self._workflow_business_key_year(created_at)
+        workflow_code = "PJ"
+        while True:
+            sequence = self._next_workflow_business_sequence(workflow_code, business_year)
+            business_key = f"{workflow_code}{business_year}{sequence:04d}"
             if not self._workflow_business_key_exists(business_key):
                 return business_key
 
@@ -1305,6 +1322,8 @@ class RuntimeManagementStore:
         if existing_key:
             return str(existing_key)
         del entity_id
+        if flow_code == "recruitment_application":
+            return self._generate_recruitment_application_business_key(created_at=created_at)
         definition = self._workflow_definition(flow_code)
         return self._generate_workflow_business_key(definition["workflow_name"], created_at=created_at)
 
@@ -2179,6 +2198,8 @@ class RuntimeManagementStore:
             _, student = self._find_required("portal_students", student_id)
             if self._normalize_portal_account_status(student.get("account_status")) != "启用":
                 raise ValueError("账号已停用，无法保存草稿")
+            if student.get("submitted_at"):
+                raise ValueError("报名申请已提交，当前仅支持只读浏览，不能再修改信息")
 
             selected_team_name = payload.selected_team_name
             advisor_name = payload.selected_advisor_name
@@ -2770,6 +2791,8 @@ class RuntimeManagementStore:
             _, student = self._find_required("portal_students", student_id)
             if self._normalize_portal_account_status(student.get("account_status")) != "启用":
                 raise ValueError("账号已停用，无法提交报名")
+            if student.get("submitted_at"):
+                raise ValueError("报名申请已提交，当前仅支持只读浏览，不能再修改信息")
             _, plan = self._find_required("recruitment_plans", payload.plan_id)
             selected_team_name = payload.selected_team_name
             if not selected_team_name:

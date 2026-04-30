@@ -29,7 +29,8 @@ import {
   type PortalTeamRecord,
 } from '../../../api/portal'
 import type { SelectOption } from '../../../api/common'
-import { resolveRequestError, showPortalAlert } from '../../../utils/portalAlerts'
+import { getPhoneValidationMessage } from '../../../utils/contactValidation'
+import { resolveRequestError, showPortalAlert, showPortalConfirm } from '../../../utils/portalAlerts'
 import PortalApplicationSection from './sections/PortalApplicationSection.vue'
 import PortalAchievementSection from './sections/PortalAchievementSection.vue'
 import PortalBasicSection from './sections/PortalBasicSection.vue'
@@ -54,6 +55,8 @@ const politicalStatusOptions = ref<SelectOption[]>([])
 const ethnicGroupOptions = ref<SelectOption[]>([])
 const selectedPlanId = ref<number | null>(null)
 const attachmentUploading = reactive<Record<string, boolean>>({})
+const isSubmitted = computed(() => Boolean(student.value?.submitted_at))
+const submittedRegistrationNo = computed(() => trimText(student.value?.candidate_no) || trimText(student.value?.business_key))
 
 type PortalSectionStatus = {
   id: string
@@ -646,6 +649,57 @@ function buildPersonalStatementSummary(personalStatement?: PortalPersonalStateme
   return trimText(personalStatement?.personal_statement_text)
 }
 
+function validateBasicRules(profileData?: PortalApplicantProfileData | null, requireComplete = false) {
+  const missingFields: string[] = []
+  if (requireComplete) {
+    if (!trimText(profileData?.full_name_pinyin)) {
+      missingFields.push('姓名拼音')
+    }
+    if (!trimText(profileData?.profile_photo_url)) {
+      missingFields.push('个人照片')
+    }
+    if (!trimText(profileData?.id_card_collage_url)) {
+      missingFields.push('身份证拼图')
+    }
+    if (!trimText(profileData?.gender)) {
+      missingFields.push('性别')
+    }
+    if (!trimText(profileData?.ethnic_group)) {
+      missingFields.push('民族')
+    }
+    if (!trimText(profileData?.political_status)) {
+      missingFields.push('政治面貌')
+    }
+    if (!trimText(profileData?.emergency_contact_name)) {
+      missingFields.push('紧急联系人姓名')
+    }
+    if (!trimText(profileData?.emergency_contact_phone)) {
+      missingFields.push('紧急联系人手机')
+    }
+    if (!trimText(profileData?.mailing_address)) {
+      missingFields.push('通讯地址')
+    }
+  }
+  if (missingFields.length) {
+    return `基本信息以下字段必填：${missingFields.join('、')}`
+  }
+
+  const phoneValidationMessage = getPhoneValidationMessage(profileData?.emergency_contact_phone || '', requireComplete, '紧急联系人手机')
+  if (phoneValidationMessage) {
+    return phoneValidationMessage
+  }
+
+  return ''
+}
+
+function validateSourceChannelRules(sourceChannel?: string | null, sourceChannelOther?: string | null) {
+  if (trimText(sourceChannel) === '其他' && !trimText(sourceChannelOther)) {
+    return '选择“其他”来源时，请补充说明'
+  }
+
+  return ''
+}
+
 function validatePersonalStatementRules(personalStatement?: PortalPersonalStatementData | null, requireComplete = false) {
   if (!requireComplete) {
     return ''
@@ -660,6 +714,77 @@ function validatePersonalStatementRules(personalStatement?: PortalPersonalStatem
   }
 
   return ''
+}
+
+function validateDeclarationRules(declaration?: PortalApplicationDeclarationData | null) {
+  if (!declaration?.has_read_declaration) {
+    return '请先确认提交声明'
+  }
+
+  return ''
+}
+
+async function validateApplicationForSubmit(title = '提交受阻') {
+  if (!selectedPlanId.value) {
+    await showPortalAlert('当前暂无可提交的招生计划', title, 'warning')
+    return false
+  }
+  const basicRuleMessage = validateBasicRules(form.profile, true)
+  if (basicRuleMessage) {
+    await showPortalAlert(basicRuleMessage, title, 'warning')
+    return false
+  }
+  const primary = primaryPreference.value
+  if (!trimText(primary?.research_center_name)) {
+    await showPortalAlert('请至少选择第一志愿研究中心', title, 'warning')
+    return false
+  }
+  const completedEducationItems = getCompletedEducationExperiences(form.education_experiences)
+  if (completedEducationItems.length < 2) {
+    await showPortalAlert('请至少完整填写两条教育经历', title, 'warning')
+    return false
+  }
+  const educationRuleMessage = validateEducationRules(form.education_experiences)
+  if (educationRuleMessage) {
+    await showPortalAlert(educationRuleMessage, title, 'warning')
+    return false
+  }
+  const practiceRuleMessage = validatePracticeRules(form.practice_experiences)
+  if (practiceRuleMessage) {
+    await showPortalAlert(practiceRuleMessage, title, 'warning')
+    return false
+  }
+  const englishRuleMessage = validateEnglishRules(form.english_proficiencies)
+  if (englishRuleMessage) {
+    await showPortalAlert(englishRuleMessage, title, 'warning')
+    return false
+  }
+  const familyRuleMessage = validateFamilyRules(form.family_members)
+  if (familyRuleMessage) {
+    await showPortalAlert(familyRuleMessage, title, 'warning')
+    return false
+  }
+  const personalStatementRuleMessage = validatePersonalStatementRules(form.personal_statement, true)
+  if (personalStatementRuleMessage) {
+    await showPortalAlert(personalStatementRuleMessage, title, 'warning')
+    return false
+  }
+  const achievementRuleMessage = validateAchievementRules(form.achievement_records)
+  if (achievementRuleMessage) {
+    await showPortalAlert(achievementRuleMessage, title, 'warning')
+    return false
+  }
+  const sourceChannelRuleMessage = validateSourceChannelRules(form.source_channel, form.source_channel_other)
+  if (sourceChannelRuleMessage) {
+    await showPortalAlert(sourceChannelRuleMessage, title, 'warning')
+    return false
+  }
+  const declarationRuleMessage = validateDeclarationRules(form.declaration)
+  if (declarationRuleMessage) {
+    await showPortalAlert(declarationRuleMessage, title, 'warning')
+    return false
+  }
+  return true
 }
 
 function createDeclaration(): PortalApplicationDeclarationData {
@@ -1183,15 +1308,7 @@ function buildSectionStatuses(): PortalSectionStatus[] {
     || trimText(profileData.id_card_collage_url),
   )
   const basicCompleted = Boolean(
-    trimText(profileData.full_name_pinyin)
-    && trimText(profileData.gender)
-    && trimText(profileData.ethnic_group)
-    && trimText(profileData.political_status)
-    && trimText(profileData.mailing_address)
-    && trimText(profileData.emergency_contact_name)
-    && trimText(profileData.emergency_contact_phone)
-    && trimText(profileData.profile_photo_url)
-    && trimText(profileData.id_card_collage_url),
+    !validateBasicRules(profileData, true),
   )
 
   const firstPreference = primaryPreference.value
@@ -1201,7 +1318,10 @@ function buildSectionStatuses(): PortalSectionStatus[] {
     || trimText(firstPreference?.research_center_name)
     || trimText(firstPreference?.advisor_name),
   )
-  const applicationCompleted = Boolean(trimText(firstPreference?.research_center_name))
+  const applicationCompleted = Boolean(
+    trimText(firstPreference?.research_center_name)
+    && !validateSourceChannelRules(form.source_channel, form.source_channel_other),
+  )
 
   const educationItems = form.education_experiences || []
   const completedEducationItems = getCompletedEducationExperiences(educationItems)
@@ -1232,7 +1352,9 @@ function buildSectionStatuses(): PortalSectionStatus[] {
     || trimText(form.personal_statement?.supporting_material_attachment_url)
     || form.declaration?.has_read_declaration,
   )
-  const statementCompleted = statementStarted && !validatePersonalStatementRules(form.personal_statement, true)
+  const statementCompleted = statementStarted
+    && !validatePersonalStatementRules(form.personal_statement, true)
+    && !validateDeclarationRules(form.declaration)
 
   const createStatus = (id: string, label: string, started: boolean, completed: boolean): PortalSectionStatus => ({
     id,
@@ -1414,64 +1536,20 @@ function buildSubmitPayload(): PortalApplicationUpsert {
 }
 
 async function submitForm() {
-  if (!selectedPlanId.value) {
-    await showPortalAlert('当前暂无可提交的招生计划', '提交受阻', 'warning')
+  if (isSubmitted.value) {
+    await showPortalAlert('报名申请已提交，当前仅支持只读浏览，不能再修改信息', '提交受阻', 'warning')
     return
   }
-  if (!trimText(form.profile?.profile_photo_url)) {
-    await showPortalAlert('请先上传个人照片后再提交申请表', '提交受阻', 'warning')
+  if (!await validateApplicationForSubmit('提交受阻')) {
     return
   }
-  if (!trimText(form.profile?.id_card_collage_url)) {
-    await showPortalAlert('请先上传身份证拼图后再提交申请表', '提交受阻', 'warning')
-    return
-  }
-  const primary = primaryPreference.value
-  if (!trimText(primary?.research_center_name)) {
-    await showPortalAlert('请至少选择第一志愿研究中心', '提交受阻', 'warning')
-    return
-  }
-  const completedEducationItems = getCompletedEducationExperiences(form.education_experiences)
-  if (completedEducationItems.length < 2) {
-    await showPortalAlert('请至少完整填写两条教育经历', '提交受阻', 'warning')
-    return
-  }
-  const educationRuleMessage = validateEducationRules(form.education_experiences)
-  if (educationRuleMessage) {
-    await showPortalAlert(educationRuleMessage, '提交受阻', 'warning')
-    return
-  }
-  const practiceRuleMessage = validatePracticeRules(form.practice_experiences)
-  if (practiceRuleMessage) {
-    await showPortalAlert(practiceRuleMessage, '提交受阻', 'warning')
-    return
-  }
-  const englishRuleMessage = validateEnglishRules(form.english_proficiencies)
-  if (englishRuleMessage) {
-    await showPortalAlert(englishRuleMessage, '提交受阻', 'warning')
-    return
-  }
-  const familyRuleMessage = validateFamilyRules(form.family_members)
-  if (familyRuleMessage) {
-    await showPortalAlert(familyRuleMessage, '提交受阻', 'warning')
-    return
-  }
-  const personalStatementRuleMessage = validatePersonalStatementRules(form.personal_statement, true)
-  if (personalStatementRuleMessage) {
-    await showPortalAlert(personalStatementRuleMessage, '提交受阻', 'warning')
-    return
-  }
-  const achievementRuleMessage = validateAchievementRules(form.achievement_records)
-  if (achievementRuleMessage) {
-    await showPortalAlert(achievementRuleMessage, '提交受阻', 'warning')
-    return
-  }
-  if (trimText(form.source_channel) === '其他' && !trimText(form.source_channel_other)) {
-    await showPortalAlert('选择“其他”来源时，请补充说明', '提交受阻', 'warning')
-    return
-  }
-  if (!form.declaration?.has_read_declaration) {
-    await showPortalAlert('请先确认提交声明', '提交受阻', 'warning')
+  const confirmed = await showPortalConfirm(
+    '申请材料一旦提交将不可修改，请确认所填写的内容是否完整、准确。',
+    '确认提交',
+    '确认提交',
+    '返回修改',
+  )
+  if (!confirmed) {
     return
   }
 
@@ -1483,7 +1561,7 @@ async function submitForm() {
     await showPortalAlert(
       [
         '报名申请提交成功。',
-        response.data.application_business_key ? `业务编号：${response.data.application_business_key}` : '',
+        response.data.application_business_key ? `报名号：${response.data.application_business_key}` : '',
         response.data.application_status ? `当前状态：${response.data.application_status}` : '',
         response.data.student?.submitted_at ? `提交时间：${response.data.student.submitted_at}` : '',
       ].filter(Boolean).join('\n'),
@@ -1498,24 +1576,11 @@ async function submitForm() {
 }
 
 async function saveDraft(showSuccess = true) {
-  const educationRuleMessage = validateEducationRules(form.education_experiences)
-  if (educationRuleMessage) {
-    await showPortalAlert(educationRuleMessage, '草稿保存受阻', 'warning')
+  if (isSubmitted.value) {
+    await showPortalAlert('报名申请已提交，当前仅支持只读浏览，不能再修改信息', '草稿保存受阻', 'warning')
     return false
   }
-  const practiceRuleMessage = validatePracticeRules(form.practice_experiences)
-  if (practiceRuleMessage) {
-    await showPortalAlert(practiceRuleMessage, '草稿保存受阻', 'warning')
-    return false
-  }
-  const familyRuleMessage = validateFamilyRules(form.family_members)
-  if (familyRuleMessage) {
-    await showPortalAlert(familyRuleMessage, '草稿保存受阻', 'warning')
-    return false
-  }
-  const achievementRuleMessage = validateAchievementRules(form.achievement_records)
-  if (achievementRuleMessage) {
-    await showPortalAlert(achievementRuleMessage, '草稿保存受阻', 'warning')
+  if (!await validateApplicationForSubmit('草稿保存受阻')) {
     return false
   }
   savingDraft.value = true
@@ -1593,6 +1658,7 @@ defineExpose({
   saveDraft,
   getSectionStatuses: buildSectionStatuses,
   getSavingDraft: () => savingDraft.value,
+  getIsSubmitted: () => isSubmitted.value,
 })
 </script>
 
@@ -1601,99 +1667,104 @@ defineExpose({
     <div v-if="initializing" class="portal-v2-form-loading">正在加载申请表...</div>
 
     <template v-else>
-      <PortalBasicSection
-        v-if="activeSectionId === 'basic-section'"
-        :form="form"
-        :student="student"
-        :gender-options="genderOptions"
-        :ethnic-group-options="ethnicGroupOptions"
-        :political-status-options="politicalStatusOptions"
-        :id-type-options="idTypeOptions"
-        :profile-photo-attachment-accept="profilePhotoAttachmentAccept"
-        :id-card-collage-attachment-accept="idCardCollageAttachmentAccept"
-        :is-attachment-uploading="isAttachmentUploading"
-        :build-attachment-upload-key="buildAttachmentUploadKey"
-        :handle-profile-photo-upload="handleProfilePhotoUpload"
-        :handle-id-card-collage-upload="handleIdCardCollageUpload"
-      />
+      <div v-if="isSubmitted" class="portal-v2-form-banner">
+        报名申请已提交，当前仅支持只读浏览，不能再修改信息。<span v-if="submittedRegistrationNo"> 报名号：{{ submittedRegistrationNo }}</span>
+      </div>
 
-      <PortalApplicationSection
-        v-else-if="activeSectionId === 'application-section'"
-        :form="form"
-        :teams="teams"
-        :source-channel-options="sourceChannelOptions"
-        :advisors-for-center="advisorsForCenter"
-        :handle-preference-center-change="handlePreferenceCenterChange"
-      />
+      <fieldset :disabled="isSubmitted" class="portal-v2-form-fieldset">
+        <PortalBasicSection
+          v-if="activeSectionId === 'basic-section'"
+          :form="form"
+          :student="student"
+          :gender-options="genderOptions"
+          :ethnic-group-options="ethnicGroupOptions"
+          :political-status-options="politicalStatusOptions"
+          :id-type-options="idTypeOptions"
+          :profile-photo-attachment-accept="profilePhotoAttachmentAccept"
+          :id-card-collage-attachment-accept="idCardCollageAttachmentAccept"
+          :is-attachment-uploading="isAttachmentUploading"
+          :build-attachment-upload-key="buildAttachmentUploadKey"
+          :handle-profile-photo-upload="handleProfilePhotoUpload"
+          :handle-id-card-collage-upload="handleIdCardCollageUpload"
+        />
 
-      <PortalEducationSection
-        v-else-if="activeSectionId === 'education-section'"
-        :form="form"
-        :get-education-stage-options="getEducationStageOptions"
-        :certificate-attachment-accept="certificateAttachmentAccept"
-        :is-attachment-uploading="isAttachmentUploading"
-        :build-attachment-upload-key="buildAttachmentUploadKey"
-        :handle-education-attachment-upload="handleEducationAttachmentUpload"
-        :handle-education-stage-change="handleEducationStageChange"
-        :add-education="addEducation"
-        :remove-education="removeEducation"
-      />
+        <PortalApplicationSection
+          v-else-if="activeSectionId === 'application-section'"
+          :form="form"
+          :teams="teams"
+          :source-channel-options="sourceChannelOptions"
+          :advisors-for-center="advisorsForCenter"
+          :handle-preference-center-change="handlePreferenceCenterChange"
+        />
 
-      <PortalEnglishSection
-        v-else-if="activeSectionId === 'english-section'"
-        :form="form"
-        :english-exam-options="englishExamOptions"
-        :certificate-attachment-accept="certificateAttachmentAccept"
-        :is-attachment-uploading="isAttachmentUploading"
-        :build-attachment-upload-key="buildAttachmentUploadKey"
-        :handle-english-attachment-upload="handleEnglishAttachmentUpload"
-        :add-english="addEnglish"
-        :remove-english="removeEnglish"
-      />
+        <PortalEducationSection
+          v-else-if="activeSectionId === 'education-section'"
+          :form="form"
+          :get-education-stage-options="getEducationStageOptions"
+          :certificate-attachment-accept="certificateAttachmentAccept"
+          :is-attachment-uploading="isAttachmentUploading"
+          :build-attachment-upload-key="buildAttachmentUploadKey"
+          :handle-education-attachment-upload="handleEducationAttachmentUpload"
+          :handle-education-stage-change="handleEducationStageChange"
+          :add-education="addEducation"
+          :remove-education="removeEducation"
+        />
 
-      <PortalPracticeSection
-        v-else-if="activeSectionId === 'practice-section'"
-        :form="form"
-        :add-practice="addPractice"
-        :remove-practice="removePractice"
-      />
+        <PortalEnglishSection
+          v-else-if="activeSectionId === 'english-section'"
+          :form="form"
+          :english-exam-options="englishExamOptions"
+          :certificate-attachment-accept="certificateAttachmentAccept"
+          :is-attachment-uploading="isAttachmentUploading"
+          :build-attachment-upload-key="buildAttachmentUploadKey"
+          :handle-english-attachment-upload="handleEnglishAttachmentUpload"
+          :add-english="addEnglish"
+          :remove-english="removeEnglish"
+        />
 
-      <PortalFamilySection
-        v-else-if="activeSectionId === 'family-section'"
-        :form="form"
-        :family-relation-options="familyRelationOptions"
-        :add-family-member="addFamilyMember"
-        :remove-family-member="removeFamilyMember"
-      />
+        <PortalPracticeSection
+          v-else-if="activeSectionId === 'practice-section'"
+          :form="form"
+          :add-practice="addPractice"
+          :remove-practice="removePractice"
+        />
 
-      <PortalAchievementSection
-        v-else-if="activeSectionId === 'achievement-section'"
-        :form="form"
-        :achievement-type-options="achievementTypeOptions"
-        :achievement-award-attachment-accept="achievementAwardAttachmentAccept"
-        :is-attachment-uploading="isAttachmentUploading"
-        :build-attachment-upload-key="buildAttachmentUploadKey"
-        :add-achievement="addAchievement"
-        :handle-achievement-type-change="handleAchievementTypeChange"
-        :handle-achievement-award-attachment-upload="handleAchievementAwardAttachmentUpload"
-        :remove-achievement="removeAchievement"
-      />
+        <PortalFamilySection
+          v-else-if="activeSectionId === 'family-section'"
+          :form="form"
+          :family-relation-options="familyRelationOptions"
+          :add-family-member="addFamilyMember"
+          :remove-family-member="removeFamilyMember"
+        />
 
-      <PortalStatementSection
-        v-else-if="activeSectionId === 'statement-section'"
-        :form="form"
-        :declaration-reminder-text="declarationReminderText"
-        :resume-attachment-accept="resumeAttachmentAccept"
-        :supporting-material-attachment-accept="supportingMaterialAttachmentAccept"
-        :is-attachment-uploading="isAttachmentUploading"
-        :build-attachment-upload-key="buildAttachmentUploadKey"
-        :handle-resume-attachment-upload="handleResumeAttachmentUpload"
-        :handle-supporting-material-attachment-upload="handleSupportingMaterialAttachmentUpload"
-        :submit-form="submitForm"
-        :submitting="submitting"
-      />
+        <PortalAchievementSection
+          v-else-if="activeSectionId === 'achievement-section'"
+          :form="form"
+          :achievement-type-options="achievementTypeOptions"
+          :achievement-award-attachment-accept="achievementAwardAttachmentAccept"
+          :is-attachment-uploading="isAttachmentUploading"
+          :build-attachment-upload-key="buildAttachmentUploadKey"
+          :add-achievement="addAchievement"
+          :handle-achievement-type-change="handleAchievementTypeChange"
+          :handle-achievement-award-attachment-upload="handleAchievementAwardAttachmentUpload"
+          :remove-achievement="removeAchievement"
+        />
 
-      <div v-else class="portal-v2-form-placeholder">该章节正在拆分中，下一步补入独立组件。</div>
+        <PortalStatementSection
+          v-else-if="activeSectionId === 'statement-section'"
+          :form="form"
+          :declaration-reminder-text="declarationReminderText"
+          :resume-attachment-accept="resumeAttachmentAccept"
+          :supporting-material-attachment-accept="supportingMaterialAttachmentAccept"
+          :is-attachment-uploading="isAttachmentUploading"
+          :build-attachment-upload-key="buildAttachmentUploadKey"
+          :handle-resume-attachment-upload="handleResumeAttachmentUpload"
+          :handle-supporting-material-attachment-upload="handleSupportingMaterialAttachmentUpload"
+          :submit-form="submitForm"
+          :submitting="submitting"
+        />
+        <div v-else class="portal-v2-form-placeholder">该章节正在拆分中，下一步补入独立组件。</div>
+      </fieldset>
     </template>
   </div>
 </template>
@@ -1701,6 +1772,24 @@ defineExpose({
 <style scoped>
 .portal-v2-form-shell {
   min-width: 0;
+}
+
+.portal-v2-form-banner {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(220, 173, 64, 0.28);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 248, 228, 0.96), rgba(255, 252, 243, 0.98));
+  color: #805f14;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.portal-v2-form-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .portal-v2-form-loading,

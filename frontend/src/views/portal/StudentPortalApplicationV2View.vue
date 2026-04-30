@@ -22,6 +22,7 @@ type PortalApplicationViewExpose = {
   saveDraft: (showSuccess?: boolean) => Promise<boolean>
   getSectionStatuses: () => PortalSectionStatus[]
   getSavingDraft: () => boolean
+  getIsSubmitted: () => boolean
 }
 
 const workflowStages = [
@@ -60,6 +61,7 @@ const canMoveNext = computed(() => activeSectionIndex.value >= 0 && activeSectio
 const applicationViewRef = ref<PortalApplicationViewExpose | null>(null)
 const sectionStatuses = computed(() => applicationViewRef.value?.getSectionStatuses() || [])
 const savingDraft = computed(() => applicationViewRef.value?.getSavingDraft() || false)
+const submittedReadonly = computed(() => applicationViewRef.value?.getIsSubmitted() || false)
 const portalStudentName = ref('学生')
 const passwordDialogVisible = ref(false)
 const passwordSubmitting = ref(false)
@@ -260,7 +262,7 @@ onMounted(async () => {
             </div>
 
             <div class="portal-v2-actions">
-              <button type="button" class="portal-v2-actions__button portal-v2-actions__button--save" :disabled="savingDraft" @click="saveCurrentSection">{{ savingDraft ? '保存中...' : '保存' }}</button>
+              <button type="button" class="portal-v2-actions__button portal-v2-actions__button--save" :disabled="savingDraft || submittedReadonly" @click="saveCurrentSection">{{ submittedReadonly ? '已提交只读' : savingDraft ? '保存中...' : '保存' }}</button>
               <button type="button" class="portal-v2-actions__button portal-v2-actions__button--ghost" :disabled="!canMovePrev" @click="goPrevSection">上一步</button>
               <button type="button" class="portal-v2-actions__button portal-v2-actions__button--primary" :disabled="!canMoveNext" @click="goNextSection">下一步</button>
             </div>
