@@ -5,7 +5,7 @@ defineProps<{
   form: PortalApplicationUpsert
   teams: PortalTeamRecord[]
   sourceChannelOptions: string[]
-  advisorsForCenter: (centerName: string) => string[]
+  advisorOptionsForTeam: (teamId: number | null | undefined) => Array<{ user_id: number | null; full_name: string }>
   handlePreferenceCenterChange: (item: PortalApplicationPreferenceItem) => void
 }>()
 </script>
@@ -30,16 +30,16 @@ defineProps<{
         <div class="section-grid">
           <label>
             <span><span v-if="index === 0" class="required-mark">*</span>研究领域</span>
-            <select v-model="item.research_center_name" @change="handlePreferenceCenterChange(item)">
+            <select v-model="item.team_id" @change="handlePreferenceCenterChange(item)">
               <option value="">请选择研究中心</option>
-              <option v-for="team in teams" :key="team.id" :value="team.team_name">{{ team.team_name }}</option>
+              <option v-for="team in teams" :key="team.id" :value="team.id">{{ team.team_name }}</option>
             </select>
           </label>
           <label>
             <span>意向导师</span>
-            <select v-model="item.advisor_name">
+            <select v-model="item.advisor_user_id">
               <option value="">请选择导师</option>
-              <option v-for="advisor in advisorsForCenter(item.research_center_name)" :key="advisor" :value="advisor">{{ advisor }}</option>
+              <option v-for="advisor in advisorOptionsForTeam(item.team_id)" :key="`${advisor.user_id}-${advisor.full_name}`" :value="advisor.user_id || ''">{{ advisor.full_name }}</option>
             </select>
           </label>
         </div>

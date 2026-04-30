@@ -148,14 +148,14 @@ def get_student_options() -> StudentOptionsResponse:
 def get_center_list(
     keyword: str | None = None,
     is_enabled: bool | None = None,
-    director_name: str | None = None,
+    director_id: int | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> CenterListResponse:
     return store.get_centers(
         keyword=keyword,
         is_enabled=is_enabled,
-        director_name=director_name,
+        director_id=director_id,
         page=page,
         page_size=page_size,
     )

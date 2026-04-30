@@ -5,7 +5,6 @@ import { Message, Phone, Tickets, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import { changePortalStudentPassword, clearPortalToken, getPortalProfile, getPortalPublicConfig, listPortalPlans, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
-import { openPortalApplicationV2 } from '../../utils/portalApplicationV2Access'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 type ProgressCard = {
@@ -80,6 +79,7 @@ const profilePhotoUrl = computed(() => {
   ]
   return candidates.find((item) => typeof item === 'string' && item.trim()) || defaultProfilePhotoUrl
 })
+const hasSubmittedApplication = computed(() => Boolean(portalStudent.value?.submitted_at))
 const completedProgressCount = computed(() => progressCards.value.filter((item) => item.completed).length)
 
 const progressCards = computed<ProgressCard[]>(() => {
@@ -160,6 +160,19 @@ const progressCards = computed<ProgressCard[]>(() => {
     completed,
   })
 
+  if (hasSubmittedApplication.value) {
+    return [
+      createCard('basic', '基本信息', true, true),
+      createCard('application', '报名信息', true, true),
+      createCard('practice', '实践经历', true, true),
+      createCard('english', '英语语言能力', true, true),
+      createCard('family', '家庭情况', true, true),
+      createCard('achievement', '成果经历', true, true),
+      createCard('statement', '个人陈述', true, true),
+      createCard('submit', '提交申请', true, true),
+    ]
+  }
+
   return [
     createCard('basic', '基本信息', basicStarted, basicCompleted),
     createCard('application', '报名信息', applicationStarted, applicationCompleted),
@@ -204,7 +217,7 @@ async function openPortalAdmissionsInfo() {
 }
 
 function goToApplication() {
-  void openPortalApplicationV2(router)
+  void router.push('/portal/application')
 }
 
 function resetPasswordForm() {
@@ -271,7 +284,7 @@ onMounted(() => {
         <nav class="portal-home-header__nav" aria-label="门户导航">
           <a class="portal-home-header__nav-link portal-home-header__nav-link--active" href="/portal/home">首页</a>
           <button type="button" class="portal-home-header__nav-link" @click="openPortalAdmissionsInfo">招生信息</button>
-          <a class="portal-home-header__nav-link" href="/portal/applicationv2" @click.prevent="goToApplication">在线申请</a>
+          <a class="portal-home-header__nav-link" href="/portal/application" @click.prevent="goToApplication">在线申请</a>
           <a class="portal-home-header__nav-link" href="#portal-progress">申请进度</a>
         </nav>
         <div class="portal-home-header__actions">
@@ -318,9 +331,9 @@ onMounted(() => {
               <hr class="portal-home-profile-card__rule" />
               <div class="portal-home-profile-card__meta-label">
                 <el-icon><Tickets /></el-icon>
-                <span>报名批次</span>
+                <span>招生计划</span>
               </div>
-              <strong>{{ activePlan?.academic_term || '未填写' }}</strong>
+              <strong>{{ activePlan?.plan_name || '未填写' }}</strong>
             </div>
             <div class="portal-home-profile-card__meta">
               <hr class="portal-home-profile-card__rule" />

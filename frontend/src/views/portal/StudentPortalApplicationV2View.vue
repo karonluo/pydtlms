@@ -5,7 +5,6 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import { changePortalStudentPassword, clearPortalToken, getPortalProfile } from '../../api/portal'
-import { ensurePortalApplicationV2Available } from '../../utils/portalApplicationV2Access'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 import PortalApplicationV2Form from './applicationv2/PortalApplicationV2Form.vue'
 
@@ -36,7 +35,7 @@ const workflowStages = [
 const headerLinks = [
   { label: '首页', href: '/portal/home' },
   { label: '招生信息', href: '/portal/home#portal-news' },
-  { label: '在线申请', href: '/portal/applicationv2', active: true },
+  { label: '在线申请', href: '/portal/application', active: true },
   { label: '申请进度', href: '/portal/home#portal-progress' },
 ]
 
@@ -158,12 +157,6 @@ async function submitPasswordChange() {
 }
 
 onMounted(async () => {
-  const allowed = await ensurePortalApplicationV2Available()
-  if (!allowed) {
-    await router.replace('/portal/home')
-    return
-  }
-
   try {
     const response = await getPortalProfile()
     portalStudentName.value = response.data.full_name || '学生'

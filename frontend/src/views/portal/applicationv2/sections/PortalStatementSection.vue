@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import type { PortalApplicationUpsert } from '../../../../api/portal'
 
+function isPreviewableAttachment(fileName: string | null | undefined, fileUrl: string | null | undefined) {
+  const candidate = String(fileName || fileUrl || '').toLowerCase()
+  return candidate.endsWith('.pdf')
+}
+
 defineProps<{
   form: PortalApplicationUpsert
   declarationReminderText: string
@@ -39,8 +44,9 @@ defineProps<{
           v-if="form.personal_statement!.resume_attachment_url && form.personal_statement!.resume_attachment_name"
           class="upload-link-input"
           :href="form.personal_statement!.resume_attachment_url"
-          target="_blank"
-          rel="noopener noreferrer"
+          :target="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? '_blank' : undefined"
+          :rel="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? 'noopener noreferrer' : undefined"
+          :download="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? undefined : (form.personal_statement!.resume_attachment_name || true)"
           :title="form.personal_statement!.resume_attachment_name || ''"
         >{{ form.personal_statement!.resume_attachment_name }}</a>
         <input v-else :value="''" readonly placeholder="支持 PDF / Word 简历" />
@@ -51,7 +57,7 @@ defineProps<{
           :accept="resumeAttachmentAccept"
           @change="handleResumeAttachmentUpload"
         />
-        <small>{{ isAttachmentUploading(buildAttachmentUploadKey('statement', 0, 'resume')) ? '上传中...' : '支持 PDF/DOC/DOCX，单个文件不超过 20MB' }}</small>
+        <small>{{ isAttachmentUploading(buildAttachmentUploadKey('statement', 0, 'resume')) ? '上传中...' : '支持 PDF/DOC/DOCX，单个文件不超过 20MB；PDF 可在线预览，Word 文件将直接下载' }}</small>
       </div>
 
       <div class="upload-card">

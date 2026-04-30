@@ -45,6 +45,47 @@ def _build_personal_statement_payload(include_resume: bool = True, include_suppo
     return payload
 
 
+def _build_valid_education_experiences() -> list[dict[str, object]]:
+    return [
+        {
+            'sort_order': 1,
+            'education_stage': '高中毕业',
+            'start_month': '2016-09',
+            'end_month': '2019-06',
+            'school_name': '无锡市第一中学',
+            'verifier_name': '王老师',
+            'verifier_phone': '13800002222',
+        },
+        {
+            'sort_order': 2,
+            'education_stage': '本科在读',
+            'start_month': '2019-09',
+            'school_name': '江南大学',
+            'major_name': '自动化',
+            'average_score': '89',
+            'gpa': '3.8',
+            'ranking': '12/120',
+            'transcript_attachment_url': '/portal-attachments/uploads/student-7/education_transcript/transcript-a.pdf',
+            'verifier_name': '李老师',
+            'verifier_phone': '13800003333',
+        },
+    ]
+
+
+def _build_valid_profile_payload() -> dict[str, object]:
+    return {
+        'full_name_pinyin': 'ZHANG SAN',
+        'profile_photo_url': '/portal-attachments/uploads/student-7/profile_photo/profile.jpg',
+        'id_card_collage_url': '/portal-attachments/uploads/student-7/id_card_collage/id-card.jpg',
+        'gender': '男',
+        'ethnic_group': '汉族',
+        'political_status': '中共党员',
+        'mailing_address': '江苏省无锡市滨湖区蠡湖大道1800号',
+        'emergency_contact_name': '张父',
+        'emergency_contact_phone': '13800004444',
+    }
+
+
 def test_portal_register_returns_profile(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.validate_portal_registration_email_code', lambda email, verification_code: None)
@@ -233,27 +274,22 @@ def test_portal_plans_and_teams_require_auth_and_return_data(monkeypatch) -> Non
         assert teams_response.json()['items'][0]['team_name'] == '智能制造联合团队'
 
 
-def test_portal_public_config_returns_application_v2_switch(monkeypatch) -> None:
+def test_portal_public_config_returns_admissions_url(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
         monkeypatch.setattr('app.api.v1.portal.settings.portal_admissions_info_url', 'https://admissions.example.com')
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', True)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_block_message', '4月30日（周四）20点之前开放，敬请期待')
 
         response = client.get('/api/v1/portal/public-config', headers={'Authorization': 'Bearer portal-token'})
 
         assert response.status_code == 200
         assert response.json() == {
             'portal_admissions_info_url': 'https://admissions.example.com',
-            'portal_application_v2_blocked': True,
-            'portal_application_v2_block_message': '4月30日（周四）20点之前开放，敬请期待',
         }
 
 
 def test_portal_application_submission_returns_business_key(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr(
             'app.api.v1.portal.submit_portal_application',
             lambda student_id, payload: {
@@ -268,19 +304,21 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
             headers={'Authorization': 'Bearer portal-token'},
             json={
                 'plan_id': 3,
-                'gender': '男',
-                'birth_date': '1999-01-01',
-                'native_place': '江苏无锡',
-                'graduation_school': '江南大学',
-                'highest_degree': '硕士',
-                'intended_field': '智能制造',
-                'political_status': '中共党员',
-                'education_experience': '2017-2021 江南大学自动化本科；2021-2024 江南大学控制科学硕士',
-                'practice_experience': '参与工业视觉检测项目',
+                'profile': _build_valid_profile_payload(),
+                'source_channel': '实验室官网',
+                'preferences': [
+                    {
+                        'preference_order': 1,
+                        'research_center_name': '智能制造联合团队',
+                        'advisor_name': '刘亚',
+                        'is_optional': False,
+                    }
+                ],
+                'education_experiences': _build_valid_education_experiences(),
                 'english_proficiencies': [
                     {
-                        'exam_name': 'CET-6',
-                        'score_text': '520',
+                        'exam_name': 'IELTS',
+                        'score_text': '7.0',
                         'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
                     }
                 ],
@@ -288,10 +326,7 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
                     {'member_name': '张父', 'relation_type': '父亲'},
                 ],
                 'personal_statement': _build_personal_statement_payload(include_resume=True),
-                'signed_agreement': True,
-                'selected_team_name': '智能制造联合团队',
-                'selected_advisor_name': '刘亚',
-                'self_evaluation': '具备算法与控制方向研究基础',
+                'declaration': {'has_read_declaration': True},
             },
         )
 
@@ -300,54 +335,6 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
         assert payload['application_business_key'] == 'RECRUIT-20260413-0007'
         assert payload['application_status'] == '报名已提交'
         assert payload['student']['selected_plan_id'] == 3
-
-
-def test_portal_application_submission_is_blocked_when_switch_is_enabled(monkeypatch) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', True)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_block_message', '4月30日（周四）20点之前开放，敬请期待')
-
-        response = client.post(
-            '/api/v1/portal/applications',
-            headers={'Authorization': 'Bearer portal-token'},
-            json={
-                'plan_id': 3,
-                'graduation_school': '江南大学',
-                'highest_degree': '硕士',
-                'selected_team_name': '智能制造联合团队',
-                'intended_field': '智能制造',
-                'english_proficiencies': [
-                    {
-                        'exam_name': 'CET-6',
-                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
-                    }
-                ],
-                'family_members': [
-                    {'member_name': '张母', 'relation_type': '母亲'},
-                ],
-                'personal_statement': _build_personal_statement_payload(include_resume=True),
-            },
-        )
-
-        assert response.status_code == 403
-        assert response.json()['detail'] == '4月30日（周四）20点之前开放，敬请期待'
-
-
-def test_portal_application_draft_is_blocked_when_switch_is_enabled(monkeypatch) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', True)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_block_message', '4月30日（周四）20点之前开放，敬请期待')
-
-        response = client.post(
-            '/api/v1/portal/applications/draft',
-            headers={'Authorization': 'Bearer portal-token'},
-            json={'plan_id': 3},
-        )
-
-        assert response.status_code == 403
-        assert response.json()['detail'] == '4月30日（周四）20点之前开放，敬请期待'
 
 
 def test_portal_attachment_upload_returns_public_url(monkeypatch, tmp_path: Path) -> None:
@@ -453,7 +440,6 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
 
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
 
         response = client.post(
@@ -529,13 +515,14 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
 def test_portal_application_submission_rejects_short_personal_statement(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
             headers={'Authorization': 'Bearer portal-token'},
             json={
                 'plan_id': 3,
+                'profile': _build_valid_profile_payload(),
+                'source_channel': '实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -581,13 +568,14 @@ def test_portal_application_submission_rejects_short_personal_statement(monkeypa
 def test_portal_application_submission_rejects_missing_resume_attachment(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
             headers={'Authorization': 'Bearer portal-token'},
             json={
                 'plan_id': 3,
+                'profile': _build_valid_profile_payload(),
+                'source_channel': '实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -629,13 +617,14 @@ def test_portal_application_submission_rejects_missing_resume_attachment(monkeyp
 def test_portal_application_submission_rejects_bachelor_graduate_without_master_stage(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
             headers={'Authorization': 'Bearer portal-token'},
             json={
                 'plan_id': 3,
+                'profile': _build_valid_profile_payload(),
+                'source_channel': '实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -666,7 +655,6 @@ def test_portal_application_submission_rejects_bachelor_graduate_without_master_
 def test_portal_application_draft_rejects_bachelor_current_with_master_stage(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications/draft',
@@ -695,7 +683,6 @@ def test_portal_application_draft_rejects_bachelor_current_with_master_stage(mon
 def test_portal_application_draft_rejects_bachelor_graduate_stage_without_master_stage(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications/draft',
@@ -724,7 +711,6 @@ def test_portal_application_draft_rejects_bachelor_graduate_stage_without_master
 def test_portal_application_draft_rejects_blank_second_education_experience(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications/draft',
@@ -753,7 +739,6 @@ def test_portal_application_draft_rejects_blank_second_education_experience(monk
 def test_portal_application_submission_rejects_non_bachelor_second_education_experience(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -790,7 +775,6 @@ def test_portal_application_submission_rejects_non_bachelor_second_education_exp
 def test_portal_application_draft_rejects_incomplete_practice_with_dates(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications/draft',
@@ -818,7 +802,6 @@ def test_portal_application_draft_rejects_incomplete_practice_with_dates(monkeyp
 def test_portal_application_submission_rejects_more_than_two_practice_experiences(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -877,7 +860,6 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
 
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
 
         response = client.post(
@@ -885,6 +867,8 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
             headers={'Authorization': 'Bearer portal-token'},
             json={
                 'plan_id': 3,
+                'profile': _build_valid_profile_payload(),
+                'source_channel': '实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -893,18 +877,7 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
                         'is_optional': False,
                     }
                 ],
-                'education_experiences': [
-                    {
-                        'sort_order': 1,
-                        'education_stage': '高中毕业',
-                        'school_name': '无锡市第一中学',
-                    },
-                    {
-                        'sort_order': 2,
-                        'education_stage': '本科在读',
-                        'school_name': '江南大学',
-                    },
-                ],
+                'education_experiences': _build_valid_education_experiences(),
                 'practice_experiences': [
                     {
                         'start_month': '',
@@ -927,6 +900,7 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
                     {'member_name': '张母', 'relation_type': '母亲'},
                 ],
                 'personal_statement': _build_personal_statement_payload(include_resume=True),
+                'declaration': {'has_read_declaration': True},
             },
         )
 
@@ -939,7 +913,6 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
 def test_portal_application_submission_rejects_missing_english_proficiency(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -976,7 +949,6 @@ def test_portal_application_submission_rejects_missing_english_proficiency(monke
 def test_portal_application_submission_rejects_english_proficiency_without_attachment(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -1019,7 +991,6 @@ def test_portal_application_submission_rejects_english_proficiency_without_attac
 def test_portal_application_submission_rejects_missing_parent_family_member(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -1077,7 +1048,6 @@ def test_portal_application_submission_accepts_single_parent_family_member(monke
 
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
 
         response = client.post(
@@ -1127,7 +1097,6 @@ def test_portal_application_submission_accepts_single_parent_family_member(monke
 def test_portal_application_submission_rejects_more_than_four_achievement_records(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -1181,7 +1150,6 @@ def test_portal_application_submission_rejects_more_than_four_achievement_record
 def test_portal_application_submission_rejects_incomplete_paper_achievement(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -1236,7 +1204,6 @@ def test_portal_application_submission_rejects_incomplete_paper_achievement(monk
 def test_portal_application_submission_rejects_award_achievement_without_certificate(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -1303,7 +1270,6 @@ def test_portal_application_submission_accepts_structured_achievement_records(mo
 
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
         monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
 
         response = client.post(
@@ -1511,7 +1477,6 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
     store = DummyStore()
 
     monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-    monkeypatch.setattr('app.api.v1.portal.settings.portal_application_v2_blocked', False)
     monkeypatch.setattr(
         'app.api.v1.portal.submit_portal_application',
         lambda student_id, payload: RuntimeManagementStore.submit_portal_application(store, student_id, payload),

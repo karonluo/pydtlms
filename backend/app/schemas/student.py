@@ -24,10 +24,12 @@ class StudentStateItem(BaseModel):
 
 class StudentRecord(BaseModel):
     id: int
+    portal_student_id: int | None = None
     student_no: str
     full_name: str
     status: str
     advisor_name: str
+    advisor_id: int | None = None
     center_name: str
     degree_type: str
     enrollment_year: int
@@ -36,10 +38,12 @@ class StudentRecord(BaseModel):
 
 
 class StudentUpsert(BaseModel):
+    portal_student_id: int | None = None
     student_no: str
     full_name: str
     status: str
-    advisor_name: str
+    advisor_name: str | None = None
+    advisor_id: int | None = None
     center_name: str
     degree_type: str
     enrollment_year: int
@@ -108,7 +112,10 @@ class CenterRecord(BaseModel):
     id: int
     center_name: str
     director_name: str
+    director_id: int | None = None
     advisor_names: list[str] = Field(default_factory=list)
+    advisor_ids: list[int] = Field(default_factory=list)
+    advisor_relation_ids: list[int] = Field(default_factory=list)
     is_enabled: bool = True
     created_date: str | None = None
     member_student_count: int = 0
@@ -117,8 +124,11 @@ class CenterRecord(BaseModel):
 
 class CenterUpsert(BaseModel):
     center_name: str
-    director_name: str
+    director_name: str | None = None
+    director_id: int | None = None
     advisor_names: list[str] = Field(default_factory=list)
+    advisor_ids: list[int] = Field(default_factory=list)
+    advisor_relation_ids: list[int] = Field(default_factory=list)
     is_enabled: bool = True
     created_date: str | None = None
 

@@ -24,7 +24,9 @@ export type PortalApplicantProfileData = {
 
 export type PortalApplicationPreferenceItem = {
   preference_order: number
-  research_center_name: string
+  team_id?: number | null
+  research_center_name?: string | null
+  advisor_user_id?: number | null
   advisor_name?: string | null
   is_optional: boolean
 }
@@ -113,6 +115,8 @@ export type PortalApplicationDeclarationData = {
 
 export type PortalApplicationDraftRecord = {
   selected_plan_id?: number | null
+  selected_team_id?: number | null
+  selected_advisor_user_id?: number | null
   source_channel?: string | null
   source_channel_other?: string | null
   preferences: PortalApplicationPreferenceItem[]
@@ -158,7 +162,9 @@ export type PortalStudentRecord = {
   material_list_attachment_name?: string | null
   signed_agreement?: boolean
   selected_plan_id?: number | null
+  selected_team_id?: number | null
   selected_team_name?: string | null
+  selected_advisor_user_id?: number | null
   selected_advisor_name?: string | null
   self_evaluation?: string | null
   submitted_at?: string | null
@@ -192,15 +198,16 @@ export type PortalProfileOptionsResponse = {
 
 export type PortalPublicConfigResponse = {
   portal_admissions_info_url: string
-  portal_application_v2_blocked: boolean
-  portal_application_v2_block_message: string
 }
 
 export type PortalTeamRecord = {
   id: number
   team_name: string
+  lead_user_id?: number | null
   lead_advisor_name: string
   advisor_names: string[]
+  advisor_ids: number[]
+  advisor_relation_ids: number[]
   department_name: string
   discipline_name: string
   research_directions: string[]
@@ -286,7 +293,9 @@ export type PortalApplicationUpsert = {
   recommendation_notes?: string | null
   personal_statement_text?: string | null
   signed_agreement?: boolean
+  selected_team_id?: number | null
   selected_team_name?: string | null
+  selected_advisor_user_id?: number | null
   selected_advisor_name?: string | null
   self_evaluation?: string | null
 }

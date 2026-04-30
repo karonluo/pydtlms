@@ -46,14 +46,17 @@ const loading = ref(false)
 const bootstrapping = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
+const deleteCenterDialogVisible = ref(false)
 const portalEmailDialogVisible = ref(false)
 const portalEmailSubmitting = ref(false)
 const portalEmailResultDialogVisible = ref(false)
 const resetPasswordDialogVisible = ref(false)
 const resetPasswordSubmitting = ref(false)
+const deleteCenterSubmitting = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedCenterIds = ref<number[]>([])
+const deletingCenter = ref<CenterRecord | null>(null)
 const studentStatusColors = ref<DictColorMap>({})
 const portalEmailTarget = ref<RegisteredPortalStudentRecord | null>(null)
 const portalEmailResult = ref<RegisteredPortalStudentActionResponse | null>(null)
@@ -102,7 +105,7 @@ const studentFilters = reactive({
 const centerFilters = reactive({
   keyword: '',
   is_enabled: '',
-  director_name: '',
+  director_id: '',
 })
 const registeredPortalFilters = reactive({
   keyword: '',
@@ -120,6 +123,7 @@ const studentForm = reactive<StudentUpsert>({
   full_name: '',
   status: '在校',
   advisor_name: '',
+  advisor_id: '',
   center_name: '',
   degree_type: '工程博士',
   enrollment_year: new Date().getFullYear(),
@@ -129,7 +133,9 @@ const studentForm = reactive<StudentUpsert>({
 const centerForm = reactive<CenterUpsert>({
   center_name: '',
   director_name: '',
+  director_id: '',
   advisor_names: [],
+  advisor_ids: [],
   is_enabled: true,
   created_date: new Date().toISOString().slice(0, 10),
 })
@@ -148,15 +154,15 @@ const studentRules: FormRules<StudentUpsert> = {
   student_no: [{ required: true, message: '请输入学号', trigger: 'blur' }],
   full_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
-  advisor_name: [{ required: true, message: '请选择导师', trigger: 'change' }],
+  advisor_id: [{ required: true, message: '请选择导师', trigger: 'change' }],
   center_name: [{ required: true, message: '请选择中心', trigger: 'change' }],
   degree_type: [{ required: true, message: '请选择学位类型', trigger: 'change' }],
   enrollment_year: [{ required: true, message: '请输入入学年份', trigger: 'change' }],
 }
 const centerRules: FormRules<CenterUpsert> = {
   center_name: [{ required: true, message: '请输入中心名称', trigger: 'blur' }],
-  director_name: [{ required: true, message: '请选择负责人', trigger: 'change' }],
-  advisor_names: [{ required: true, message: '请选择导师团队', trigger: 'change', type: 'array' }],
+  director_id: [{ required: true, message: '请选择负责人', trigger: 'change' }],
+  advisor_ids: [{ required: true, message: '请选择导师团队', trigger: 'change', type: 'array' }],
 }
 
 const activeSection = computed(() => String(route.meta.section || 'records'))
@@ -217,11 +223,13 @@ const centerAdvisorMap = computed(() => {
   options.value.center_advisor_map.forEach((item) => mapping.set(item.center_name, item.advisors))
   return mapping
 })
+const allAdvisorOptions = computed(() => options.value.advisor_options)
 const advisorOptions = computed(() => {
   if (!studentForm.center_name) {
-    return options.value.advisor_options
+    return allAdvisorOptions.value
   }
-  return centerAdvisorMap.value.get(studentForm.center_name) || []
+  const mappedOptions = centerAdvisorMap.value.get(studentForm.center_name)
+  return mappedOptions?.length ? mappedOptions : allAdvisorOptions.value
 })
 const resetPasswordResultMessage = computed(() => {
   if (!resetPasswordResult.value) {
@@ -240,6 +248,7 @@ const registeredStudentPager = useServerPagination()
 function normalizeStudentPayload(payload: StudentUpsert): StudentUpsert {
   return {
     ...payload,
+    advisor_id: payload.advisor_id ? String(payload.advisor_id) : '',
     center_name: payload.center_name.trim(),
     phone_number: payload.phone_number?.trim() || '',
     political_status: payload.political_status?.trim() || '',
@@ -250,8 +259,8 @@ function normalizeCenterPayload(payload: CenterUpsert): CenterUpsert {
   return {
     ...payload,
     center_name: payload.center_name.trim(),
-    director_name: payload.director_name.trim(),
-    advisor_names: Array.from(new Set(payload.advisor_names.filter(Boolean))),
+    director_id: payload.director_id ? String(payload.director_id) : '',
+    advisor_ids: Array.from(new Set(payload.advisor_ids.filter(Boolean).map((item) => String(item)))),
     created_date: payload.created_date || new Date().toISOString().slice(0, 10),
   }
 }
@@ -284,7 +293,7 @@ async function loadCenters() {
   const response = await listCenters({
     keyword: centerFilters.keyword || undefined,
     is_enabled: centerFilters.is_enabled ? centerFilters.is_enabled === 'true' : undefined,
-    director_name: centerFilters.director_name || undefined,
+    director_id: centerFilters.director_id || undefined,
     page: centerPager.pagination.currentPage,
     page_size: centerPager.pagination.pageSize,
   })
@@ -340,6 +349,7 @@ function resetStudentForm() {
     full_name: '',
     status: '在校',
     advisor_name: '',
+    advisor_id: '',
     center_name: '',
     degree_type: '工程博士',
     enrollment_year: new Date().getFullYear(),
@@ -354,7 +364,9 @@ function resetCenterForm() {
   Object.assign(centerForm, {
     center_name: '',
     director_name: '',
+    director_id: '',
     advisor_names: [],
+    advisor_ids: [],
     is_enabled: true,
     created_date: new Date().toISOString().slice(0, 10),
   })
@@ -382,6 +394,7 @@ function openStudentEditDialog(row: StudentRecord) {
     full_name: row.full_name,
     status: row.status,
     advisor_name: row.advisor_name,
+    advisor_id: row.advisor_id ? String(row.advisor_id) : '',
     center_name: row.center_name,
     degree_type: row.degree_type,
     enrollment_year: row.enrollment_year,
@@ -397,7 +410,9 @@ function openCenterEditDialog(row: CenterRecord) {
   Object.assign(centerForm, {
     center_name: row.center_name,
     director_name: row.director_name,
+    director_id: row.director_id ? String(row.director_id) : '',
     advisor_names: [...row.advisor_names],
+    advisor_ids: row.advisor_ids.map((item) => String(item)),
     is_enabled: row.is_enabled,
     created_date: row.created_date || new Date().toISOString().slice(0, 10),
   })
@@ -483,17 +498,33 @@ async function handleDeleteStudent(row: StudentRecord) {
 }
 
 async function handleDeleteCenter(row: CenterRecord) {
+  deletingCenter.value = row
+  deleteCenterDialogVisible.value = true
+}
+
+function closeDeleteCenterDialog() {
+  if (deleteCenterSubmitting.value) {
+    return
+  }
+  deleteCenterDialogVisible.value = false
+  deletingCenter.value = null
+}
+
+async function submitDeleteCenter() {
+  if (!deletingCenter.value) {
+    return
+  }
   try {
-    await ElMessageBox.confirm(`确定删除研究中心 ${row.center_name} 吗？`, '删除确认', { type: 'warning' })
-    await deleteCenter(row.id)
+    deleteCenterSubmitting.value = true
+    await deleteCenter(deletingCenter.value.id)
     ElMessage.success('研究中心已删除')
+    closeDeleteCenterDialog()
     await refreshAfterMutation()
   } catch (error) {
-    if (error === 'cancel') {
-      return
-    }
     const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '研究中心删除失败') : '研究中心删除失败'
     ElMessage.error(detail)
+  } finally {
+    deleteCenterSubmitting.value = false
   }
 }
 
@@ -567,21 +598,26 @@ function handleCenterSelectionChange(selection: CenterRecord[]) {
 
 function handleStudentCenterChange(value: string) {
   const availableAdvisors = centerAdvisorMap.value.get(value) || []
-  if (!availableAdvisors.some((item) => item.value === studentForm.advisor_name)) {
-    studentForm.advisor_name = ''
+  if (!availableAdvisors.some((item) => item.value === studentForm.advisor_id)) {
+    studentForm.advisor_id = ''
   }
 }
 
 function handleCenterDirectorChange(value: string) {
-  if (!centerForm.advisor_names.includes(value)) {
-    centerForm.advisor_names = Array.from(new Set([...centerForm.advisor_names, value]))
+  if (!value) {
+    return
+  }
+  if (!centerForm.advisor_ids.includes(value)) {
+    centerForm.advisor_ids = Array.from(new Set([...centerForm.advisor_ids, value]))
   }
 }
 
 function syncCenterDirector() {
-  if (!centerForm.advisor_names.includes(centerForm.director_name)) {
-    centerForm.director_name = centerForm.advisor_names[0] || ''
+  const directorId = String(centerForm.director_id || '')
+  if (directorId && centerForm.advisor_ids.includes(directorId)) {
+    return
   }
+  centerForm.director_id = centerForm.advisor_ids[0] || ''
 }
 
 function statusTagType(status: string) {
@@ -753,15 +789,6 @@ async function openRegisteredPortalApplicationDetail(row: RegisteredPortalStuden
   }
 }
 
-async function refreshPortalViewingApplication() {
-  if (!portalViewingApplication.value?.id) {
-    return
-  }
-  const response = await getRecruitmentApplicationDetail(portalViewingApplication.value.id)
-  portalViewingApplication.value = response.data
-  await loadPortalViewingWorkflowTask(response.data.business_key)
-}
-
 async function handlePortalWorkflowAction(action: WorkflowActionOption) {
   if (!portalViewingWorkflowTask.value) {
     ElMessage.warning('当前未找到可执行的审批任务')
@@ -776,19 +803,30 @@ async function submitPortalWorkflowCommentDialog() {
   if (!portalViewingWorkflowTask.value || !pendingPortalWorkflowAction.value) {
     return
   }
+  const currentAction = pendingPortalWorkflowAction.value
   portalWorkflowActionSubmitting.value = true
   try {
     await executeWorkflowTaskAction(portalViewingWorkflowTask.value.id, {
-      action: pendingPortalWorkflowAction.value.action,
+      action: currentAction.action,
       comment: portalWorkflowComment.value.trim() || undefined,
     })
-    ElMessage.success(`${pendingPortalWorkflowAction.value.label}已完成`)
     portalWorkflowCommentDialogVisible.value = false
-    await Promise.all([refreshAfterMutation(), refreshPortalViewingApplication()])
+    portalApplicationDetailVisible.value = false
+    portalViewingApplication.value = null
+    portalViewingWorkflowTask.value = null
+    ElMessage.success(`${currentAction.label}已完成`)
+    try {
+      await refreshAfterMutation()
+    } catch (refreshError) {
+      const refreshMessage = axios.isAxiosError(refreshError)
+        ? String(refreshError.response?.data?.detail || refreshError.message)
+        : '列表刷新失败，请手动刷新页面'
+      ElMessage.warning(`操作已完成，但${refreshMessage}`)
+    }
   } catch (error) {
     const message = axios.isAxiosError(error)
       ? String(error.response?.data?.detail || error.message)
-      : `${pendingPortalWorkflowAction.value.label}失败`
+      : `${currentAction.label}失败`
     ElMessage.error(message)
   } finally {
     portalWorkflowActionSubmitting.value = false
@@ -863,8 +901,8 @@ async function submitPortalEmailDialog() {
 }
 
 watch(() => studentForm.center_name, handleStudentCenterChange)
-watch(() => centerForm.director_name, handleCenterDirectorChange)
-watch(() => centerForm.advisor_names, syncCenterDirector)
+watch(() => String(centerForm.director_id || ''), handleCenterDirectorChange)
+watch(() => centerForm.advisor_ids.slice(), syncCenterDirector)
 watch(() => portalEmailDialogVisible.value, (visible) => {
   if (!visible) {
     resetPortalEmailForm()
@@ -965,7 +1003,7 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="负责人">
-          <el-select v-model="centerFilters.director_name" placeholder="全部负责人" clearable filterable style="width: 180px">
+          <el-select v-model="centerFilters.director_id" placeholder="全部负责人" clearable filterable style="width: 180px">
             <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
@@ -1180,8 +1218,8 @@ onMounted(() => {
               <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="导师" prop="advisor_name">
-            <el-select v-model="studentForm.advisor_name" placeholder="请选择导师" filterable :disabled="!studentForm.center_name">
+          <el-form-item label="导师" prop="advisor_id">
+            <el-select v-model="studentForm.advisor_id" placeholder="请选择导师" filterable :disabled="!studentForm.center_name">
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
@@ -1211,14 +1249,14 @@ onMounted(() => {
           <el-form-item label="中心名称" prop="center_name">
             <el-input v-model="centerForm.center_name" placeholder="请输入中心名称" />
           </el-form-item>
-          <el-form-item label="负责人" prop="director_name">
-            <el-select v-model="centerForm.director_name" placeholder="请选择负责人" filterable>
-              <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+          <el-form-item label="负责人" prop="director_id">
+            <el-select v-model="centerForm.director_id" placeholder="请选择负责人" filterable>
+              <el-option v-for="item in allAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="导师团队" prop="advisor_names" class="dialog-grid--full">
-            <el-select v-model="centerForm.advisor_names" multiple filterable placeholder="请选择导师团队">
-              <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+          <el-form-item label="导师团队" prop="advisor_ids" class="dialog-grid--full">
+            <el-select v-model="centerForm.advisor_ids" multiple filterable placeholder="请选择导师团队">
+              <el-option v-for="item in allAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="是否启用">
@@ -1233,6 +1271,43 @@ onMounted(() => {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitDialog">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="deleteCenterDialogVisible"
+      title="删除确认"
+      width="560px"
+      destroy-on-close
+      :close-on-click-modal="!deleteCenterSubmitting"
+      :close-on-press-escape="!deleteCenterSubmitting"
+      :show-close="!deleteCenterSubmitting"
+      @closed="deletingCenter = null"
+    >
+      <div v-if="deletingCenter" class="dialog-form delete-center-dialog">
+        <p class="delete-center-dialog__lead">确定删除这个研究中心吗？删除后不可恢复。</p>
+        <div class="delete-center-dialog__summary">
+          <div>
+            <span class="delete-center-dialog__label">研究中心</span>
+            <strong>{{ deletingCenter.center_name }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">负责人</span>
+            <strong>{{ deletingCenter.director_name || '未配置' }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">导师团队</span>
+            <strong>{{ deletingCenter.advisor_names.join('、') || '未配置' }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">学生数</span>
+            <strong>{{ deletingCenter.member_student_count }} / 活跃 {{ deletingCenter.active_student_count }}</strong>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="deleteCenterSubmitting" @click="closeDeleteCenterDialog">取消</el-button>
+        <el-button type="danger" :loading="deleteCenterSubmitting" @click="submitDeleteCenter">确认删除</el-button>
       </template>
     </el-dialog>
 
@@ -1507,6 +1582,40 @@ onMounted(() => {
   line-height: 1.7;
 }
 
+.delete-center-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.delete-center-dialog__lead {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.delete-center-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.delete-center-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.delete-center-dialog__summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
 .reset-password-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1575,6 +1684,7 @@ onMounted(() => {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .delete-center-dialog__summary,
   .reset-password-summary {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -70,8 +70,6 @@ class Settings(BaseSettings):
     frontend_dev_proxy_target: str = "http://127.0.0.1:5173"
     frontend_dev_proxy_timeout_seconds: float = 15.0
     portal_admissions_info_url: str = "https://www.shlab.org.cn"
-    portal_application_v2_blocked: bool = True
-    portal_application_v2_block_message: str = "4月30日（周四）20点之前开放，敬请期待"
 
     model_config = SettingsConfigDict(
         env_file=(BACKEND_DIR / ".env", BACKEND_DIR / ".env.local"),

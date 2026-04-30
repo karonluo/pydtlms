@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS dtlms_users (
     id BIGSERIAL PRIMARY KEY,
+    portal_student_id BIGINT UNIQUE REFERENCES dtlms_portal_students(id),
     username VARCHAR(64) NOT NULL UNIQUE,
     full_name VARCHAR(128) NOT NULL,
     email VARCHAR(128),

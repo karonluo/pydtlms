@@ -224,10 +224,17 @@ async function removeTask(row: WorkflowTaskRecord) {
 async function executeAction(row: WorkflowTaskRecord, action: WorkflowActionOption, comment?: string) {
   actionSubmitting.value = true
   try {
-    const response = await executeWorkflowTaskAction(row.id, { action: action.action, comment: comment || undefined })
-    taskDetail.value = response.data
+    await executeWorkflowTaskAction(row.id, { action: action.action, comment: comment || undefined })
+    detailVisible.value = false
+    taskDetail.value = null
+    actionComment.value = ''
+    showHistory.value = false
     ElMessage.success(`${action.label}已完成`)
-    await loadData()
+    try {
+      await loadData()
+    } catch (refreshError) {
+      ElMessage.warning(`操作已完成，但列表刷新失败：${getErrorMessage(refreshError)}`)
+    }
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {

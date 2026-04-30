@@ -138,7 +138,9 @@ function createProfile(): PortalApplicantProfileData {
 function createPreference(order: number, isOptional: boolean): PortalApplicationPreferenceItem {
   return {
     preference_order: order,
+    team_id: null,
     research_center_name: '',
+    advisor_user_id: null,
     advisor_name: '',
     is_optional: isOptional,
   }
@@ -732,7 +734,32 @@ function validateDeclarationRules(declaration?: PortalApplicationDeclarationData
   return ''
 }
 
+const requiredSubmitSectionIds = new Set([
+  'basic-section',
+  'application-section',
+  'education-section',
+  'english-section',
+  'family-section',
+  'statement-section',
+])
+
+function getIncompleteRequiredSectionLabels() {
+  return buildSectionStatuses()
+    .filter((item) => requiredSubmitSectionIds.has(item.id) && !item.completed)
+    .map((item) => item.label)
+}
+
 async function validateApplicationForSubmit(title = '提交受阻') {
+  const incompleteRequiredSections = getIncompleteRequiredSectionLabels()
+  if (incompleteRequiredSections.length > 1) {
+    await showPortalAlert(
+      `提交前请先完成以下必填章节：${incompleteRequiredSections.join('、')}`,
+      title,
+      'warning',
+    )
+    return false
+  }
+
   if (!selectedPlanId.value) {
     await showPortalAlert('当前暂无可提交的招生计划', title, 'warning')
     return false
@@ -912,7 +939,9 @@ function createEmptyForm(): PortalApplicationUpsert {
     recommendation_notes: '',
     personal_statement_text: '',
     signed_agreement: false,
+    selected_team_id: null,
     selected_team_name: '',
+    selected_advisor_user_id: null,
     selected_advisor_name: '',
     self_evaluation: '',
   }
@@ -959,13 +988,27 @@ function trimText(value: string | null | undefined) {
   return String(value || '').trim()
 }
 
-function advisorsForCenter(centerName: string) {
-  return teams.value.find((item) => item.team_name === centerName)?.advisor_names || []
+function findTeamById(teamId: number | null | undefined) {
+  return teams.value.find((item) => item.id === Number(teamId || 0)) || null
+}
+
+function advisorOptionsForTeam(teamId: number | null | undefined) {
+  const team = findTeamById(teamId)
+  if (!team) {
+    return [] as Array<{ user_id: number | null; full_name: string }>
+  }
+  return team.advisor_names.map((fullName, index) => ({
+    user_id: team.advisor_ids[index] ?? null,
+    full_name: fullName,
+  }))
 }
 
 function handlePreferenceCenterChange(item: PortalApplicationPreferenceItem) {
-  const advisors = advisorsForCenter(item.research_center_name)
-  if (!advisors.includes(item.advisor_name || '')) {
+  const team = findTeamById(item.team_id)
+  item.research_center_name = team?.team_name || ''
+  const advisors = advisorOptionsForTeam(item.team_id)
+  if (!advisors.some((advisor) => advisor.user_id === Number(item.advisor_user_id || 0))) {
+    item.advisor_user_id = null
     item.advisor_name = ''
   }
 }
@@ -1200,12 +1243,16 @@ function applyProfile(profile: PortalStudentRecord) {
     preferences: ensureTwoPreferences(
       draft?.preferences?.length
         ? draft.preferences.map((item) => ({
+            team_id: item.team_id ?? null,
             research_center_name: item.research_center_name || '',
+            advisor_user_id: item.advisor_user_id ?? null,
             advisor_name: item.advisor_name || '',
           }))
         : [
             {
+            team_id: profile.selected_team_id ?? null,
               research_center_name: profile.selected_team_name || '',
+            advisor_user_id: profile.selected_advisor_user_id ?? null,
               advisor_name: profile.selected_advisor_name || '',
             },
           ],
@@ -1473,11 +1520,13 @@ function buildSubmitPayload(): PortalApplicationUpsert {
   const orderedPreferences = (form.preferences || [])
     .map((item, index) => ({
       preference_order: index + 1,
+      team_id: item.team_id ?? null,
       research_center_name: trimText(item.research_center_name),
+      advisor_user_id: item.advisor_user_id ?? null,
       advisor_name: trimText(item.advisor_name) || null,
       is_optional: index > 0,
     }))
-    .filter((item) => item.research_center_name)
+    .filter((item) => item.team_id || item.research_center_name)
 
   const orderedEducation = (form.education_experiences || [])
     .map((item, index) => ({
@@ -1622,7 +1671,9 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     material_list_attachment: trimText(form.personal_statement?.supporting_material_attachment_url) || null,
     personal_statement_text: buildPersonalStatementSummary(form.personal_statement) || null,
     signed_agreement: declaration.has_read_declaration,
+    selected_team_id: primaryPreferenceItem?.team_id ?? null,
     selected_team_name: primaryPreferenceItem?.research_center_name || '',
+    selected_advisor_user_id: primaryPreferenceItem?.advisor_user_id ?? null,
     selected_advisor_name: primaryPreferenceItem?.advisor_name || null,
     self_evaluation: trimText(form.personal_statement?.ai_industry_opinion) || null,
   }
@@ -1793,7 +1844,7 @@ defineExpose({
           :form="form"
           :teams="teams"
           :source-channel-options="sourceChannelOptions"
-          :advisors-for-center="advisorsForCenter"
+          :advisor-options-for-team="advisorOptionsForTeam"
           :handle-preference-center-change="handlePreferenceCenterChange"
         />
 

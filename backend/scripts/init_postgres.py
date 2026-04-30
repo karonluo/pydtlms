@@ -16,7 +16,7 @@ from app.services.postgres_state_store import PostgresStateStore
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Initialize PostgreSQL schema and sync runtime data for DTLMS.")
+    parser = argparse.ArgumentParser(description="Initialize PostgreSQL schema and sync formal relational data for DTLMS.")
     parser.add_argument("--summary", action="store_true", help="Print inserted dataset counts only.")
     args = parser.parse_args()
 
@@ -25,7 +25,6 @@ def main() -> None:
 
     summary = {
         "database": "db_dtlms",
-        "runtime_tables": len(pg_store.DATASET_TABLES) + 1,
         "students": len(store.state.get("students", [])),
         "recruitment_plans": len(store.state.get("recruitment_plans", [])),
         "recruitment_applications": len(store.state.get("recruitment_applications", [])),

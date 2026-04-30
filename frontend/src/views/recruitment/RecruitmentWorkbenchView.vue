@@ -607,15 +607,6 @@ function applicationMoreActions() {
   ]
 }
 
-async function refreshViewingApplication() {
-  if (!viewingApplication.value?.id) {
-    return
-  }
-  const response = await getRecruitmentApplicationDetail(viewingApplication.value.id)
-  viewingApplication.value = response.data
-  await loadViewingApplicationWorkflowTask(response.data.business_key)
-}
-
 async function handleViewingApplicationWorkflowAction(action: WorkflowActionOption) {
   if (!viewingApplicationWorkflowTask.value) {
     ElMessage.warning('当前未找到可执行的审批任务')
@@ -630,19 +621,30 @@ async function submitApplicationWorkflowCommentDialog() {
   if (!viewingApplicationWorkflowTask.value || !pendingViewingApplicationWorkflowAction.value) {
     return
   }
+  const currentAction = pendingViewingApplicationWorkflowAction.value
   applicationWorkflowActionSubmitting.value = true
   try {
     await executeWorkflowTaskAction(viewingApplicationWorkflowTask.value.id, {
-      action: pendingViewingApplicationWorkflowAction.value.action,
+      action: currentAction.action,
       comment: applicationWorkflowComment.value.trim() || undefined,
     })
-    ElMessage.success(`${pendingViewingApplicationWorkflowAction.value.label}已完成`)
     applicationWorkflowCommentDialogVisible.value = false
-    await Promise.all([refreshAll(), refreshViewingApplication()])
+    applicationDetailVisible.value = false
+    viewingApplication.value = null
+    viewingApplicationWorkflowTask.value = null
+    ElMessage.success(`${currentAction.label}已完成`)
+    try {
+      await refreshAll()
+    } catch (refreshError) {
+      const refreshMessage = axios.isAxiosError(refreshError)
+        ? String(refreshError.response?.data?.detail || refreshError.message)
+        : '列表刷新失败，请手动刷新页面'
+      ElMessage.warning(`操作已完成，但${refreshMessage}`)
+    }
   } catch (error) {
     const message = axios.isAxiosError(error)
       ? String(error.response?.data?.detail || error.message)
-      : `${pendingViewingApplicationWorkflowAction.value.label}失败`
+      : `${currentAction.label}失败`
     ElMessage.error(message)
   } finally {
     applicationWorkflowActionSubmitting.value = false

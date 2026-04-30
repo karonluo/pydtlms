@@ -57,9 +57,9 @@ def test_build_dsn_includes_connect_timeout() -> None:
     assert f"connect_timeout={store.CONNECT_TIMEOUT_SECONDS}" in dsn
 
 
-def test_schema_initialized_returns_true_when_runtime_table_exists() -> None:
+def test_schema_initialized_returns_true_when_formal_schema_exists() -> None:
     store = PostgresStateStore()
-    cursor = FakeCursor(fetchone_results=[("public.dtlms_runtime_counters",)])
+    cursor = FakeCursor(fetchone_results=[("public.dtlms_users",)])
 
     assert store._schema_initialized(cursor) is True
 
@@ -312,7 +312,107 @@ def test_list_registered_portal_students_page_marks_returned_forms(monkeypatch) 
     assert items[0]["submitted_at"] is None
 
 
-def test_update_runtime_recruitment_application_updates_relational_status(monkeypatch) -> None:
+def test_get_portal_student_detail_hides_submitted_at_for_returned_application(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "id_number": "32000019990101123X",
+                "account_status": "启用",
+                "selected_plan_id": 3,
+                "selected_team_id": None,
+                "selected_team_name": None,
+                "selected_advisor_user_id": None,
+                "selected_advisor_name": None,
+                "submitted_at": "2026-04-20 10:00:00",
+                "signed_agreement": True,
+            },
+            {
+                "id": 15,
+                "plan_id": 3,
+                "business_key": "RECRUIT-20260420-0015",
+                "candidate_no": "RECRUIT-20260420-0015",
+                "source_channel": "上海人工智能实验室官网",
+                "source_channel_other": None,
+                "intended_advisor_name": "刘亚",
+                "application_status": "returned",
+                "applied_at": "2026-04-20 10:00:00",
+                "first_choice_team_id": None,
+                "second_choice_team_id": None,
+                "intended_advisor_user_id": None,
+            },
+            None,
+            None,
+        ],
+        fetchall_results=[[], [], [], [], [], [], []],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    item = store.get_portal_student_detail(7)
+
+    assert item is not None
+    assert item["submitted_at"] is None
+    assert item["application_draft"]["submitted_at"] is None
+
+
+def test_get_portal_student_detail_hides_submitted_at_for_rejected_application(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "id_number": "32000019990101123X",
+                "account_status": "启用",
+                "selected_plan_id": 3,
+                "selected_team_id": None,
+                "selected_team_name": None,
+                "selected_advisor_user_id": None,
+                "selected_advisor_name": None,
+                "submitted_at": "2026-04-20 10:00:00",
+                "signed_agreement": True,
+            },
+            {
+                "id": 15,
+                "plan_id": 3,
+                "business_key": "RECRUIT-20260420-0015",
+                "candidate_no": "RECRUIT-20260420-0015",
+                "source_channel": "上海人工智能实验室官网",
+                "source_channel_other": None,
+                "intended_advisor_name": "刘亚",
+                "application_status": "rejected",
+                "applied_at": "2026-04-20 10:00:00",
+                "first_choice_team_id": None,
+                "second_choice_team_id": None,
+                "intended_advisor_user_id": None,
+            },
+            None,
+            None,
+        ],
+        fetchall_results=[[], [], [], [], [], [], []],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    item = store.get_portal_student_detail(7)
+
+    assert item is not None
+    assert item["submitted_at"] is None
+    assert item["application_draft"]["submitted_at"] is None
+
+
+def test_sync_recruitment_application_status_updates_relational_status(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor()
     connection = FakeConnection(cursor)
@@ -320,7 +420,7 @@ def test_update_runtime_recruitment_application_updates_relational_status(monkey
     monkeypatch.setattr(store, "ensure_schema", lambda: None)
     monkeypatch.setattr(store, "_connect", lambda database_name: connection)
 
-    store.update_runtime_recruitment_application(
+    store.sync_recruitment_application_status(
         15,
         {
             "id": 15,
@@ -329,14 +429,37 @@ def test_update_runtime_recruitment_application_updates_relational_status(monkey
         },
     )
 
-    assert len(cursor.executed) == 2
+    assert len(cursor.executed) == 1
     update_sql, update_params = cursor.executed[0]
     assert "UPDATE dtlms_recruitment_applications" in update_sql
     assert update_params == ("returned", 15)
 
-    insert_sql, insert_params = cursor.executed[1]
-    assert "INSERT INTO dtlms_runtime_recruitment_applications" in insert_sql
-    assert insert_params[0] == 15
+
+def test_sync_recruitment_application_status_clears_portal_submission_for_resubmittable_status(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor()
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    store.sync_recruitment_application_status(
+        15,
+        {
+            "id": 15,
+            "portal_student_id": 7,
+            "application_status": "不录取",
+            "business_key": "RECRUIT-20260420-0015",
+        },
+    )
+
+    assert len(cursor.executed) == 2
+    update_sql, update_params = cursor.executed[0]
+    portal_update_sql, portal_update_params = cursor.executed[1]
+    assert "UPDATE dtlms_recruitment_applications" in update_sql
+    assert update_params == ("rejected", 15)
+    assert "UPDATE dtlms_portal_students" in portal_update_sql
+    assert portal_update_params == (7,)
 
 
 def test_derive_portal_profile_includes_id_card_collage_url() -> None:

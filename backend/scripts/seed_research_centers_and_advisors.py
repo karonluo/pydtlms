@@ -303,7 +303,7 @@ def _sync_system_users(store: PostgresStateStore, advisor_seeds: list[AdvisorSee
     with store._connect("db_dtlms") as conn:
         with conn.cursor() as cur:
             user_rows = _existing_user_rows(cur)
-            next_user_id = _next_available_id(cur, "dtlms_users", "dtlms_runtime_system_users")
+            next_user_id = _next_available_id(cur, "dtlms_users")
 
     users_by_username = {str(item["username"]): item for item in user_rows}
     users_by_name = {str(item["full_name"]): item for item in user_rows}
@@ -372,7 +372,7 @@ def _sync_centers(store: PostgresStateStore, center_seeds: list[CenterSeed]) -> 
                 ([item.center_name for item in center_seeds],),
             )
             existing_rows = cur.fetchall()
-            next_team_id = _next_available_id(cur, "dtlms_teams", "dtlms_runtime_teams")
+            next_team_id = _next_available_id(cur, "dtlms_teams")
 
     teams_by_name = {
         str(row[1]): {

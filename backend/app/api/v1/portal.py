@@ -1,7 +1,9 @@
+from mimetypes import guess_type
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.portal_security import create_portal_access_token, portal_bearer, resolve_portal_student_id
@@ -71,11 +73,19 @@ PORTAL_ATTACHMENT_CONTENT_TYPES: dict[str, tuple[str, ...]] = {
     "id_card_collage": ("image/",),
     "resume": (
         "application/pdf",
+        "application/x-pdf",
+        "application/acrobat",
+        "applications/vnd.pdf",
+        "text/pdf",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ),
     "supporting_material": (
         "application/pdf",
+        "application/x-pdf",
+        "application/acrobat",
+        "applications/vnd.pdf",
+        "text/pdf",
         "application/zip",
         "application/x-zip-compressed",
         "application/msword",
@@ -96,6 +106,10 @@ PORTAL_ATTACHMENT_GENERIC_CONTENT_TYPES = {
 }
 
 
+def _portal_attachment_public_url(student_folder: str, category: str, filename: str) -> str:
+    return f"/api/v1/portal/attachments/{student_folder}/{category}/{filename}"
+
+
 def get_current_portal_student_id(credentials: HTTPAuthorizationCredentials | None = Depends(portal_bearer)) -> int:
     return resolve_portal_student_id(credentials)
 
@@ -108,14 +122,6 @@ def get_current_active_portal_student_id(student_id: int = Depends(get_current_p
     if student.account_status != "启用":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用，请联系管理员")
     return student_id
-
-
-def ensure_portal_application_v2_available() -> None:
-    if settings.portal_application_v2_blocked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=settings.portal_application_v2_block_message,
-        )
 
 
 def _validate_portal_attachment(file: UploadFile, category: str) -> str:
@@ -245,8 +251,6 @@ def portal_public_config(student_id: int = Depends(get_current_active_portal_stu
     del student_id
     return PortalPublicConfigResponse(
         portal_admissions_info_url=settings.portal_admissions_info_url,
-        portal_application_v2_blocked=settings.portal_application_v2_blocked,
-        portal_application_v2_block_message=settings.portal_application_v2_block_message,
     )
 
 
@@ -278,8 +282,32 @@ async def portal_upload_attachment(
         file_name=original_name,
         file_type=str(file.content_type or "") or None,
         file_size=len(content),
-        url=f"/portal-attachments/uploads/student-{student_id}/{category}/{filename}",
+        url=_portal_attachment_public_url(f"student-{student_id}", category, filename),
     )
+
+
+@router.get("/attachments/{student_folder}/{category}/{filename}", include_in_schema=False)
+def portal_get_attachment(student_folder: str, category: str, filename: str) -> FileResponse:
+    if not student_folder.startswith("student-"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if category not in PORTAL_ATTACHMENT_EXTENSIONS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    attachment_path = (PORTAL_ATTACHMENT_UPLOAD_DIR / student_folder / category / safe_name).resolve()
+    try:
+        attachment_path.relative_to(PORTAL_ATTACHMENT_UPLOAD_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found") from exc
+
+    if not attachment_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    media_type, _ = guess_type(str(attachment_path))
+    return FileResponse(attachment_path, media_type=media_type or "application/octet-stream")
 
 
 @router.post("/applications", response_model=PortalApplicationSubmissionResponse)
@@ -287,7 +315,6 @@ def portal_submit_application(
     payload: PortalApplicationUpsert,
     student_id: int = Depends(get_current_active_portal_student_id),
 ) -> PortalApplicationSubmissionResponse:
-    ensure_portal_application_v2_available()
     try:
         return submit_portal_application(student_id, payload)
     except KeyError as exc:
@@ -301,7 +328,6 @@ def portal_save_application_draft(
     payload: PortalApplicationDraftUpsert,
     student_id: int = Depends(get_current_active_portal_student_id),
 ) -> PortalApplicationDraftSaveResponse:
-    ensure_portal_application_v2_available()
     try:
         student = save_portal_application_draft(student_id, payload)
         return PortalApplicationDraftSaveResponse(message="草稿已保存", student=student)

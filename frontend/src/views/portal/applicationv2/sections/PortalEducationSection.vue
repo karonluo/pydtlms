@@ -144,6 +144,13 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
   color: #173459;
 }
 
+.toolbar-card__hint {
+  margin: 0;
+  color: #627896;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .toolbar-card .action-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -162,6 +169,10 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+}
+
+.toolbar-card {
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .section-grid {

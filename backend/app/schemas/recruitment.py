@@ -140,7 +140,9 @@ class RecruitApplicationRecord(BaseModel):
     candidate_no: str | None = None
     review_round: str | None = None
     student_name: str
+    first_choice_team_id: int | None = None
     first_choice: str | None = None
+    second_choice_team_id: int | None = None
     second_choice: str | None = None
     gender: str | None = None
     political_status: str | None = None
@@ -164,7 +166,8 @@ class RecruitApplicationRecord(BaseModel):
     graduate_rank: str | None = None
     graduate_major: str | None = None
     highest_degree: str
-    intended_field: str
+    intended_field: str | None = None
+    intended_advisor_user_id: int | None = None
     intended_advisor_name: str | None = None
     discovery_channel: str | None = None
     source_channel: str | None = None
@@ -225,7 +228,9 @@ class RecruitApplicationRecord(BaseModel):
                 preferences.append(
                     {
                         "preference_order": 1,
+                        "team_id": data.get("first_choice_team_id"),
                         "research_center_name": data.get("first_choice"),
+                        "advisor_user_id": data.get("intended_advisor_user_id"),
                         "advisor_name": data.get("intended_advisor_name"),
                         "is_optional": False,
                     }
@@ -234,6 +239,7 @@ class RecruitApplicationRecord(BaseModel):
                 preferences.append(
                     {
                         "preference_order": 2,
+                        "team_id": data.get("second_choice_team_id"),
                         "research_center_name": data.get("second_choice"),
                         "advisor_name": None,
                         "is_optional": True,
@@ -266,7 +272,9 @@ class RecruitApplicationUpsert(BaseModel):
     candidate_no: str | None = None
     review_round: str | None = None
     student_name: str
+    first_choice_team_id: int | None = None
     first_choice: str | None = None
+    second_choice_team_id: int | None = None
     second_choice: str | None = None
     gender: str | None = None
     political_status: str | None = None
@@ -291,6 +299,7 @@ class RecruitApplicationUpsert(BaseModel):
     graduate_major: str | None = None
     highest_degree: str
     intended_field: str
+    intended_advisor_user_id: int | None = None
     intended_advisor_name: str | None = None
     discovery_channel: str | None = None
     source_channel: str | None = None
@@ -348,10 +357,13 @@ class RecruitApplicationUpsert(BaseModel):
 
         preferences = sorted(self.preferences, key=lambda item: item.preference_order)
         if preferences:
+            self.first_choice_team_id = self.first_choice_team_id or preferences[0].team_id
             self.first_choice = self.first_choice or preferences[0].research_center_name
+            self.intended_advisor_user_id = self.intended_advisor_user_id or preferences[0].advisor_user_id
             self.intended_advisor_name = self.intended_advisor_name or preferences[0].advisor_name
             self.intended_field = self.intended_field or preferences[0].research_center_name
             if len(preferences) > 1:
+                self.second_choice_team_id = self.second_choice_team_id or preferences[1].team_id
                 self.second_choice = self.second_choice or preferences[1].research_center_name
 
         if self.source_channel or self.source_channel_other:

@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { clearPortalToken, getPortalProfile } from '../api/portal'
 import { useAuthStore } from '../stores/auth'
-import { ensurePortalApplicationV2Available } from '../utils/portalApplicationV2Access'
 
 import AppLayout from '../layouts/AppLayout.vue'
 
@@ -18,7 +17,6 @@ const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
 const PortalHomeView = () => import('../views/home/PortalHomeView.vue')
 const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
-const StudentPortalApplicationView = () => import('../views/portal/StudentPortalApplicationView.vue')
 const StudentPortalApplicationV2View = () => import('../views/portal/StudentPortalApplicationV2View.vue')
 
 const APP_TITLE = '博士生生命周期管理系统'
@@ -29,8 +27,8 @@ const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true, title: '系统登录' } },
     { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
     { path: '/portal/home', component: PortalHomeView, meta: { public: true, portalProtected: true, title: '门户首页' } },
-    { path: '/portal/application', component: StudentPortalApplicationView, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
-    { path: '/portal/applicationv2', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表V2' } },
+    { path: '/portal/application', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
+    { path: '/portal/applicationv2', redirect: '/portal/application', meta: { public: true, portalProtected: true } },
     {
       path: '/',
       component: AppLayout,
@@ -93,14 +91,6 @@ router.beforeEach(async (to) => {
       }
     }
   }
-
-  if (to.path === '/portal/applicationv2') {
-    const allowed = await ensurePortalApplicationV2Available()
-    if (!allowed) {
-      return { path: '/portal/home' }
-    }
-  }
-
 
   if (to.path === '/login' && hasAccessToken && authStore.sessionState !== 'ready') {
     try {

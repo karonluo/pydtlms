@@ -164,7 +164,7 @@ def delete_student_record(student_id: int, principal: Principal = Depends(requir
 def center_list(
     keyword: str | None = Query(default=None),
     is_enabled: bool | None = Query(default=None),
-    director_name: str | None = Query(default=None),
+    director_id: int | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("students:read")),
@@ -172,7 +172,7 @@ def center_list(
     return get_center_list(
         keyword=keyword,
         is_enabled=is_enabled,
-        director_name=director_name,
+        director_id=director_id,
         page=page,
         page_size=page_size,
     )

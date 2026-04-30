@@ -14,6 +14,7 @@ export type StudentRecord = {
   full_name: string
   status: string
   advisor_name: string
+  advisor_id?: number | null
   center_name: string
   degree_type: string
   enrollment_year: number
@@ -22,7 +23,18 @@ export type StudentRecord = {
 }
 
 
-export type StudentUpsert = Omit<StudentRecord, 'id'>
+export type StudentUpsert = {
+  student_no: string
+  full_name: string
+  status: string
+  advisor_name?: string | null
+  advisor_id?: string | number | null
+  center_name: string
+  degree_type: string
+  enrollment_year: number
+  phone_number?: string | null
+  political_status?: string | null
+}
 
 
 export type StudentManagementResponse = PagedResponse<StudentRecord>
@@ -68,7 +80,9 @@ export type CenterRecord = {
   id: number
   center_name: string
   director_name: string
+  director_id?: number | null
   advisor_names: string[]
+  advisor_ids: number[]
   is_enabled: boolean
   created_date?: string | null
   member_student_count: number
@@ -76,7 +90,15 @@ export type CenterRecord = {
 }
 
 
-export type CenterUpsert = Omit<CenterRecord, 'id' | 'member_student_count' | 'active_student_count'>
+export type CenterUpsert = {
+  center_name: string
+  director_name?: string | null
+  director_id?: string | number | null
+  advisor_names?: string[]
+  advisor_ids: Array<string | number>
+  is_enabled: boolean
+  created_date?: string | null
+}
 
 
 export type CenterListResponse = PagedResponse<CenterRecord>
@@ -170,7 +192,7 @@ export function deleteStudent(id: number) {
 export function listCenters(params?: PaginationParams & {
   keyword?: string
   is_enabled?: boolean
-  director_name?: string
+  director_id?: string | number
 }) {
   return http.get<CenterListResponse>('/students/centers', { params })
 }

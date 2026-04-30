@@ -19,6 +19,21 @@ def _first_non_empty(*values: Any) -> str | None:
     return None
 
 
+def _rewrite_portal_attachment_urls(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _rewrite_portal_attachment_urls(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_rewrite_portal_attachment_urls(item) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    legacy_prefix = "/portal-attachments/uploads/"
+    if text.startswith(legacy_prefix):
+        return f"/api/v1/portal/attachments/{text[len(legacy_prefix):]}"
+    return value
+
+
 def _serialize_models(items: Sequence[BaseModel | dict[str, Any]] | None) -> str | None:
     if not items:
         return None
@@ -509,8 +524,10 @@ class PortalApplicantProfileData(BaseModel):
 
 class PortalApplicationPreferenceItem(BaseModel):
     preference_order: int = 1
-    research_center_name: str
+    research_center_name: str | None = None
+    team_id: int | None = None
     advisor_name: str | None = None
+    advisor_user_id: int | None = None
     is_optional: bool = False
 
 
@@ -743,7 +760,9 @@ class PortalStudentRecord(BaseModel):
     personal_statement_text: str | None = None
     signed_agreement: bool = False
     selected_plan_id: int | None = None
+    selected_team_id: int | None = None
     selected_team_name: str | None = None
+    selected_advisor_user_id: int | None = None
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
     submitted_at: str | None = None
@@ -756,7 +775,7 @@ class PortalStudentRecord(BaseModel):
         if not isinstance(raw_value, dict):
             return raw_value
 
-        data = dict(raw_value)
+        data = _rewrite_portal_attachment_urls(dict(raw_value))
         if data.get("profile") is None:
             profile_payload = {
                 "profile_photo_url": data.get("profile_photo_url"),
@@ -780,7 +799,9 @@ class PortalStudentRecord(BaseModel):
                 preferences.append(
                     {
                         "preference_order": 1,
+                        "team_id": data.get("selected_team_id"),
                         "research_center_name": data.get("selected_team_name"),
+                        "advisor_user_id": data.get("selected_advisor_user_id"),
                         "advisor_name": data.get("selected_advisor_name"),
                         "is_optional": False,
                     }
@@ -844,8 +865,11 @@ class PortalPlanListResponse(BaseModel):
 class PortalTeamRecord(BaseModel):
     id: int
     team_name: str
+    lead_user_id: int | None = None
     lead_advisor_name: str
     advisor_names: list[str] = Field(default_factory=list)
+    advisor_ids: list[int] = Field(default_factory=list)
+    advisor_relation_ids: list[int] = Field(default_factory=list)
     department_name: str
     discipline_name: str
     research_directions: list[str] = Field(default_factory=list)
@@ -863,8 +887,6 @@ class PortalProfileOptionsResponse(BaseModel):
 
 class PortalPublicConfigResponse(BaseModel):
     portal_admissions_info_url: str = "https://www.shlab.org.cn"
-    portal_application_v2_blocked: bool = False
-    portal_application_v2_block_message: str = "4月30日（周四）20点之前开放，敬请期待"
 
 
 class PortalApplicationUpsert(BaseModel):
@@ -901,7 +923,9 @@ class PortalApplicationUpsert(BaseModel):
     recommendation_notes: str | None = None
     personal_statement_text: str | None = None
     signed_agreement: bool = False
+    selected_team_id: int | None = None
     selected_team_name: str | None = None
+    selected_advisor_user_id: int | None = None
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
 
@@ -927,7 +951,9 @@ class PortalApplicationUpsert(BaseModel):
         preferences = sorted(self.preferences, key=lambda item: item.preference_order)
         if preferences:
             primary_preference = preferences[0]
+            self.selected_team_id = self.selected_team_id or primary_preference.team_id
             self.selected_team_name = self.selected_team_name or primary_preference.research_center_name
+            self.selected_advisor_user_id = self.selected_advisor_user_id or primary_preference.advisor_user_id
             self.selected_advisor_name = self.selected_advisor_name or primary_preference.advisor_name
             self.intended_field = self.intended_field or primary_preference.research_center_name
 
@@ -1032,7 +1058,9 @@ class PortalApplicationDraftUpsert(BaseModel):
     recommendation_notes: str | None = None
     personal_statement_text: str | None = None
     signed_agreement: bool = False
+    selected_team_id: int | None = None
     selected_team_name: str | None = None
+    selected_advisor_user_id: int | None = None
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
 
@@ -1058,7 +1086,9 @@ class PortalApplicationDraftUpsert(BaseModel):
         preferences = sorted(self.preferences, key=lambda item: item.preference_order)
         if preferences:
             primary_preference = preferences[0]
+            self.selected_team_id = self.selected_team_id or primary_preference.team_id
             self.selected_team_name = self.selected_team_name or primary_preference.research_center_name
+            self.selected_advisor_user_id = self.selected_advisor_user_id or primary_preference.advisor_user_id
             self.selected_advisor_name = self.selected_advisor_name or primary_preference.advisor_name
             self.intended_field = self.intended_field or primary_preference.research_center_name
 
