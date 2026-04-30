@@ -1679,6 +1679,16 @@ class PostgresStateStore:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
             with conn.cursor() as cur:
+                application_status = self._map_application_status(str(payload.get("application_status") or ""))
+                cur.execute(
+                    """
+                    UPDATE dtlms_recruitment_applications
+                    SET application_status = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    """,
+                    (application_status, int(application_id)),
+                )
                 cur.execute(
                     """
                     INSERT INTO dtlms_runtime_recruitment_applications (id, payload, updated_at)
@@ -5050,7 +5060,7 @@ class PostgresStateStore:
                     "achievement_records": achievement_records,
                     "personal_statement": dict(personal_statement_row) if personal_statement_row else {},
                     "declaration": dict(declaration_row) if declaration_row else {"has_read_declaration": bool(student.get("signed_agreement"))},
-                    "submitted_at": self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at"),
+                    "submitted_at": None if self._application_status_label(application.get("application_status")) == "驳回重填" else self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at"),
                 }
                 personal_statement = student["application_draft"]["personal_statement"]
                 personal_statement["resume_attachment_name"] = resolve_attachment_name(
@@ -5073,7 +5083,7 @@ class PostgresStateStore:
                     student["selected_team_name"] = preferences[0].get("research_center_name") or student.get("selected_team_name")
                     student["selected_advisor_name"] = preferences[0].get("advisor_name") or application.get("intended_advisor_name") or student.get("selected_advisor_name")
                 student["selected_plan_id"] = int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None
-                student["submitted_at"] = self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at")
+                student["submitted_at"] = None if self._application_status_label(application.get("application_status")) == "驳回重填" else self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at")
                 return student
 
     def list_workflow_tasks_page(
@@ -5656,8 +5666,12 @@ class PostgresStateStore:
 
         normalized_status = str(application_form_status or "").strip()
         if normalized_status == "已填写报名":
+            where_clauses.append("COALESCE(latest_application.application_status, '') <> 'returned'")
             where_clauses.append("COALESCE(ps.submitted_at, latest_application.applied_at) IS NOT NULL")
+        elif normalized_status == "驳回重填":
+            where_clauses.append("COALESCE(latest_application.application_status, '') = 'returned'")
         elif normalized_status == "未填写报名":
+            where_clauses.append("COALESCE(latest_application.application_status, '') <> 'returned'")
             where_clauses.append("COALESCE(ps.submitted_at, latest_application.applied_at) IS NULL")
 
         where_sql = " AND ".join(where_clauses)
@@ -6768,7 +6782,8 @@ class PostgresStateStore:
 
     @classmethod
     def _normalize_registered_portal_student_row(cls, row: dict[str, Any]) -> dict[str, Any]:
-        submitted_at = cls._stringify_datetime(row.get("submitted_at") or row.get("applied_at"))
+        recruitment_application_status = cls._application_status_label(row.get("application_status")) if row.get("application_status") else None
+        submitted_at = None if recruitment_application_status == "驳回重填" else cls._stringify_datetime(row.get("submitted_at") or row.get("applied_at"))
         return {
             "id": int(row["id"]),
             "full_name": str(row.get("full_name") or ""),
@@ -6776,13 +6791,13 @@ class PostgresStateStore:
             "email": str(row.get("email") or ""),
             "id_number": str(row.get("id_number") or ""),
             "account_status": cls._normalize_portal_account_status(row.get("account_status")),
-            "application_form_status": "已填写报名" if submitted_at else "未填写报名",
+            "application_form_status": "驳回重填" if recruitment_application_status == "驳回重填" else ("已填写报名" if submitted_at else "未填写报名"),
             "selected_plan_name": row.get("selected_plan_name"),
             "selected_center_name": row.get("selected_team_name"),
             "selected_advisor_name": row.get("selected_advisor_name"),
             "recruitment_application_id": int(row.get("recruitment_application_id") or 0) or None,
             "recruitment_application_business_key": (str(row.get("recruitment_application_business_key") or "") or None),
-            "recruitment_application_status": cls._application_status_label(row.get("application_status")) if row.get("application_status") else None,
+            "recruitment_application_status": recruitment_application_status,
             "registered_at": cls._stringify_datetime(row.get("created_at")),
             "submitted_at": submitted_at,
         }
@@ -7185,6 +7200,7 @@ class PostgresStateStore:
     def _map_application_status(value: str) -> str:
         mapping = {
             "报名已提交": "submitted",
+            "驳回重填": "returned",
             "资格审核通过": "qualified",
             "材料评分中": "scoring",
             "面试完成": "interviewed",
@@ -7197,6 +7213,7 @@ class PostgresStateStore:
     def _application_status_label(value: str | None) -> str:
         mapping = {
             "submitted": "报名已提交",
+            "returned": "驳回重填",
             "qualified": "资格审核通过",
             "scoring": "材料评分中",
             "interviewed": "面试完成",

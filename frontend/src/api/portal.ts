@@ -253,6 +253,7 @@ export type PortalPasswordChangeRequest = {
 
 export type PortalApplicationUpsert = {
   plan_id: number
+  validation_section_id?: string | null
   profile?: PortalApplicantProfileData | null
   source_channel?: string | null
   source_channel_other?: string | null

@@ -18,7 +18,6 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>英语能力列表</strong>
-        <span>该章节必填，请至少填写 1 条英语考试记录并上传英语证明附件。</span>
       </div>
       <button type="button" class="action-button" @click="addEnglish">新增英语成绩</button>
     </div>

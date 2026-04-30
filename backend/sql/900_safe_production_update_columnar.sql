@@ -1778,4 +1778,943 @@ ON CONFLICT (counter_name) DO UPDATE
 SET counter_value = GREATEST(dtlms_runtime_counters.counter_value, EXCLUDED.counter_value),
     updated_at = CURRENT_TIMESTAMP;
 
+-- 12) 正式团队/导师名单清理与关联重挂接
+CREATE TEMP TABLE tmp_official_team_advisor_seed ON COMMIT DROP AS
+SELECT
+    c.seed_order,
+    c.center_name,
+    names.ordinality AS advisor_order,
+    names.advisor_name
+FROM tmp_center_seed AS c
+CROSS JOIN LATERAL unnest(c.advisor_names) WITH ORDINALITY AS names(advisor_name, ordinality);
+
+CREATE TEMP TABLE tmp_official_center_alternates ON COMMIT DROP AS
+SELECT
+    c.center_name,
+    ARRAY(
+        SELECT c2.center_name
+        FROM tmp_center_seed AS c2
+        WHERE c2.center_name <> c.center_name
+        ORDER BY c2.seed_order
+    ) AS alternate_center_names
+FROM tmp_center_seed AS c;
+
+CREATE TEMP TABLE tmp_disallowed_team_cleanup ON COMMIT DROP AS
+SELECT t.id, t.team_name
+FROM dtlms_teams AS t
+WHERE t.is_deleted = FALSE
+  AND NOT EXISTS (
+      SELECT 1
+      FROM tmp_center_seed AS s
+      WHERE s.center_name = t.team_name
+  );
+
+CREATE TEMP TABLE tmp_disallowed_advisor_cleanup ON COMMIT DROP AS
+SELECT a.id, a.full_name
+FROM dtlms_advisors AS a
+WHERE a.is_deleted = FALSE
+  AND NOT EXISTS (
+      SELECT 1
+      FROM tmp_advisor_seed AS s
+      WHERE s.full_name = a.full_name
+  );
+
+CREATE TEMP TABLE tmp_student_official_reassign ON COMMIT DROP AS
+WITH current_students AS (
+    SELECT
+        s.id AS student_id,
+        s.student_no,
+        s.full_name,
+        COALESCE(NULLIF(BTRIM(s.team_name), ''), NULLIF(BTRIM(t.team_name), ''), '') AS current_team_name,
+        COALESCE(NULLIF(BTRIM(a.full_name), ''), '') AS current_advisor_name
+    FROM dtlms_students AS s
+    LEFT JOIN dtlms_teams AS t ON t.id = s.team_id
+    LEFT JOIN dtlms_advisors AS a ON a.id = s.primary_advisor_id
+    WHERE s.is_deleted = FALSE
+), candidate_teams AS (
+    SELECT
+        cs.*,
+        CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_center_seed AS allowed_team
+                WHERE allowed_team.center_name = cs.current_team_name
+            ) THEN cs.current_team_name
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.advisor_name = cs.current_advisor_name
+            ) THEN (
+                SELECT team_seed.center_name
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.advisor_name = cs.current_advisor_name
+                ORDER BY ABS(hashtextextended(CONCAT('student-team:', cs.student_id::TEXT, ':', cs.student_no, ':', team_seed.center_name), 0)),
+                         team_seed.seed_order
+                LIMIT 1
+            )
+            ELSE (
+                SELECT seed.center_name
+                FROM tmp_center_seed AS seed
+                ORDER BY ABS(hashtextextended(CONCAT('student-team:', cs.student_id::TEXT, ':', cs.student_no, ':', seed.center_name), 0)),
+                         seed.seed_order
+                LIMIT 1
+            )
+        END AS target_team_name
+    FROM current_students AS cs
+), resolved_students AS (
+    SELECT
+        ct.student_id,
+        ct.student_no,
+        ct.full_name,
+        ct.current_team_name,
+        ct.current_advisor_name,
+        ct.target_team_name,
+        CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.center_name = ct.target_team_name
+                  AND team_seed.advisor_name = ct.current_advisor_name
+            ) THEN ct.current_advisor_name
+            ELSE (
+                SELECT team_seed.advisor_name
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.center_name = ct.target_team_name
+                ORDER BY ABS(hashtextextended(CONCAT('student-advisor:', ct.student_id::TEXT, ':', ct.current_advisor_name, ':', team_seed.advisor_name), 0)),
+                         team_seed.advisor_order
+                LIMIT 1
+            )
+        END AS target_advisor_name
+    FROM candidate_teams AS ct
+)
+SELECT
+    rs.student_id,
+    rs.student_no,
+    rs.full_name,
+    rs.current_team_name,
+    rs.current_advisor_name,
+    rs.target_team_name,
+    rs.target_advisor_name,
+    team.id AS target_team_id,
+    advisor.id AS target_advisor_id
+FROM resolved_students AS rs
+JOIN dtlms_teams AS team
+    ON team.team_name = rs.target_team_name
+   AND team.is_deleted = FALSE
+JOIN dtlms_advisors AS advisor
+    ON advisor.full_name = rs.target_advisor_name
+   AND advisor.is_deleted = FALSE
+WHERE NOT (
+    rs.current_team_name = rs.target_team_name
+    AND rs.current_advisor_name = rs.target_advisor_name
+    AND EXISTS (
+        SELECT 1
+        FROM tmp_official_team_advisor_seed AS team_seed
+        WHERE team_seed.center_name = rs.current_team_name
+          AND team_seed.advisor_name = rs.current_advisor_name
+    )
+);
+
+UPDATE dtlms_students AS s
+SET team_id = r.target_team_id,
+    primary_advisor_id = r.target_advisor_id,
+    team_name = r.target_team_name,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE s.id = r.student_id;
+
+UPDATE dtlms_student_team_history AS h
+SET team_id = r.target_team_id,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE h.student_id = r.student_id
+  AND EXISTS (
+      SELECT 1
+      FROM tmp_disallowed_team_cleanup AS bad_team
+      WHERE bad_team.id = h.team_id
+  );
+
+INSERT INTO dtlms_student_team_history (
+    student_id,
+    team_id,
+    start_date,
+    end_date,
+    change_reason
+)
+SELECT
+    r.student_id,
+    r.target_team_id,
+    CURRENT_DATE,
+    NULL,
+    'official_center_cleanup'
+FROM tmp_student_official_reassign AS r
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dtlms_student_team_history AS h
+    WHERE h.student_id = r.student_id
+      AND h.team_id = r.target_team_id
+      AND h.end_date IS NULL
+);
+
+UPDATE dtlms_student_advisor_history AS h
+SET advisor_id = r.target_advisor_id,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE h.student_id = r.student_id
+  AND EXISTS (
+      SELECT 1
+      FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+      WHERE bad_advisor.id = h.advisor_id
+  );
+
+INSERT INTO dtlms_student_advisor_history (
+    student_id,
+    advisor_id,
+    relation_type,
+    start_date,
+    end_date,
+    change_reason
+)
+SELECT
+    r.student_id,
+    r.target_advisor_id,
+    'primary',
+    CURRENT_DATE,
+    NULL,
+    'official_center_cleanup'
+FROM tmp_student_official_reassign AS r
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dtlms_student_advisor_history AS h
+    WHERE h.student_id = r.student_id
+      AND h.advisor_id = r.target_advisor_id
+      AND h.end_date IS NULL
+);
+
+UPDATE dtlms_training_plans AS plan
+SET advisor_id = r.target_advisor_id,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE plan.student_id = r.student_id
+  AND plan.is_deleted = FALSE;
+
+UPDATE dtlms_outbound_studies AS study
+SET advisor_id = r.target_advisor_id,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE study.student_id = r.student_id
+  AND study.is_deleted = FALSE;
+
+UPDATE dtlms_theses AS thesis
+SET advisor_id = r.target_advisor_id,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE thesis.student_id = r.student_id
+  AND thesis.is_deleted = FALSE;
+
+UPDATE dtlms_scientific_reports AS report
+SET reviewer_advisor_id = r.target_advisor_id,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE report.student_id = r.student_id
+  AND report.is_deleted = FALSE;
+
+UPDATE dtlms_runtime_students AS runtime_student
+SET payload = jsonb_set(
+        jsonb_set(runtime_student.payload, '{team_name}', to_jsonb(r.target_team_name), TRUE),
+        '{advisor_name}',
+        to_jsonb(r.target_advisor_name),
+        TRUE
+    ),
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_student_official_reassign AS r
+WHERE runtime_student.id = r.student_id;
+
+CREATE TEMP TABLE tmp_portal_student_official_reassign ON COMMIT DROP AS
+WITH portal_students AS (
+    SELECT
+        ps.id AS portal_student_id,
+        COALESCE(NULLIF(BTRIM(ps.selected_team_name), ''), '') AS current_team_name,
+        COALESCE(NULLIF(BTRIM(ps.selected_advisor_name), ''), '') AS current_advisor_name
+    FROM dtlms_portal_students AS ps
+), candidate_teams AS (
+    SELECT
+        portal.portal_student_id,
+        portal.current_team_name,
+        portal.current_advisor_name,
+        CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_center_seed AS allowed_team
+                WHERE allowed_team.center_name = portal.current_team_name
+            ) THEN portal.current_team_name
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.advisor_name = portal.current_advisor_name
+            ) THEN (
+                SELECT team_seed.center_name
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.advisor_name = portal.current_advisor_name
+                ORDER BY ABS(hashtextextended(CONCAT('portal-team:', portal.portal_student_id::TEXT, ':', team_seed.center_name), 0)),
+                         team_seed.seed_order
+                LIMIT 1
+            )
+            ELSE (
+                SELECT seed.center_name
+                FROM tmp_center_seed AS seed
+                ORDER BY ABS(hashtextextended(CONCAT('portal-team:', portal.portal_student_id::TEXT, ':', seed.center_name), 0)),
+                         seed.seed_order
+                LIMIT 1
+            )
+        END AS target_team_name
+    FROM portal_students AS portal
+), resolved_portal_students AS (
+    SELECT
+        candidate.portal_student_id,
+        candidate.current_team_name,
+        candidate.current_advisor_name,
+        candidate.target_team_name,
+        CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.center_name = candidate.target_team_name
+                  AND team_seed.advisor_name = candidate.current_advisor_name
+            ) THEN candidate.current_advisor_name
+            ELSE (
+                SELECT team_seed.advisor_name
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.center_name = candidate.target_team_name
+                ORDER BY ABS(hashtextextended(CONCAT('portal-advisor:', candidate.portal_student_id::TEXT, ':', team_seed.advisor_name), 0)),
+                         team_seed.advisor_order
+                LIMIT 1
+            )
+        END AS target_advisor_name
+    FROM candidate_teams AS candidate
+)
+SELECT *
+FROM resolved_portal_students AS portal
+WHERE NOT (
+    portal.current_team_name = portal.target_team_name
+    AND portal.current_advisor_name = portal.target_advisor_name
+    AND EXISTS (
+        SELECT 1
+        FROM tmp_official_team_advisor_seed AS team_seed
+        WHERE team_seed.center_name = portal.current_team_name
+          AND team_seed.advisor_name = portal.current_advisor_name
+    )
+);
+
+UPDATE dtlms_portal_students AS ps
+SET selected_team_name = r.target_team_name,
+    selected_advisor_name = r.target_advisor_name,
+    application_draft = CASE
+        WHEN jsonb_typeof(ps.application_draft) = 'object' THEN
+            jsonb_set(
+                jsonb_set(ps.application_draft, '{selected_team_name}', to_jsonb(r.target_team_name), TRUE),
+                '{selected_advisor_name}',
+                to_jsonb(r.target_advisor_name),
+                TRUE
+            )
+        ELSE ps.application_draft
+    END,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_portal_student_official_reassign AS r
+WHERE ps.id = r.portal_student_id;
+
+UPDATE dtlms_runtime_portal_students AS runtime_portal
+SET payload = CASE
+        WHEN jsonb_typeof(runtime_portal.payload) = 'object' THEN
+            jsonb_set(
+                jsonb_set(
+                    jsonb_set(runtime_portal.payload, '{selected_team_name}', to_jsonb(r.target_team_name), TRUE),
+                    '{selected_advisor_name}',
+                    to_jsonb(r.target_advisor_name),
+                    TRUE
+                ),
+                '{application_draft}',
+                CASE
+                    WHEN jsonb_typeof(runtime_portal.payload -> 'application_draft') = 'object' THEN
+                        jsonb_set(
+                            jsonb_set(runtime_portal.payload -> 'application_draft', '{selected_team_name}', to_jsonb(r.target_team_name), TRUE),
+                            '{selected_advisor_name}',
+                            to_jsonb(r.target_advisor_name),
+                            TRUE
+                        )
+                    ELSE runtime_portal.payload -> 'application_draft'
+                END,
+                TRUE
+            )
+        ELSE runtime_portal.payload
+    END,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_portal_student_official_reassign AS r
+WHERE runtime_portal.id = r.portal_student_id;
+
+CREATE TEMP TABLE tmp_recruitment_official_reassign ON COMMIT DROP AS
+WITH recruitment_base AS (
+    SELECT
+        ra.id AS application_id,
+        COALESCE(NULLIF(BTRIM(ra.first_choice), ''), '') AS current_first_choice,
+        COALESCE(NULLIF(BTRIM(ra.second_choice), ''), '') AS current_second_choice,
+        COALESCE(NULLIF(BTRIM(ra.intended_advisor_name), ''), '') AS current_advisor_name
+    FROM dtlms_recruitment_applications AS ra
+    WHERE ra.is_deleted = FALSE
+), first_choice_candidates AS (
+    SELECT
+        rb.application_id,
+        rb.current_first_choice,
+        rb.current_second_choice,
+        rb.current_advisor_name,
+        CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_center_seed AS allowed_team
+                WHERE allowed_team.center_name = rb.current_first_choice
+            ) THEN rb.current_first_choice
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.advisor_name = rb.current_advisor_name
+            ) THEN (
+                SELECT team_seed.center_name
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.advisor_name = rb.current_advisor_name
+                ORDER BY ABS(hashtextextended(CONCAT('recruit-first:', rb.application_id::TEXT, ':', team_seed.center_name), 0)),
+                         team_seed.seed_order
+                LIMIT 1
+            )
+            ELSE (
+                SELECT seed.center_name
+                FROM tmp_center_seed AS seed
+                ORDER BY ABS(hashtextextended(CONCAT('recruit-first:', rb.application_id::TEXT, ':', seed.center_name), 0)),
+                         seed.seed_order
+                LIMIT 1
+            )
+        END AS target_first_choice
+    FROM recruitment_base AS rb
+), resolved_recruitment AS (
+    SELECT
+        fc.application_id,
+        fc.current_first_choice,
+        fc.current_second_choice,
+        fc.current_advisor_name,
+        fc.target_first_choice,
+        CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.center_name = fc.target_first_choice
+                  AND team_seed.advisor_name = fc.current_advisor_name
+            ) THEN fc.current_advisor_name
+            ELSE (
+                SELECT team_seed.advisor_name
+                FROM tmp_official_team_advisor_seed AS team_seed
+                WHERE team_seed.center_name = fc.target_first_choice
+                ORDER BY ABS(hashtextextended(CONCAT('recruit-advisor:', fc.application_id::TEXT, ':', team_seed.advisor_name), 0)),
+                         team_seed.advisor_order
+                LIMIT 1
+            )
+        END AS target_advisor_name,
+        CASE
+            WHEN fc.current_second_choice = '' THEN NULL
+            WHEN EXISTS (
+                SELECT 1
+                FROM tmp_center_seed AS allowed_team
+                WHERE allowed_team.center_name = fc.current_second_choice
+                  AND allowed_team.center_name <> fc.target_first_choice
+            ) THEN fc.current_second_choice
+            ELSE (
+                SELECT alternate_name
+                FROM unnest((
+                    SELECT alternate_center_names
+                    FROM tmp_official_center_alternates AS alternate_centers
+                    WHERE alternate_centers.center_name = fc.target_first_choice
+                )) WITH ORDINALITY AS alt(alternate_name, alternate_order)
+                ORDER BY ABS(hashtextextended(CONCAT('recruit-second:', fc.application_id::TEXT, ':', alternate_name), 0)),
+                         alternate_order
+                LIMIT 1
+            )
+        END AS target_second_choice
+    FROM first_choice_candidates AS fc
+)
+SELECT *
+FROM resolved_recruitment AS recruitment
+WHERE recruitment.current_first_choice IS DISTINCT FROM recruitment.target_first_choice
+   OR recruitment.current_second_choice IS DISTINCT FROM COALESCE(recruitment.target_second_choice, '')
+   OR recruitment.current_advisor_name IS DISTINCT FROM recruitment.target_advisor_name;
+
+UPDATE dtlms_recruitment_applications AS ra
+SET first_choice = r.target_first_choice,
+    second_choice = r.target_second_choice,
+    intended_advisor_name = r.target_advisor_name,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_recruitment_official_reassign AS r
+WHERE ra.id = r.application_id;
+
+UPDATE dtlms_portal_application_preferences AS preference
+SET research_center_name = CASE
+        WHEN preference.preference_order = 1 THEN r.target_first_choice
+        ELSE COALESCE(r.target_second_choice, preference.research_center_name)
+    END,
+    advisor_name = CASE
+        WHEN preference.preference_order = 1 THEN r.target_advisor_name
+        WHEN COALESCE(preference.is_optional, FALSE) = TRUE AND NULLIF(BTRIM(preference.advisor_name), '') IS NULL THEN NULL
+        ELSE (
+            SELECT team_seed.advisor_name
+            FROM tmp_official_team_advisor_seed AS team_seed
+            WHERE team_seed.center_name = CASE
+                WHEN preference.preference_order = 1 THEN r.target_first_choice
+                ELSE COALESCE(r.target_second_choice, preference.research_center_name)
+            END
+            ORDER BY ABS(hashtextextended(CONCAT('pref-advisor:', preference.id::TEXT, ':', team_seed.advisor_name), 0)),
+                     team_seed.advisor_order
+            LIMIT 1
+        )
+    END,
+    updated_at = CURRENT_TIMESTAMP
+FROM tmp_recruitment_official_reassign AS r
+WHERE preference.application_id = r.application_id;
+
+UPDATE dtlms_research_projects AS project
+SET principal_advisor_id = advisor.id,
+    updated_at = CURRENT_TIMESTAMP
+FROM LATERAL (
+    SELECT team_seed.advisor_name
+    FROM tmp_advisor_seed AS team_seed
+    ORDER BY ABS(hashtextextended(CONCAT('project-advisor:', project.id::TEXT, ':', team_seed.full_name), 0)),
+             team_seed.full_name
+    LIMIT 1
+) AS picked
+JOIN dtlms_advisors AS advisor
+    ON advisor.full_name = picked.advisor_name
+   AND advisor.is_deleted = FALSE
+WHERE project.is_deleted = FALSE
+  AND EXISTS (
+      SELECT 1
+      FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+      WHERE bad_advisor.id = project.principal_advisor_id
+  );
+
+UPDATE dtlms_team_advisors AS team_advisor
+SET is_deleted = TRUE,
+    left_on = COALESCE(team_advisor.left_on, CURRENT_DATE),
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+        SELECT 1
+        FROM tmp_disallowed_team_cleanup AS bad_team
+        WHERE bad_team.id = team_advisor.team_id
+    )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+        WHERE bad_advisor.id = team_advisor.advisor_id
+    );
+
+UPDATE dtlms_teams AS team
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_disallowed_team_cleanup AS bad_team
+    WHERE bad_team.id = team.id
+);
+
+DELETE FROM dtlms_runtime_teams AS runtime_team
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_disallowed_team_cleanup AS bad_team
+    WHERE bad_team.id = runtime_team.id
+);
+
+UPDATE dtlms_advisors AS advisor
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+    WHERE bad_advisor.id = advisor.id
+);
+
+UPDATE dtlms_users AS system_user
+SET is_active = FALSE,
+    is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+    WHERE bad_advisor.full_name = system_user.full_name
+);
+
+DELETE FROM dtlms_runtime_system_users AS runtime_user
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+    WHERE COALESCE(runtime_user.payload ->> 'full_name', '') = bad_advisor.full_name
+);
+
+DELETE FROM dtlms_runtime_profiles AS runtime_profile
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_disallowed_advisor_cleanup AS bad_advisor
+    WHERE COALESCE(runtime_profile.payload ->> 'full_name', '') = bad_advisor.full_name
+);
+
+-- 13) 清洗门户学生历史脏紧急联系人手机号
+UPDATE dtlms_portal_student_profiles
+SET emergency_contact_phone = NULL,
+    updated_at = CURRENT_TIMESTAMP
+WHERE NULLIF(BTRIM(COALESCE(emergency_contact_phone, '')), '') IS NOT NULL
+  AND BTRIM(emergency_contact_phone) !~ '^1[3-9][0-9]{9}$';
+
+UPDATE dtlms_runtime_portal_students
+SET payload = jsonb_set(
+        jsonb_set(payload, '{profile,emergency_contact_phone}', 'null'::jsonb, true),
+        '{emergency_contact_phone}',
+        'null'::jsonb,
+        true
+    ),
+    updated_at = CURRENT_TIMESTAMP
+WHERE (
+        NULLIF(BTRIM(COALESCE(payload -> 'profile' ->> 'emergency_contact_phone', '')), '') IS NOT NULL
+        AND BTRIM(payload -> 'profile' ->> 'emergency_contact_phone') !~ '^1[3-9][0-9]{9}$'
+    )
+   OR (
+        NULLIF(BTRIM(COALESCE(payload ->> 'emergency_contact_phone', '')), '') IS NOT NULL
+        AND BTRIM(payload ->> 'emergency_contact_phone') !~ '^1[3-9][0-9]{9}$'
+   );
+
+-- 14) 软删除 2026-04-23 23:59:59.000 及以前创建的学生/导师/团队与关联培养学位旧数据
+CREATE TEMP TABLE tmp_legacy_cleanup_cutoff ON COMMIT DROP AS
+SELECT TIMESTAMPTZ '2026-04-23 23:59:59.000+08' AS cutoff_at;
+
+CREATE TEMP TABLE tmp_legacy_advisor_cleanup ON COMMIT DROP AS
+SELECT advisor.id,
+       advisor.advisor_no,
+       advisor.full_name
+FROM dtlms_advisors AS advisor
+WHERE advisor.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff);
+
+CREATE TEMP TABLE tmp_legacy_team_cleanup ON COMMIT DROP AS
+SELECT team.id,
+       team.team_code,
+       team.team_name
+FROM dtlms_teams AS team
+WHERE team.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = team.lead_advisor_id
+   );
+
+CREATE TEMP TABLE tmp_legacy_student_cleanup ON COMMIT DROP AS
+SELECT student.id,
+       student.student_no,
+       student.full_name
+FROM dtlms_students AS student
+WHERE student.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_team_cleanup AS team
+        WHERE team.id = student.team_id
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = student.primary_advisor_id
+   );
+
+CREATE TEMP TABLE tmp_legacy_training_plan_cleanup ON COMMIT DROP AS
+SELECT plan.id
+FROM dtlms_training_plans AS plan
+WHERE plan.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = plan.student_id
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = plan.advisor_id
+   );
+
+CREATE TEMP TABLE tmp_legacy_scientific_report_cleanup ON COMMIT DROP AS
+SELECT report.id
+FROM dtlms_scientific_reports AS report
+WHERE report.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = report.student_id
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_training_plan_cleanup AS plan
+        WHERE plan.id = report.training_plan_id
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = report.reviewer_advisor_id
+   );
+
+CREATE TEMP TABLE tmp_legacy_outbound_study_cleanup ON COMMIT DROP AS
+SELECT study.id
+FROM dtlms_outbound_studies AS study
+WHERE study.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = study.student_id
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = study.advisor_id
+   );
+
+CREATE TEMP TABLE tmp_legacy_thesis_cleanup ON COMMIT DROP AS
+SELECT thesis.id
+FROM dtlms_theses AS thesis
+WHERE thesis.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = thesis.student_id
+   )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = thesis.advisor_id
+   );
+
+CREATE TEMP TABLE tmp_legacy_thesis_review_cleanup ON COMMIT DROP AS
+SELECT review.id
+FROM dtlms_thesis_reviews AS review
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_thesis_cleanup AS thesis
+    WHERE thesis.id = review.thesis_id
+);
+
+CREATE TEMP TABLE tmp_legacy_research_project_cleanup ON COMMIT DROP AS
+SELECT project.id
+FROM dtlms_research_projects AS project
+WHERE project.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = project.principal_advisor_id
+   );
+
+UPDATE dtlms_team_advisors AS team_advisor
+SET is_deleted = TRUE,
+    left_on = COALESCE(team_advisor.left_on, CURRENT_DATE),
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+        SELECT 1
+        FROM tmp_legacy_team_cleanup AS team
+        WHERE team.id = team_advisor.team_id
+    )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = team_advisor.advisor_id
+   );
+
+DELETE FROM dtlms_student_team_history AS history
+WHERE EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = history.student_id
+    )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_team_cleanup AS team
+        WHERE team.id = history.team_id
+   );
+
+DELETE FROM dtlms_student_advisor_history AS history
+WHERE EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = history.student_id
+    )
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_advisor_cleanup AS advisor
+        WHERE advisor.id = history.advisor_id
+   );
+
+DELETE FROM dtlms_training_plan_versions AS version
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_training_plan_cleanup AS plan
+    WHERE plan.id = version.training_plan_id
+);
+
+UPDATE dtlms_achievements AS achievement
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE achievement.created_at <= (SELECT cutoff_at FROM tmp_legacy_cleanup_cutoff)
+   OR EXISTS (
+        SELECT 1
+        FROM tmp_legacy_student_cleanup AS student
+        WHERE student.id = achievement.student_id
+   );
+
+UPDATE dtlms_training_plans AS plan
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_training_plan_cleanup AS cleanup
+    WHERE cleanup.id = plan.id
+);
+
+DELETE FROM dtlms_runtime_training_plans AS runtime_plan
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_training_plan_cleanup AS cleanup
+    WHERE cleanup.id = runtime_plan.id
+);
+
+UPDATE dtlms_scientific_reports AS report
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_scientific_report_cleanup AS cleanup
+    WHERE cleanup.id = report.id
+);
+
+DELETE FROM dtlms_runtime_scientific_reports AS runtime_report
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_scientific_report_cleanup AS cleanup
+    WHERE cleanup.id = runtime_report.id
+);
+
+UPDATE dtlms_outbound_studies AS study
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_outbound_study_cleanup AS cleanup
+    WHERE cleanup.id = study.id
+);
+
+DELETE FROM dtlms_runtime_outbound_studies AS runtime_study
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_outbound_study_cleanup AS cleanup
+    WHERE cleanup.id = runtime_study.id
+);
+
+DELETE FROM dtlms_runtime_thesis_reviews AS runtime_review
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_thesis_review_cleanup AS cleanup
+    WHERE cleanup.id = runtime_review.id
+);
+
+DELETE FROM dtlms_thesis_reviews AS review
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_thesis_review_cleanup AS cleanup
+    WHERE cleanup.id = review.id
+);
+
+UPDATE dtlms_theses AS thesis
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_thesis_cleanup AS cleanup
+    WHERE cleanup.id = thesis.id
+);
+
+DELETE FROM dtlms_runtime_theses AS runtime_thesis
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_thesis_cleanup AS cleanup
+    WHERE cleanup.id = runtime_thesis.id
+);
+
+UPDATE dtlms_research_projects AS project
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_research_project_cleanup AS cleanup
+    WHERE cleanup.id = project.id
+);
+
+UPDATE dtlms_students AS student
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_student_cleanup AS cleanup
+    WHERE cleanup.id = student.id
+);
+
+DELETE FROM dtlms_runtime_students AS runtime_student
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_student_cleanup AS cleanup
+    WHERE cleanup.id = runtime_student.id
+);
+
+UPDATE dtlms_teams AS team
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_team_cleanup AS cleanup
+    WHERE cleanup.id = team.id
+);
+
+DELETE FROM dtlms_runtime_teams AS runtime_team
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_team_cleanup AS cleanup
+    WHERE cleanup.id = runtime_team.id
+);
+
+UPDATE dtlms_advisors AS advisor
+SET is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_advisor_cleanup AS cleanup
+    WHERE cleanup.id = advisor.id
+);
+
+UPDATE dtlms_users AS system_user
+SET is_active = FALSE,
+    is_deleted = TRUE,
+    updated_at = CURRENT_TIMESTAMP
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_advisor_cleanup AS cleanup
+    WHERE cleanup.full_name = system_user.full_name
+);
+
+DELETE FROM dtlms_runtime_system_users AS runtime_user
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_advisor_cleanup AS cleanup
+    WHERE COALESCE(runtime_user.payload ->> 'full_name', '') = cleanup.full_name
+);
+
+DELETE FROM dtlms_runtime_profiles AS runtime_profile
+WHERE EXISTS (
+    SELECT 1
+    FROM tmp_legacy_advisor_cleanup AS cleanup
+    WHERE COALESCE(runtime_profile.payload ->> 'full_name', '') = cleanup.full_name
+);
+
 COMMIT;

@@ -25,6 +25,7 @@ class FakePostgresStateStore:
         self.deleted_center_ids: list[int] = []
         self.deleted_recruitment_plan_ids: list[int] = []
         self.portal_application_submissions: list[dict] = []
+        self.updated_recruitment_applications: list[dict] = []
         self.saved_states: list[dict] = []
         self.synced_roles: list[dict] = []
         self.synced_operation_logs: list[dict] = []
@@ -84,6 +85,9 @@ class FakePostgresStateStore:
                 "counters": counters,
             }
         )
+
+    def update_runtime_recruitment_application(self, application_id, payload) -> None:
+        self.updated_recruitment_applications.append({"application_id": int(application_id), "payload": dict(payload)})
 
     def sync_role(self, role_payload, operation_log=None, *, counters=None) -> None:
         self.synced_roles.append({"role_payload": role_payload, "operation_log": operation_log, "counters": counters})
@@ -258,6 +262,7 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
         selected_team_name=team_name,
         selected_advisor_name=advisor_name,
         intended_field=team_name,
+        source_channel="实验室官网",
         english_proficiencies=[
             {
                 "exam_name": "CET-6",
@@ -717,9 +722,88 @@ def test_execute_workflow_action_creates_student_master_and_sends_reject_email(m
         "student_name": "驳回联调考生",
         "email": "candidate-reject@example.com",
         "business_key": rejected_application.business_key,
-        "application_status": "不录取",
+        "application_status": "驳回重填",
         "plan_name": "2026 秋季博士招生",
     }
+
+
+def test_rejected_portal_application_resets_submission_and_allows_resubmit(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009966",
+            email="resubmit-student@example.com",
+            full_name="驳回重填学生",
+            id_number="320000199909099934",
+            password="Secret123!",
+        )
+    )
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "resubmit-student@example.com")
+    payload = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
+    first_submit = store.submit_portal_application(student_id, payload)
+
+    reject_task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == first_submit.application_business_key)
+    store.execute_workflow_action(
+        reject_task_id,
+        "reject",
+        "请补充材料后重新提交",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    portal_student = next(item for item in store.state["portal_students"] if item["id"] == student_id)
+    latest_application = next(item for item in store.state["recruitment_applications"] if item["business_key"] == first_submit.application_business_key)
+    assert portal_student["submitted_at"] is None
+    assert latest_application["application_status"] == "驳回重填"
+    assert fake_postgres.updated_recruitment_applications[-1]["application_id"] == latest_application["id"]
+    assert fake_postgres.updated_recruitment_applications[-1]["payload"]["application_status"] == "驳回重填"
+
+    second_submit = store.submit_portal_application(student_id, payload)
+    assert second_submit.application_status == "报名已提交"
+
+
+def test_get_registered_portal_students_marks_returned_forms(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009965",
+            email="returned-student@example.com",
+            full_name="状态联调学生",
+            id_number="320000199909099918",
+            password="Secret123!",
+        )
+    )
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "returned-student@example.com")
+    payload = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
+    first_submit = store.submit_portal_application(student_id, payload)
+    reject_task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == first_submit.application_business_key)
+    store.execute_workflow_action(
+        reject_task_id,
+        "reject",
+        "退回补充",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    response = store.get_registered_portal_students(page=1, page_size=20)
+    returned_record = next(item for item in response.items if item.email == "returned-student@example.com")
+    assert returned_record.application_form_status == "驳回重填"
+    assert returned_record.recruitment_application_status == "驳回重填"
+    assert returned_record.submitted_at is None
 
 
 def test_update_recruitment_application_persists_full_state(monkeypatch) -> None:
@@ -1501,6 +1585,32 @@ def test_portal_application_upsert_rejects_invalid_emergency_contact_phone() -> 
         PortalApplicationUpsert.model_validate(payload)
 
 
+def test_build_portal_student_record_tolerates_invalid_legacy_emergency_contact_phone(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+
+    record = store._build_portal_student_record(
+        {
+            "id": 7,
+            "full_name": "历史数据学生",
+            "phone_number": "13800001111",
+            "email": "legacy-portal@example.com",
+            "id_number": "32000019990101123X",
+            "account_status": "启用",
+            "profile": {
+                "full_name_pinyin": "LI SHI",
+                "emergency_contact_name": "家长",
+                "emergency_contact_phone": "1",
+            },
+        }
+    )
+
+    assert record.profile is not None
+    assert record.profile.emergency_contact_phone is None
+
+
 def test_portal_application_upsert_requires_source_channel_other_when_needed() -> None:
     from pydantic import ValidationError
 
@@ -1511,6 +1621,18 @@ def test_portal_application_upsert_requires_source_channel_other_when_needed() -
     payload["source_channel_other"] = ""
 
     with pytest.raises(ValidationError, match="选择“其他”来源时，请补充说明"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
+def test_portal_application_upsert_requires_source_channel() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["source_channel"] = ""
+
+    with pytest.raises(ValidationError, match="请选择了解项目方式"):
         PortalApplicationUpsert.model_validate(payload)
 
 
@@ -1527,6 +1649,18 @@ def test_portal_application_upsert_requires_submission_declaration() -> None:
         PortalApplicationUpsert.model_validate(payload)
 
 
+def test_portal_application_upsert_rejects_personal_statement_over_1200_chars() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["personal_statement"]["personal_statement_text"] = "甲" * 1201
+
+    with pytest.raises(ValidationError, match="个人陈述需控制在 1200 字以内"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
 def test_portal_application_draft_upsert_rejects_missing_required_fields() -> None:
     from pydantic import ValidationError
 
@@ -1537,3 +1671,18 @@ def test_portal_application_draft_upsert_rejects_missing_required_fields() -> No
 
     with pytest.raises(ValidationError, match="基本信息以下字段必填：姓名拼音"):
         PortalApplicationDraftUpsert.model_validate(payload)
+
+
+def test_portal_application_draft_upsert_validates_only_current_section_when_scope_provided() -> None:
+    from app.schemas.portal import PortalApplicationDraftUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["validation_section_id"] = "basic-section"
+    payload["profile"]["full_name_pinyin"] = "测试学生"
+    payload["signed_agreement"] = False
+    payload["declaration"]["has_read_declaration"] = False
+    payload["english_proficiencies"] = []
+
+    validated = PortalApplicationDraftUpsert.model_validate(payload)
+
+    assert validated.validation_section_id == "basic-section"

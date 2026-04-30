@@ -379,11 +379,14 @@ def _validate_portal_personal_statement_rules(
     if not require_complete:
         return
 
+    if statement_text and len(statement_text) > 1200:
+        raise ValueError("个人陈述需控制在 1200 字以内")
+
     if not statement_text:
-        raise ValueError("请填写个人陈述第 1 题")
+        raise ValueError("请填写个人陈述并上传简历。")
 
     if not resume_attachment_url:
-        raise ValueError("请上传个人简历附件")
+        raise ValueError("请填写个人陈述并上传简历。")
 
 
 def _validate_portal_basic_profile_rules(
@@ -423,6 +426,9 @@ def _validate_portal_basic_profile_rules(
 
 
 def _validate_portal_source_channel_rules(source_channel: str | None, source_channel_other: str | None) -> None:
+    if not _first_non_empty(source_channel):
+        raise ValueError("请选择了解项目方式")
+
     if _first_non_empty(source_channel) == "其他" and not _first_non_empty(source_channel_other):
         raise ValueError("选择“其他”来源时，请补充说明")
 
@@ -430,6 +436,53 @@ def _validate_portal_source_channel_rules(source_channel: str | None, source_cha
 def _validate_portal_declaration_rules(signed_agreement: bool) -> None:
     if not signed_agreement:
         raise ValueError("请先确认提交声明")
+
+
+def _validate_portal_draft_rules_by_section(payload: "PortalApplicationDraftUpsert") -> None:
+    section_id = _first_non_empty(payload.validation_section_id)
+    if not section_id:
+        return
+
+    if section_id == "basic-section":
+        _validate_portal_basic_profile_rules(
+            payload.profile,
+            gender=payload.gender,
+            ethnic_group=payload.ethnic_group,
+            political_status=payload.political_status,
+            mailing_address=payload.mailing_address,
+            require_complete=True,
+        )
+        return
+
+    if section_id == "application-section":
+        _validate_portal_source_channel_rules(payload.source_channel, payload.source_channel_other)
+        if not _first_non_empty(payload.selected_team_name):
+            raise ValueError("缺少第一志愿研究中心信息")
+        return
+
+    if section_id == "education-section":
+        _validate_portal_education_rules(payload.education_experiences, require_minimum_two=True)
+        return
+
+    if section_id == "practice-section":
+        _validate_portal_practice_rules(payload.practice_experiences)
+        return
+
+    if section_id == "english-section":
+        _validate_portal_english_rules(payload.english_proficiencies, require_at_least_one=True)
+        return
+
+    if section_id == "family-section":
+        _validate_portal_family_rules(payload.family_members, require_at_least_one_parent=True)
+        return
+
+    if section_id == "achievement-section":
+        _validate_portal_achievement_rules(payload.achievement_records)
+        return
+
+    if section_id == "statement-section":
+        _validate_portal_personal_statement_rules(payload.personal_statement, require_complete=True)
+        return
 
 
 class PortalApplicantProfileData(BaseModel):
@@ -946,6 +999,7 @@ class PortalApplicationUpsert(BaseModel):
 
 class PortalApplicationDraftUpsert(BaseModel):
     plan_id: int = 0
+    validation_section_id: str | None = None
     profile: PortalApplicantProfileData | None = None
     source_channel: str | None = None
     source_channel_other: str | None = None
@@ -1042,6 +1096,12 @@ class PortalApplicationDraftUpsert(BaseModel):
 
         if self.declaration is not None:
             self.signed_agreement = self.signed_agreement or self.declaration.has_read_declaration
+
+        if _first_non_empty(self.validation_section_id):
+            _validate_portal_draft_rules_by_section(self)
+            if not _first_non_empty(self.intended_field):
+                self.intended_field = self.selected_team_name
+            return self
 
         _validate_portal_education_rules(
             self.education_experiences,

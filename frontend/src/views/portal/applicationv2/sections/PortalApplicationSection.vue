@@ -15,7 +15,6 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>研究领域选择</strong>
-        <span>第一志愿必填，第二志愿选填。</span>
       </div>
     </div>
 
@@ -30,7 +29,7 @@ defineProps<{
 
         <div class="section-grid">
           <label>
-            <span><span v-if="index === 0" class="required-mark">*</span>研究中心</span>
+            <span><span v-if="index === 0" class="required-mark">*</span>研究领域</span>
             <select v-model="item.research_center_name" @change="handlePreferenceCenterChange(item)">
               <option value="">请选择研究中心</option>
               <option v-for="team in teams" :key="team.id" :value="team.team_name">{{ team.team_name }}</option>
@@ -51,7 +50,7 @@ defineProps<{
       <div class="section-card__header"><strong>了解项目方式</strong></div>
       <div class="section-grid">
         <label>
-          <span>获知渠道</span>
+          <span><span class="required-mark">*</span>获知渠道</span>
           <select v-model="form.source_channel">
             <option value="">请选择</option>
             <option v-for="item in sourceChannelOptions" :key="item" :value="item">{{ item }}</option>

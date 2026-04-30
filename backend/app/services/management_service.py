@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 from passlib.context import CryptContext
 
 from app.core.cache import build_cache_key, get_cache_client
+from app.schemas.contact import validate_optional_phone_number
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.portal import (
     PortalApplicationSubmissionResponse,
@@ -132,6 +133,7 @@ PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 ListItemT = TypeVar("ListItemT")
 logger = logging.getLogger(__name__)
 FINAL_WORKFLOW_STATUSES = {"已通过", "已驳回"}
+PORTAL_RESUBMITTABLE_APPLICATION_STATUSES = {"驳回重填", "不录取"}
 ADMITTED_RECRUITMENT_APPLICATION_STATUSES = {"资格审核通过", "材料评分中", "面试待安排", "面试完成", "预录取", "同意录取"}
 PORTAL_REGISTRATION_EMAIL_CODE_LENGTH = 6
 PORTAL_REGISTRATION_EMAIL_CODE_EXPIRES_SECONDS = 10 * 60
@@ -252,7 +254,7 @@ MANAGED_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
                         "label": "审核不通过",
                         "next_node": None,
                         "task_status": "已驳回",
-                        "field_updates": {"application_status": "不录取"},
+                        "field_updates": {"application_status": "驳回重填"},
                     },
                 },
             },
@@ -1609,6 +1611,7 @@ class RuntimeManagementStore:
                 "面试完成": ("admission_confirmation", "处理中"),
                 "预录取": (None, "已通过"),
                 "同意录取": (None, "已通过"),
+                "驳回重填": (None, "已驳回"),
                 "不录取": (None, "已驳回"),
             }
             node_key, task_status = mapping.get(item.get("application_status"), ("qualification_review", "待处理"))
@@ -1846,6 +1849,8 @@ class RuntimeManagementStore:
             entity_index, entity = self._find_required(definition["business_dataset"], int(task["entity_id"]))
             updated_entity = {**entity, **action_definition.get("field_updates", {})}
             self._list(definition["business_dataset"])[entity_index] = updated_entity
+            if flow_code == "recruitment_application" and str(updated_entity.get("application_status") or "").strip() == "驳回重填":
+                self._reset_portal_student_submission_for_resubmission(updated_entity)
 
             next_node = action_definition.get("next_node")
             updated_task = dict(task)
@@ -1901,6 +1906,16 @@ class RuntimeManagementStore:
         if notification_payload is not None and self._email_service.enabled():
             self._email_service.send_recruitment_status_update(**notification_payload)
         return result
+
+    def _reset_portal_student_submission_for_resubmission(self, application: dict[str, Any]) -> None:
+        portal_student_id = int(application.get("portal_student_id") or 0)
+        if portal_student_id <= 0:
+            return
+        _, student = self._find_required("portal_students", portal_student_id)
+        student["submitted_at"] = None
+        draft = student.get("application_draft")
+        if isinstance(draft, dict):
+            draft["submitted_at"] = None
 
     def _build_recruitment_email_notification(self, application: dict[str, Any]) -> dict[str, str] | None:
         status = str(application.get("application_status") or "").strip()
@@ -2108,6 +2123,17 @@ class RuntimeManagementStore:
     def _build_portal_student_record(self, item: dict[str, Any]) -> PortalStudentRecord:
         normalized = dict(item)
         normalized["account_status"] = self._normalize_portal_account_status(normalized.get("account_status"))
+        profile = normalized.get("profile")
+        if isinstance(profile, dict):
+            profile_payload = dict(profile)
+            try:
+                profile_payload["emergency_contact_phone"] = validate_optional_phone_number(
+                    profile_payload.get("emergency_contact_phone"),
+                    "紧急联系人手机",
+                )
+            except ValueError:
+                profile_payload["emergency_contact_phone"] = None
+            normalized["profile"] = profile_payload
         if not normalized.get("business_key") and not normalized.get("candidate_no"):
             student_id = normalized.get("id")
             selected_plan_id = normalized.get("selected_plan_id")
@@ -2861,7 +2887,7 @@ class RuntimeManagementStore:
             created_workflow_task = False
             if existing_application:
                 previous_application_status = str(existing_application.get("application_status") or "").strip()
-                resubmitting_rejected_application = previous_application_status == "不录取"
+                resubmitting_rejected_application = previous_application_status in PORTAL_RESUBMITTABLE_APPLICATION_STATUSES
                 existing_application.update(
                     {
                         "student_name": student["full_name"],
@@ -3290,7 +3316,7 @@ class RuntimeManagementStore:
                 email=str(student.get("email") or ""),
                 id_number=str(student.get("id_number") or ""),
                 account_status=self._normalize_portal_account_status(student.get("account_status")),
-                application_form_status="已填写报名" if submitted_at else "未填写报名",
+                application_form_status="驳回重填" if application_status == "驳回重填" else ("已填写报名" if submitted_at else "未填写报名"),
                 selected_plan_name=plan_name_map.get(int(plan_id or 0)) if plan_id is not None else None,
                 selected_center_name=str(student.get("selected_team_name") or "") or None,
                 selected_advisor_name=str(student.get("selected_advisor_name") or "") or None,
@@ -3298,7 +3324,7 @@ class RuntimeManagementStore:
                 recruitment_application_business_key=(str(latest_application.get("business_key") or "") or None) if latest_application else None,
                 recruitment_application_status=application_status or None,
                 registered_at=str(student.get("created_at") or "") or None,
-                submitted_at=submitted_at or None,
+                submitted_at=None if application_status == "驳回重填" else (submitted_at or None),
             )
             records.append(record)
 

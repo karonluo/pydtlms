@@ -24,8 +24,8 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
     <div class="toolbar-card">
       <div>
         <strong>教育经历列表</strong>
-        <span>默认包含一条高中毕业记录；新增面板会显示在上方，最多填写 3 条。</span>
       </div>
+      <p class="toolbar-card__hint">请按最高学历到高中的顺序填写，默认包含高中经历，最多填写 3 条教育经历。</p>
       <button type="button" class="action-button" @click="addEducation">新增教育经历</button>
     </div>
 

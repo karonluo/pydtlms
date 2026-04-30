@@ -14,7 +14,6 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>家庭成员</strong>
-        <span>父母信息至少填写一方，其他成员可按需补充。</span>
       </div>
       <button type="button" class="action-button" @click="addFamilyMember">新增家庭成员</button>
     </div>

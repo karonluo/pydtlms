@@ -32,9 +32,13 @@ class FakeCursor:
 class FakeConnection:
     def __init__(self, cursor: FakeCursor) -> None:
         self.cursor_instance = cursor
+        self.committed = False
 
     def cursor(self):
         return self.cursor_instance
+
+    def commit(self) -> None:
+        self.committed = True
 
     def __enter__(self):
         return self
@@ -269,6 +273,70 @@ def test_list_registered_portal_students_page_returns_application_identifiers(mo
     assert items[0]["recruitment_application_id"] == 15
     assert items[0]["recruitment_application_business_key"] == "RECRUIT-20260420-0015"
     assert items[0]["application_form_status"] == "已填写报名"
+
+
+def test_list_registered_portal_students_page_marks_returned_forms(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[{"total": 1}],
+        fetchall_results=[[
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "id_number": "32000019990101123X",
+                "account_status": "启用",
+                "selected_plan_name": "2026博士招生",
+                "selected_team_name": "智能制造联合团队",
+                "selected_advisor_name": "刘亚",
+                "created_at": "2026-04-01 10:00:00",
+                "submitted_at": None,
+                "recruitment_application_id": 15,
+                "recruitment_application_business_key": "RECRUIT-20260420-0015",
+                "application_status": "returned",
+                "applied_at": "2026-04-20 10:00:00",
+            }
+        ]],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    items, total = store.list_registered_portal_students_page(page=1, page_size=10)
+
+    assert total == 1
+    assert items[0]["application_form_status"] == "驳回重填"
+    assert items[0]["recruitment_application_status"] == "驳回重填"
+    assert items[0]["submitted_at"] is None
+
+
+def test_update_runtime_recruitment_application_updates_relational_status(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor()
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    store.update_runtime_recruitment_application(
+        15,
+        {
+            "id": 15,
+            "application_status": "驳回重填",
+            "business_key": "RECRUIT-20260420-0015",
+        },
+    )
+
+    assert len(cursor.executed) == 2
+    update_sql, update_params = cursor.executed[0]
+    assert "UPDATE dtlms_recruitment_applications" in update_sql
+    assert update_params == ("returned", 15)
+
+    insert_sql, insert_params = cursor.executed[1]
+    assert "INSERT INTO dtlms_runtime_recruitment_applications" in insert_sql
+    assert insert_params[0] == 15
 
 
 def test_derive_portal_profile_includes_id_card_collage_url() -> None:

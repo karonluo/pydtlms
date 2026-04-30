@@ -43,12 +43,12 @@ const headerLinks = [
 const formSections = [
   { id: 'basic-section', label: '基本信息', description: '用于确认身份、联系方式与基础背景。', icon: User },
   { id: 'application-section', label: '报名信息', description: '填写获知渠道、研究中心志愿和导师选择。', icon: OfficeBuilding },
-  { id: 'education-section', label: '教育经历', description: '请按最高学历到高中的顺序填写教育背景与附件。', icon: School },
+  { id: 'education-section', label: '教育经历', description: '', icon: School },
   { id: 'practice-section', label: '实践经历', description: '补充项目、实习、工程实践或工作经历。', icon: Briefcase },
   { id: 'english-section', label: '英语能力', description: '请至少填写 1 条英语考试记录并上传证明材料。', icon: Reading },
   { id: 'family-section', label: '家庭情况', description: '父母信息必填，其他成员可按需补充。', icon: House },
   { id: 'achievement-section', label: '成果经历', description: '可补充论文发表与获奖经历，最多填写 4 条。', icon: Medal },
-  { id: 'statement-section', label: '个人陈述', description: '填写个人陈述、AI 思考并完成提交确认。', icon: EditPen },
+  { id: 'statement-section', label: '个人陈述', description: '请填写个人陈述并上传简历。', icon: EditPen },
 ]
 
 const activeSectionId = ref('basic-section')
@@ -248,12 +248,10 @@ onMounted(async () => {
           <div class="portal-v2-main-panel">
             <div class="portal-v2-main-panel__header">
               <div class="portal-v2-main-panel__step">
-                <span>当前章节</span>
                 <strong>{{ activeSectionStep }}</strong>
               </div>
               <div class="portal-v2-main-panel__copy">
                 <h2>{{ activeSection.label }}</h2>
-                <p>{{ activeSection.description }}</p>
               </div>
             </div>
 
@@ -610,13 +608,6 @@ onMounted(async () => {
   border-radius: 14px;
   background: linear-gradient(135deg, rgba(29, 108, 214, 0.06), rgba(88, 185, 255, 0.12));
   border: 1px solid rgba(197, 219, 245, 0.92);
-}
-
-.portal-v2-main-panel__step span {
-  color: #6f82a0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
 }
 
 .portal-v2-main-panel__step strong {

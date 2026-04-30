@@ -693,6 +693,10 @@ function validateBasicRules(profileData?: PortalApplicantProfileData | null, req
 }
 
 function validateSourceChannelRules(sourceChannel?: string | null, sourceChannelOther?: string | null) {
+  if (!trimText(sourceChannel)) {
+    return '请选择了解项目方式'
+  }
+
   if (trimText(sourceChannel) === '其他' && !trimText(sourceChannelOther)) {
     return '选择“其他”来源时，请补充说明'
   }
@@ -701,16 +705,20 @@ function validateSourceChannelRules(sourceChannel?: string | null, sourceChannel
 }
 
 function validatePersonalStatementRules(personalStatement?: PortalPersonalStatementData | null, requireComplete = false) {
+  const statementText = buildPersonalStatementSummary(personalStatement)
+  if (statementText && statementText.length > 1200) {
+    return '个人陈述需控制在 1200 字以内'
+  }
+
   if (!requireComplete) {
     return ''
   }
 
-  const statementText = buildPersonalStatementSummary(personalStatement)
   if (!statementText) {
-    return '请填写个人陈述第 1 题'
+    return '请填写个人陈述并上传简历。'
   }
   if (!trimText(personalStatement?.resume_attachment_url)) {
-    return '请先上传个人简历附件'
+    return '请填写个人陈述并上传简历。'
   }
 
   return ''
@@ -785,6 +793,91 @@ async function validateApplicationForSubmit(title = '提交受阻') {
     return false
   }
   return true
+}
+
+async function validateCurrentSectionForSave(title = '草稿保存受阻') {
+  switch (props.activeSectionId) {
+    case 'basic-section': {
+      const basicRuleMessage = validateBasicRules(form.profile, true)
+      if (basicRuleMessage) {
+        await showPortalAlert(basicRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'application-section': {
+      if (!selectedPlanId.value) {
+        await showPortalAlert('当前暂无可提交的招生计划', title, 'warning')
+        return false
+      }
+      const primary = primaryPreference.value
+      if (!trimText(primary?.research_center_name)) {
+        await showPortalAlert('请至少选择第一志愿研究中心', title, 'warning')
+        return false
+      }
+      const sourceChannelRuleMessage = validateSourceChannelRules(form.source_channel, form.source_channel_other)
+      if (sourceChannelRuleMessage) {
+        await showPortalAlert(sourceChannelRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'education-section': {
+      const completedEducationItems = getCompletedEducationExperiences(form.education_experiences)
+      if (completedEducationItems.length < 2) {
+        await showPortalAlert('请至少完整填写两条教育经历', title, 'warning')
+        return false
+      }
+      const educationRuleMessage = validateEducationRules(form.education_experiences)
+      if (educationRuleMessage) {
+        await showPortalAlert(educationRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'practice-section': {
+      const practiceRuleMessage = validatePracticeRules(form.practice_experiences)
+      if (practiceRuleMessage) {
+        await showPortalAlert(practiceRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'english-section': {
+      const englishRuleMessage = validateEnglishRules(form.english_proficiencies)
+      if (englishRuleMessage) {
+        await showPortalAlert(englishRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'family-section': {
+      const familyRuleMessage = validateFamilyRules(form.family_members)
+      if (familyRuleMessage) {
+        await showPortalAlert(familyRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'achievement-section': {
+      const achievementRuleMessage = validateAchievementRules(form.achievement_records)
+      if (achievementRuleMessage) {
+        await showPortalAlert(achievementRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    case 'statement-section': {
+      const personalStatementRuleMessage = validatePersonalStatementRules(form.personal_statement, true)
+      if (personalStatementRuleMessage) {
+        await showPortalAlert(personalStatementRuleMessage, title, 'warning')
+        return false
+      }
+      return true
+    }
+    default:
+      return true
+  }
 }
 
 function createDeclaration(): PortalApplicationDeclarationData {
@@ -1242,7 +1335,7 @@ function removeFamilyMember(index: number) {
 async function addAchievement() {
   if ((form.achievement_records?.length || 0) >= 4) {
     await showPortalAlert(
-      '成果经历最多填写 4 条。\n若有更多成果，请通过上传个人简历附件的方式进行详细说明。',
+      '成果经历非必填，如有则填写论文发表与获奖经历，最多填写4条。\n若超过4条可在个人陈述与补充材料中体现。',
       '成果经历提醒',
       'warning',
     )
@@ -1535,6 +1628,13 @@ function buildSubmitPayload(): PortalApplicationUpsert {
   }
 }
 
+function buildDraftPayload(): PortalApplicationUpsert {
+  return {
+    ...buildSubmitPayload(),
+    validation_section_id: props.activeSectionId,
+  }
+}
+
 async function submitForm() {
   if (isSubmitted.value) {
     await showPortalAlert('报名申请已提交，当前仅支持只读浏览，不能再修改信息', '提交受阻', 'warning')
@@ -1580,12 +1680,12 @@ async function saveDraft(showSuccess = true) {
     await showPortalAlert('报名申请已提交，当前仅支持只读浏览，不能再修改信息', '草稿保存受阻', 'warning')
     return false
   }
-  if (!await validateApplicationForSubmit('草稿保存受阻')) {
+  if (!await validateCurrentSectionForSave('草稿保存受阻')) {
     return false
   }
   savingDraft.value = true
   try {
-    const response = await savePortalApplicationDraft(buildSubmitPayload())
+    const response = await savePortalApplicationDraft(buildDraftPayload())
     student.value = response.data.student
     if (showSuccess) {
       await showPortalAlert(response.data.message || '报名草稿已保存，可稍后继续填写。', '保存成功', 'success')

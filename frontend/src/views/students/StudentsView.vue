@@ -65,6 +65,9 @@ const portalViewingApplication = ref<RecruitApplicationRecord | null>(null)
 const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
 const portalWorkflowTaskLoading = ref(false)
 const portalWorkflowActionSubmitting = ref(false)
+const portalWorkflowCommentDialogVisible = ref(false)
+const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
+const portalWorkflowComment = ref('')
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -137,6 +140,7 @@ const centerEnabledOptions = [
 ]
 const portalApplicationFormStatusOptions = [
   { label: '已填写报名', value: '已填写报名' },
+  { label: '驳回重填', value: '驳回重填' },
   { label: '未填写报名', value: '未填写报名' },
 ]
 
@@ -588,6 +592,9 @@ function portalApplicationFormStatusTagType(status: string) {
   if (status === '已填写报名') {
     return 'success'
   }
+  if (status === '驳回重填') {
+    return 'warning'
+  }
   return 'info'
 }
 
@@ -600,6 +607,9 @@ function portalRecruitmentStatusTagType(status: string | null | undefined) {
   }
   if (status === '预录取' || status === '同意录取') {
     return 'success'
+  }
+  if (status === '驳回重填') {
+    return 'danger'
   }
   return 'info'
 }
@@ -699,7 +709,7 @@ function openRegisteredPortalStudentEmailDialog(row: RegisteredPortalStudentReco
 }
 
 function canViewRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
-  return row.application_form_status === '已填写报名' && !!row.recruitment_application_id
+  return (row.application_form_status === '已填写报名' || row.application_form_status === '驳回重填') && !!row.recruitment_application_id
 }
 
 function canReviewRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
@@ -757,29 +767,37 @@ async function handlePortalWorkflowAction(action: WorkflowActionOption) {
     ElMessage.warning('当前未找到可执行的审批任务')
     return
   }
-  const promptResult = await ElMessageBox.prompt(`请输入“${action.label}”审批意见，可留空。`, '审批处理', {
-    inputValue: '',
-    inputPlaceholder: '审批意见（可选）',
-    confirmButtonText: action.label,
-    cancelButtonText: '取消',
-  }).catch(() => null)
-  if (!promptResult) {
+  pendingPortalWorkflowAction.value = action
+  portalWorkflowComment.value = ''
+  portalWorkflowCommentDialogVisible.value = true
+}
+
+async function submitPortalWorkflowCommentDialog() {
+  if (!portalViewingWorkflowTask.value || !pendingPortalWorkflowAction.value) {
     return
   }
   portalWorkflowActionSubmitting.value = true
   try {
     await executeWorkflowTaskAction(portalViewingWorkflowTask.value.id, {
-      action: action.action,
-      comment: promptResult.value?.trim() || undefined,
+      action: pendingPortalWorkflowAction.value.action,
+      comment: portalWorkflowComment.value.trim() || undefined,
     })
-    ElMessage.success(`${action.label}已完成`)
+    ElMessage.success(`${pendingPortalWorkflowAction.value.label}已完成`)
+    portalWorkflowCommentDialogVisible.value = false
     await Promise.all([refreshAfterMutation(), refreshPortalViewingApplication()])
   } catch (error) {
-    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : `${action.label}失败`
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message)
+      : `${pendingPortalWorkflowAction.value.label}失败`
     ElMessage.error(message)
   } finally {
     portalWorkflowActionSubmitting.value = false
   }
+}
+
+function resetPortalWorkflowCommentDialog() {
+  pendingPortalWorkflowAction.value = null
+  portalWorkflowComment.value = ''
 }
 
 function registeredPortalMainActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
@@ -862,11 +880,17 @@ watch(() => resetPasswordDialogVisible.value, (visible) => {
     resetResetPasswordDialog()
   }
 })
+watch(() => portalWorkflowCommentDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalWorkflowCommentDialog()
+  }
+})
 watch(() => activeSection.value, () => {
   dialogVisible.value = false
   portalEmailDialogVisible.value = false
   portalEmailResultDialogVisible.value = false
   resetPasswordDialogVisible.value = false
+  portalWorkflowCommentDialogVisible.value = false
   selectedCenterIds.value = []
   void loadSectionData()
 })
@@ -1093,6 +1117,31 @@ onMounted(() => {
       :action-loading="portalWorkflowActionSubmitting"
       @execute-action="handlePortalWorkflowAction"
     />
+
+    <el-dialog
+      v-model="portalWorkflowCommentDialogVisible"
+      :title="pendingPortalWorkflowAction ? pendingPortalWorkflowAction.label : '审批处理'"
+      width="640px"
+      destroy-on-close
+    >
+      <div class="workflow-comment-dialog">
+        <p class="workflow-comment-dialog__hint">请输入审批意见，可留空后直接提交。</p>
+        <el-input
+          v-model="portalWorkflowComment"
+          type="textarea"
+          :rows="5"
+          maxlength="500"
+          show-word-limit
+          placeholder="审批意见（可选）"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="portalWorkflowCommentDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalWorkflowActionSubmitting" @click="submitPortalWorkflowCommentDialog">
+          {{ pendingPortalWorkflowAction?.label || '确认' }}
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-if="canMutateSection"
@@ -1445,6 +1494,17 @@ onMounted(() => {
 .reset-password-dialog {
   display: grid;
   gap: 16px;
+}
+
+.workflow-comment-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-comment-dialog__hint {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
 }
 
 .reset-password-summary {

@@ -31,8 +31,8 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>成果经历</strong>
-        <span>最多填写 4 条，仅支持“论文发表”和“获奖经历”。若有更多成果，请通过上传个人简历附件的方式进行详细说明。</span>
       </div>
+      <p class="toolbar-card__hint">成果经历非必填，如有则填写论文发表与获奖经历，最多填写4条。若超过4条可在个人陈述与补充材料中体现。</p>
       <button type="button" class="action-button" @click="addAchievement">新增成果经历</button>
     </div>
 
@@ -112,10 +112,16 @@ defineProps<{
 }
 
 .record-card__header span,
-.toolbar-card span,
 .empty-card {
   color: #627896;
   font-size: 12px;
+}
+
+.toolbar-card__hint {
+  margin: 0;
+  color: #627896;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .toolbar-card strong,
@@ -130,6 +136,10 @@ defineProps<{
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+}
+
+.toolbar-card {
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .section-grid {

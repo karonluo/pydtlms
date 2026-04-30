@@ -19,12 +19,16 @@ defineProps<{
   <section class="section-page">
     <div class="section-card">
       <div class="section-intro">
-        <strong>个人陈述与附件</strong>
-        <p>请围绕“个人成长经历、为何申报本项目或本专业、未来职业发展规划”三个主题填写。</p>
+        <strong>个人陈述</strong>
+        <p>请填写个人陈述并上传简历。</p>
       </div>
 
       <div class="section-grid">
-        <label class="section-grid__full"><span><span class="required-mark">*</span>个人成长经历、自我个性描述、为何申报本项目或本专业以及未来职业发展规划等</span><textarea v-model="form.personal_statement!.personal_statement_text" rows="7" placeholder="请结合个人成长经历、自我个性、申报动机与未来职业发展规划进行陈述" /></label>
+        <label class="section-grid__full">
+          <span><span class="required-mark">*</span>请简要描述个人经历、申请上海人工智能实验室联培博士生项目的原因以及未来规划等（必填，1200字以内）</span>
+          <textarea v-model="form.personal_statement!.personal_statement_text" rows="7" maxlength="1200" placeholder="请简要描述个人经历、申请上海人工智能实验室联培博士生项目的原因以及未来规划等" />
+          <small class="textarea-counter">已输入 {{ (form.personal_statement!.personal_statement_text || '').length }}/1200</small>
+        </label>
         <label class="section-grid__full"><span>你认为目前 AI 技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？</span><textarea v-model="form.personal_statement!.ai_problem_statement" rows="5" placeholder="选填，请填写你最关注、未来希望作为科研目标解决的 AI 关键问题" /></label>
         <label class="section-grid__full"><span>请陈述一个目前 AI 行业基本形成共识，但你不同意的观点，可以适当展开</span><textarea v-model="form.personal_statement!.ai_industry_opinion" rows="5" placeholder="选填，请填写你不同意的行业共识观点及理由" /></label>
       </div>
@@ -113,6 +117,12 @@ defineProps<{
 }
 
 .upload-card small {
+  color: #627896;
+  font-size: 12px;
+}
+
+.textarea-counter {
+  justify-self: end;
   color: #627896;
   font-size: 12px;
 }

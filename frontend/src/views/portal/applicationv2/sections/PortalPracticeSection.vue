@@ -13,7 +13,6 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>实践经历列表</strong>
-        <span>本章节选填，可留空提交；最多填写 2 条，如有更多内容，请在个人陈述与附件中补充上传。</span>
       </div>
       <button type="button" class="action-button" @click="addPractice">新增实践经历</button>
     </div>

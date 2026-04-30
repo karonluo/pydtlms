@@ -262,6 +262,9 @@ const applicationStatusColors = ref<DictColorMap>({})
 const materialStatusColors = ref<DictColorMap>({})
 const applicationWorkflowTaskLoading = ref(false)
 const applicationWorkflowActionSubmitting = ref(false)
+const applicationWorkflowCommentDialogVisible = ref(false)
+const pendingViewingApplicationWorkflowAction = ref<WorkflowActionOption | null>(null)
+const applicationWorkflowComment = ref('')
 
 const planFormRef = ref<FormInstance>()
 const applicationFormRef = ref<FormInstance>()
@@ -618,29 +621,37 @@ async function handleViewingApplicationWorkflowAction(action: WorkflowActionOpti
     ElMessage.warning('当前未找到可执行的审批任务')
     return
   }
-  const promptResult = await ElMessageBox.prompt(`请输入“${action.label}”审批意见，可留空。`, '审批处理', {
-    inputValue: '',
-    inputPlaceholder: '审批意见（可选）',
-    confirmButtonText: action.label,
-    cancelButtonText: '取消',
-  }).catch(() => null)
-  if (!promptResult) {
+  pendingViewingApplicationWorkflowAction.value = action
+  applicationWorkflowComment.value = ''
+  applicationWorkflowCommentDialogVisible.value = true
+}
+
+async function submitApplicationWorkflowCommentDialog() {
+  if (!viewingApplicationWorkflowTask.value || !pendingViewingApplicationWorkflowAction.value) {
     return
   }
   applicationWorkflowActionSubmitting.value = true
   try {
     await executeWorkflowTaskAction(viewingApplicationWorkflowTask.value.id, {
-      action: action.action,
-      comment: promptResult.value?.trim() || undefined,
+      action: pendingViewingApplicationWorkflowAction.value.action,
+      comment: applicationWorkflowComment.value.trim() || undefined,
     })
-    ElMessage.success(`${action.label}已完成`)
+    ElMessage.success(`${pendingViewingApplicationWorkflowAction.value.label}已完成`)
+    applicationWorkflowCommentDialogVisible.value = false
     await Promise.all([refreshAll(), refreshViewingApplication()])
   } catch (error) {
-    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : `${action.label}失败`
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message)
+      : `${pendingViewingApplicationWorkflowAction.value.label}失败`
     ElMessage.error(message)
   } finally {
     applicationWorkflowActionSubmitting.value = false
   }
+}
+
+function resetApplicationWorkflowCommentDialog() {
+  pendingViewingApplicationWorkflowAction.value = null
+  applicationWorkflowComment.value = ''
 }
 
 async function submitPlanForm() {
@@ -1482,6 +1493,32 @@ onMounted(() => {
       :action-loading="applicationWorkflowActionSubmitting"
       @execute-action="handleViewingApplicationWorkflowAction"
     />
+
+    <el-dialog
+      v-model="applicationWorkflowCommentDialogVisible"
+      :title="pendingViewingApplicationWorkflowAction ? pendingViewingApplicationWorkflowAction.label : '审批处理'"
+      width="640px"
+      destroy-on-close
+      @closed="resetApplicationWorkflowCommentDialog"
+    >
+      <div class="workflow-comment-dialog">
+        <p class="workflow-comment-dialog__hint">请输入审批意见，可留空后直接提交。</p>
+        <el-input
+          v-model="applicationWorkflowComment"
+          type="textarea"
+          :rows="5"
+          maxlength="500"
+          show-word-limit
+          placeholder="审批意见（可选）"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="applicationWorkflowCommentDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="applicationWorkflowActionSubmitting" @click="submitApplicationWorkflowCommentDialog">
+          {{ pendingViewingApplicationWorkflowAction?.label || '确认' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -1606,6 +1643,17 @@ onMounted(() => {
 .delete-application-dialog {
   display: grid;
   gap: 16px;
+}
+
+.workflow-comment-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-comment-dialog__hint {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
 }
 
 .delete-application-dialog__lead {
