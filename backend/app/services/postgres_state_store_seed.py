@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,6 +16,23 @@ logger = logging.getLogger(__name__)
 
 
 class PostgresStateStoreSeedMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
+    @staticmethod
+    def _execute_dynamic(
+        cur: psycopg.Cursor[Any],
+        query: str,
+        params: Any | None = None,
+    ) -> None:
+        cur.execute(cast(Any, query), params)
+
+    @staticmethod
+    def _require_scalar_row(row: Any, context: str) -> Any:
+        if row is None:
+            raise RuntimeError(f"Expected row for {context}")
+        return row
+
     def _seed_relational_tables(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
         self._seed_users_and_roles(cur, state)
         advisor_map = self._seed_advisors(cur, state)
@@ -394,7 +411,8 @@ class PostgresStateStoreSeedMixin:
                 item.get("material_list_attachment"),
                 item.get("supplementary_profile"),
             )
-            cur.execute(
+            self._execute_dynamic(
+                cur,
                 f"INSERT INTO dtlms_recruitment_applications ({', '.join(application_columns)}, is_deleted) VALUES ({', '.join(['%s'] * len(application_columns))}, FALSE)",
                 application_values,
             )
@@ -416,7 +434,8 @@ class PostgresStateStoreSeedMixin:
                 "INSERT INTO dtlms_reviewer_assignments (application_id, reviewer_username, reviewer_role, assignment_status) VALUES (%s, %s, %s, %s) RETURNING id",
                 (int(item["id"]), reviewer, "reviewer", "assigned"),
             )
-            reviewer_assignment_id = int(cur.fetchone()[0])
+            reviewer_assignment_row = self._require_scalar_row(cur.fetchone(), "reviewer assignment id")
+            reviewer_assignment_id = int(reviewer_assignment_row[0])
             cur.execute(
                 "INSERT INTO dtlms_material_scores (application_id, reviewer_assignment_id, material_score, recommendation_text) VALUES (%s, %s, %s, %s)",
                 (int(item["id"]), reviewer_assignment_id, item.get("final_score"), "按模拟数据导入"),
@@ -439,7 +458,8 @@ class PostgresStateStoreSeedMixin:
                         "completed" if item.get("final_score") is not None else "scheduled",
                     ),
                 )
-                schedule_id = int(cur.fetchone()[0])
+                schedule_row = self._require_scalar_row(cur.fetchone(), "interview schedule id")
+                schedule_id = int(schedule_row[0])
                 cur.execute(
                     """
                     INSERT INTO dtlms_interview_scores (

@@ -18,24 +18,13 @@ class Settings(BaseSettings):
     docs_url: str = "/docs"
     openapi_url: str = "/openapi.json"
 
-    # smtp_enabled: bool = True
-    # smtp_host: str = "smtp.feishu.cn"
-    # smtp_port: int = 465
-    # smtp_username: str = "lkai@cotong.com"
-    # smtp_password: str = "3uXpbNqMKJKouCWn"
-    # smtp_from_email: str = "lkai@cotong.com"
-    # smtp_from_name: str = "博士生生命周期管理系统"
-    # smtp_use_tls: bool = False
-    # smtp_use_ssl: bool = True
-    # smtp_timeout_seconds: int = 15
-
-    smtp_enabled: bool = True
-    smtp_host: str = "smtp.pjlab.org.cn"
+    smtp_enabled: bool = False
+    smtp_host: str = ""
     smtp_port: int = 465
-    smtp_username: str = "admissions@pjlab.org.cn"
-    smtp_password: str = "a63txE9VyP2JfNKy"
-    smtp_from_email: str = "admissions@pjlab.org.cn"
-    smtp_from_name: str = "AI LAB 招生"
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = ""
     smtp_use_tls: bool = False
     smtp_use_ssl: bool = True
     smtp_timeout_seconds: int = 120
@@ -72,7 +61,7 @@ class Settings(BaseSettings):
     portal_admissions_info_url: str = "https://www.shlab.org.cn"
 
     model_config = SettingsConfigDict(
-        env_file=(BACKEND_DIR / ".env", BACKEND_DIR / ".env.local"),
+        env_file=(BACKEND_DIR / ".env.local", BACKEND_DIR / ".env"),
         extra="ignore",
         case_sensitive=False,
     )

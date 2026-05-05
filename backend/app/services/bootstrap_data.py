@@ -1,6 +1,6 @@
 from app.schemas.dashboard import DashboardAlert, DashboardOverview, MetricCard
 from app.schemas.recruitment import RecruitPlanSummary, RecruitWorkbench
-from app.schemas.student import StudentLifecycleBoard, StudentSummary
+from app.schemas.student import StudentLifecycleBoard, StudentStateItem, StudentSummary
 from app.schemas.training import DegreeWorkbench, TrainingTask, TrainingWorkbench
 
 
@@ -25,6 +25,11 @@ def build_dashboard_overview() -> DashboardOverview:
             MetricCard(label="答辩流程中", value="34", target="学位季", trend="盲审待办8人", status="healthy"),
             MetricCard(label="查重一次通过", value="91%", target=">=90%", trend="维持高位", status="healthy"),
             MetricCard(label="正式授位通过率", value="96%", target=">=95%", trend="稳态运行", status="healthy"),
+        ],
+        workflow_metrics=[
+            MetricCard(label="流程待办总量", value="27", target="当日清零", trend="兼容表已切换", status="attention"),
+            MetricCard(label="审批按时完成率", value="89%", target=">=90%", trend="接近目标", status="warning"),
+            MetricCard(label="驳回重提闭环", value="100%", target="100%", trend="主链可追踪", status="healthy"),
         ],
         alerts=[
             DashboardAlert(level="high", title="导师超期未审科研报告", owner="培养管理", due_text="3名导师超过14天"),
@@ -64,10 +69,10 @@ def build_student_board() -> StudentLifecycleBoard:
             StudentSummary(student_no="D20230018", full_name="张乐之", status="学位论文阶段", advisor_name="袁野", team_name="数据智能团队"),
         ],
         state_distribution=[
-            {"label": "在校", "count": 182},
-            {"label": "实习中", "count": 43},
-            {"label": "请假中", "count": 8},
-            {"label": "答辩阶段", "count": 34},
+            StudentStateItem(label="在校", count=182),
+            StudentStateItem(label="实习中", count=43),
+            StudentStateItem(label="请假中", count=8),
+            StudentStateItem(label="答辩阶段", count=34),
         ],
     )
 

@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 class PostgresStateStoreQueryMixin:
+    if TYPE_CHECKING:
+        def ensure_schema(self) -> None: ...
+
+        def _connect(self, database_name: str, autocommit: bool = False) -> psycopg.Connection[Any]: ...
+
+        def __getattr__(self, name: str) -> Any: ...
+
     @staticmethod
     def _resolve_attachment_name(
         attachment_rows: list[dict[str, Any]],
@@ -38,6 +45,26 @@ class PostgresStateStoreQueryMixin:
         if fallback_url:
             return Path(str(fallback_url)).name or None
         return None
+
+    @staticmethod
+    def _execute_dynamic(
+        cur: psycopg.Cursor[Any],
+        query: str,
+        params: Any | None = None,
+    ) -> None:
+        cur.execute(cast(Any, query), params)
+
+    @staticmethod
+    def _require_row(row: Any, context: str) -> dict[str, Any]:
+        if row is None:
+            raise RuntimeError(f"Expected row for {context}")
+        return dict(cast(dict[str, Any], row))
+
+    @staticmethod
+    def _require_scalar_row(row: Any, context: str) -> Any:
+        if row is None:
+            raise RuntimeError(f"Expected row for {context}")
+        return row
 
     def get_recruitment_application_detail(self, application_id: int) -> dict[str, Any] | None:
         self.ensure_schema()
@@ -463,7 +490,7 @@ class PostgresStateStoreQueryMixin:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT DISTINCT ht.id_
+                    SELECT ht.id_
                     FROM dtlms_wf_hi_taskinst ht
                     ORDER BY ht.start_time_ DESC, ht.id_ DESC
                     """
@@ -731,23 +758,31 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_wf_hi_taskinst ht
                     JOIN dtlms_wf_re_procdef pd ON pd.id_ = ht.proc_def_id_
                     LEFT JOIN LATERAL (
                         SELECT
-                            MAX(CASE WHEN hv.name_ = 'workflowName' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS workflow_name,
-                            MAX(CASE WHEN hv.name_ = 'businessModule' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS business_module,
-                            MAX(CASE WHEN hv.name_ = 'applicantName' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS applicant_name,
-                            MAX(CASE WHEN hv.name_ = 'currentHandler' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS current_handler,
-                            MAX(CASE WHEN hv.name_ = 'currentNode' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS current_node,
-                            MAX(CASE WHEN hv.name_ = 'taskStatus' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS task_status,
-                            MAX(CASE WHEN hv.name_ = 'latestComment' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS latest_comment,
-                            MAX(CASE WHEN hv.name_ = 'formSummary' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS form_summary
-                        FROM dtlms_wf_hi_varinst hv
-                        WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            MAX(CASE WHEN latest_var.name_ = 'workflowName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS workflow_name,
+                            MAX(CASE WHEN latest_var.name_ = 'businessModule' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS business_module,
+                            MAX(CASE WHEN latest_var.name_ = 'applicantName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS applicant_name,
+                            MAX(CASE WHEN latest_var.name_ = 'currentHandler' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_handler,
+                            MAX(CASE WHEN latest_var.name_ = 'currentNode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_node,
+                            MAX(CASE WHEN latest_var.name_ = 'taskStatus' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS task_status,
+                            MAX(CASE WHEN latest_var.name_ = 'latestComment' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS latest_comment,
+                            MAX(CASE WHEN latest_var.name_ = 'formSummary' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS form_summary
+                        FROM (
+                            SELECT DISTINCT ON (hv.name_)
+                                hv.name_,
+                                hv.text_value_,
+                                hv.json_value_
+                            FROM dtlms_wf_hi_varinst hv
+                            WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            ORDER BY hv.name_, hv.last_updated_time_ DESC, hv.id_ DESC
+                        ) latest_var
                     ) vars ON TRUE
                     WHERE {where_sql}
                     """,
@@ -756,7 +791,8 @@ class PostgresStateStoreQueryMixin:
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         ht.id_ AS task_key,
@@ -788,21 +824,28 @@ class PostgresStateStoreQueryMixin:
                     JOIN dtlms_wf_re_procdef pd ON pd.id_ = ht.proc_def_id_
                     LEFT JOIN LATERAL (
                         SELECT
-                            MAX(CASE WHEN hv.name_ = 'workflowName' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS workflow_name,
-                            MAX(CASE WHEN hv.name_ = 'businessModule' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS business_module,
-                            MAX(CASE WHEN hv.name_ = 'applicantName' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS applicant_name,
-                            MAX(CASE WHEN hv.name_ = 'currentHandler' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS current_handler,
-                            MAX(CASE WHEN hv.name_ = 'currentNode' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS current_node,
-                            MAX(CASE WHEN hv.name_ = 'taskStatus' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS task_status,
-                            MAX(CASE WHEN hv.name_ = 'latestComment' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS latest_comment,
-                            MAX(CASE WHEN hv.name_ = 'formSummary' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS form_summary,
-                            MAX(CASE WHEN hv.name_ = 'flowCode' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS flow_code,
-                            MAX(CASE WHEN hv.name_ = 'nodeKey' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS node_key,
-                            MAX(CASE WHEN hv.name_ = 'entityId' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS entity_id,
-                            MAX(CASE WHEN hv.name_ = 'candidateGroups' THEN hv.json_value_ END) AS candidate_groups,
-                            MAX(CASE WHEN hv.name_ = 'historyEntries' THEN hv.json_value_ END) AS history_entries
-                        FROM dtlms_wf_hi_varinst hv
-                        WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            MAX(CASE WHEN latest_var.name_ = 'workflowName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS workflow_name,
+                            MAX(CASE WHEN latest_var.name_ = 'businessModule' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS business_module,
+                            MAX(CASE WHEN latest_var.name_ = 'applicantName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS applicant_name,
+                            MAX(CASE WHEN latest_var.name_ = 'currentHandler' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_handler,
+                            MAX(CASE WHEN latest_var.name_ = 'currentNode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_node,
+                            MAX(CASE WHEN latest_var.name_ = 'taskStatus' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS task_status,
+                            MAX(CASE WHEN latest_var.name_ = 'latestComment' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS latest_comment,
+                            MAX(CASE WHEN latest_var.name_ = 'formSummary' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS form_summary,
+                            MAX(CASE WHEN latest_var.name_ = 'flowCode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS flow_code,
+                            MAX(CASE WHEN latest_var.name_ = 'nodeKey' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS node_key,
+                            MAX(CASE WHEN latest_var.name_ = 'entityId' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS entity_id,
+                            MAX(CASE WHEN latest_var.name_ = 'candidateGroups' THEN latest_var.json_value_::text END)::jsonb AS candidate_groups,
+                            MAX(CASE WHEN latest_var.name_ = 'historyEntries' THEN latest_var.json_value_::text END)::jsonb AS history_entries
+                        FROM (
+                            SELECT DISTINCT ON (hv.name_)
+                                hv.name_,
+                                hv.text_value_,
+                                hv.json_value_
+                            FROM dtlms_wf_hi_varinst hv
+                            WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            ORDER BY hv.name_, hv.last_updated_time_ DESC, hv.id_ DESC
+                        ) latest_var
                     ) vars ON TRUE
                     WHERE {where_sql}
                     ORDER BY ht.start_time_ DESC, ht.id_ DESC
@@ -849,21 +892,28 @@ class PostgresStateStoreQueryMixin:
                     JOIN dtlms_wf_re_procdef pd ON pd.id_ = ht.proc_def_id_
                     LEFT JOIN LATERAL (
                         SELECT
-                            MAX(CASE WHEN hv.name_ = 'workflowName' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS workflow_name,
-                            MAX(CASE WHEN hv.name_ = 'businessModule' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS business_module,
-                            MAX(CASE WHEN hv.name_ = 'applicantName' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS applicant_name,
-                            MAX(CASE WHEN hv.name_ = 'currentHandler' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS current_handler,
-                            MAX(CASE WHEN hv.name_ = 'currentNode' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS current_node,
-                            MAX(CASE WHEN hv.name_ = 'taskStatus' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS task_status,
-                            MAX(CASE WHEN hv.name_ = 'latestComment' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS latest_comment,
-                            MAX(CASE WHEN hv.name_ = 'formSummary' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS form_summary,
-                            MAX(CASE WHEN hv.name_ = 'flowCode' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS flow_code,
-                            MAX(CASE WHEN hv.name_ = 'nodeKey' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS node_key,
-                            MAX(CASE WHEN hv.name_ = 'entityId' THEN COALESCE(hv.text_value_, hv.json_value_->>'value') END) AS entity_id,
-                            MAX(CASE WHEN hv.name_ = 'candidateGroups' THEN hv.json_value_ END) AS candidate_groups,
-                            MAX(CASE WHEN hv.name_ = 'historyEntries' THEN hv.json_value_ END) AS history_entries
-                        FROM dtlms_wf_hi_varinst hv
-                        WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            MAX(CASE WHEN latest_var.name_ = 'workflowName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS workflow_name,
+                            MAX(CASE WHEN latest_var.name_ = 'businessModule' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS business_module,
+                            MAX(CASE WHEN latest_var.name_ = 'applicantName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS applicant_name,
+                            MAX(CASE WHEN latest_var.name_ = 'currentHandler' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_handler,
+                            MAX(CASE WHEN latest_var.name_ = 'currentNode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_node,
+                            MAX(CASE WHEN latest_var.name_ = 'taskStatus' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS task_status,
+                            MAX(CASE WHEN latest_var.name_ = 'latestComment' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS latest_comment,
+                            MAX(CASE WHEN latest_var.name_ = 'formSummary' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS form_summary,
+                            MAX(CASE WHEN latest_var.name_ = 'flowCode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS flow_code,
+                            MAX(CASE WHEN latest_var.name_ = 'nodeKey' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS node_key,
+                            MAX(CASE WHEN latest_var.name_ = 'entityId' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS entity_id,
+                            MAX(CASE WHEN latest_var.name_ = 'candidateGroups' THEN latest_var.json_value_::text END)::jsonb AS candidate_groups,
+                            MAX(CASE WHEN latest_var.name_ = 'historyEntries' THEN latest_var.json_value_::text END)::jsonb AS history_entries
+                        FROM (
+                            SELECT DISTINCT ON (hv.name_)
+                                hv.name_,
+                                hv.text_value_,
+                                hv.json_value_
+                            FROM dtlms_wf_hi_varinst hv
+                            WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            ORDER BY hv.name_, hv.last_updated_time_ DESC, hv.id_ DESC
+                        ) latest_var
                     ) vars ON TRUE
                     WHERE ht.id_ = %s
                     LIMIT 1
@@ -914,7 +964,8 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_training_plans tp
@@ -927,7 +978,8 @@ class PostgresStateStoreQueryMixin:
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         tp.id,
@@ -988,7 +1040,7 @@ class PostgresStateStoreQueryMixin:
                     FROM dtlms_recruitment_plans rp
                     WHERE {where_sql}
                 """
-                cur.execute(count_sql, params)
+                self._execute_dynamic(cur, count_sql, params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
@@ -1008,7 +1060,7 @@ class PostgresStateStoreQueryMixin:
                     ORDER BY rp.id DESC
                     LIMIT %s OFFSET %s
                 """
-                cur.execute(page_sql, [*params, page_size, offset])
+                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
                 return [self._normalize_recruitment_plan_row(dict(row)) for row in cur.fetchall()], total
 
     def list_scientific_reports_page(
@@ -1050,7 +1102,8 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_scientific_reports sr
@@ -1063,7 +1116,8 @@ class PostgresStateStoreQueryMixin:
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         sr.id,
@@ -1129,7 +1183,8 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_outbound_studies os
@@ -1142,7 +1197,8 @@ class PostgresStateStoreQueryMixin:
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         os.id,
@@ -1215,7 +1271,7 @@ class PostgresStateStoreQueryMixin:
                     LEFT JOIN dtlms_teams t ON t.id = s.team_id
                     WHERE {where_sql}
                 """
-                cur.execute(count_sql, params)
+                self._execute_dynamic(cur, count_sql, params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
@@ -1239,7 +1295,7 @@ class PostgresStateStoreQueryMixin:
                     ORDER BY s.id DESC
                     LIMIT %s OFFSET %s
                 """
-                cur.execute(page_sql, [*params, page_size, offset])
+                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
                 return [self._normalize_student_row(dict(row)) for row in cur.fetchall()], total
 
     def list_registered_portal_students_page(
@@ -1302,7 +1358,7 @@ class PostgresStateStoreQueryMixin:
                     {latest_application_sql}
                     WHERE {where_sql}
                 """
-                cur.execute(count_sql, params)
+                self._execute_dynamic(cur, count_sql, params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
@@ -1330,7 +1386,7 @@ class PostgresStateStoreQueryMixin:
                     ORDER BY ps.created_at DESC, ps.id DESC
                     LIMIT %s OFFSET %s
                 """
-                cur.execute(page_sql, [*params, page_size, offset])
+                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
                 return [self._normalize_registered_portal_student_row(dict(row)) for row in cur.fetchall()], total
 
     def list_theses_page(
@@ -1392,7 +1448,8 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_theses t
@@ -1404,7 +1461,8 @@ class PostgresStateStoreQueryMixin:
                 )
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         t.id,
@@ -1476,7 +1534,8 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_thesis_reviews tr
@@ -1487,7 +1546,8 @@ class PostgresStateStoreQueryMixin:
                 )
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         tr.id,
@@ -1544,14 +1604,16 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"SELECT COUNT(*) AS total FROM dtlms_operation_logs WHERE {where_sql}",
                     params,
                 )
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT id, created_at, operator_username, module_name, entity_name, entity_id, action, result, new_value
                     FROM dtlms_operation_logs
@@ -1614,7 +1676,7 @@ class PostgresStateStoreQueryMixin:
                     LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
                     WHERE {where_sql}
                 """
-                cur.execute(count_sql, params)
+                self._execute_dynamic(cur, count_sql, params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
@@ -1652,7 +1714,7 @@ class PostgresStateStoreQueryMixin:
                     ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
                     LIMIT %s OFFSET %s
                 """
-                cur.execute(page_sql, [*params, page_size, offset])
+                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
                 return [self._normalize_recruitment_application_row(dict(row)) for row in cur.fetchall()], total
 
     def list_centers_page(
@@ -1705,7 +1767,7 @@ class PostgresStateStoreQueryMixin:
                     LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
                     WHERE {where_sql}
                 """
-                cur.execute(count_sql, params)
+                self._execute_dynamic(cur, count_sql, params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
@@ -1751,7 +1813,7 @@ class PostgresStateStoreQueryMixin:
                     ORDER BY t.id DESC
                     LIMIT %s OFFSET %s
                 """
-                cur.execute(page_sql, [*params, page_size, offset])
+                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
                 return [self._normalize_center_row(dict(row)) for row in cur.fetchall()], total
 
     def list_active_advisors(self) -> list[dict[str, Any]]:
@@ -1834,14 +1896,16 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"SELECT COUNT(*) AS total FROM dtlms_data_sync_logs WHERE {where_sql}",
                     params,
                 )
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT id, source_system, target_system, sync_status, record_count, created_at, failure_reason
                     FROM dtlms_data_sync_logs
@@ -1881,10 +1945,11 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) AS total FROM dtlms_roles r WHERE {where_sql}", params)
+                self._execute_dynamic(cur, f"SELECT COUNT(*) AS total FROM dtlms_roles r WHERE {where_sql}", params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         r.id,
@@ -1929,10 +1994,11 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) AS total FROM dtlms_audit_policies WHERE {where_sql}", params)
+                self._execute_dynamic(cur, f"SELECT COUNT(*) AS total FROM dtlms_audit_policies WHERE {where_sql}", params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"SELECT id, item, policy, status FROM dtlms_audit_policies WHERE {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s",
                     [*params, page_size, offset],
                 )
@@ -1964,10 +2030,11 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) AS total FROM dtlms_integrations WHERE {where_sql}", params)
+                self._execute_dynamic(cur, f"SELECT COUNT(*) AS total FROM dtlms_integrations WHERE {where_sql}", params)
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"SELECT id, name, direction, cadence, status, owner FROM dtlms_integrations WHERE {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s",
                     [*params, page_size, offset],
                 )
@@ -2014,7 +2081,8 @@ class PostgresStateStoreQueryMixin:
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_users u
@@ -2028,7 +2096,8 @@ class PostgresStateStoreQueryMixin:
                 total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     SELECT
                         u.id,
@@ -2073,7 +2142,7 @@ class PostgresStateStoreQueryMixin:
                     GROUP BY t.id
                     ORDER BY t.id DESC
                 """
-                cur.execute(sql_text, params)
+                self._execute_dynamic(cur, sql_text, params)
                 return [self._normalize_dict_row(dict(row) | {"data_count": int(row["data_count"])} ) for row in cur.fetchall()]
 
     def list_dict_data(self, keyword: str | None = None, dict_type: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
@@ -2099,7 +2168,7 @@ class PostgresStateStoreQueryMixin:
                     WHERE {' AND '.join(where_clauses)}
                     ORDER BY d.dict_type ASC, d.sort_order ASC, d.id ASC
                 """
-                cur.execute(sql_text, params)
+                self._execute_dynamic(cur, sql_text, params)
                 return [self._normalize_dict_row(dict(row)) for row in cur.fetchall()]
 
     def list_dict_options(self, dict_type: str) -> list[dict[str, Any]]:
@@ -2134,7 +2203,7 @@ class PostgresStateStoreQueryMixin:
                     """,
                     (payload["dict_name"], payload["dict_type"], payload["status"], payload.get("remark")),
                 )
-                record = self._normalize_dict_row(dict(cur.fetchone()))
+                record = self._normalize_dict_row(self._require_row(cur.fetchone(), "create_dict_type"))
             conn.commit()
         return record | {"data_count": 0}
 
@@ -2162,7 +2231,7 @@ class PostgresStateStoreQueryMixin:
                     """,
                     (payload["dict_name"], payload["dict_type"], payload["status"], payload.get("remark"), dict_type_id),
                 )
-                record = self._normalize_dict_row(dict(cur.fetchone()))
+                record = self._normalize_dict_row(self._require_row(cur.fetchone(), "update_dict_type"))
                 if current["dict_type"] != payload["dict_type"]:
                     cur.execute(
                         "UPDATE dtlms_dict_data SET dict_type = %s, updated_at = CURRENT_TIMESTAMP WHERE dict_type_id = %s AND is_deleted = FALSE",
@@ -2171,7 +2240,7 @@ class PostgresStateStoreQueryMixin:
                 cur.execute("SELECT COUNT(*) AS count FROM dtlms_dict_data WHERE dict_type_id = %s AND is_deleted = FALSE", (dict_type_id,))
                 count_row = cur.fetchone()
             conn.commit()
-        return record | {"data_count": int(count_row["count"])}
+        return record | {"data_count": int(self._require_row(count_row, "update_dict_type_count")["count"])}
 
     def delete_dict_type(self, dict_type_id: int) -> None:
         self.ensure_schema()
@@ -2181,7 +2250,7 @@ class PostgresStateStoreQueryMixin:
                 if not cur.fetchone():
                     raise KeyError(dict_type_id)
                 cur.execute("SELECT COUNT(*) FROM dtlms_dict_data WHERE dict_type_id = %s AND is_deleted = FALSE", (dict_type_id,))
-                if int(cur.fetchone()[0]) > 0:
+                if int(self._require_scalar_row(cur.fetchone(), "delete_dict_type_count")[0]) > 0:
                     raise ValueError("Dict type still has dict data")
                 cur.execute("UPDATE dtlms_dict_types SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (dict_type_id,))
             conn.commit()
@@ -2222,7 +2291,7 @@ class PostgresStateStoreQueryMixin:
                         payload.get("remark"),
                     ),
                 )
-                record = self._normalize_dict_row(dict(cur.fetchone()))
+                record = self._normalize_dict_row(self._require_row(cur.fetchone(), "create_dict_data"))
             conn.commit()
         return record | {"dict_name": dict_type_row["dict_name"]}
 
@@ -2276,7 +2345,7 @@ class PostgresStateStoreQueryMixin:
                         dict_data_id,
                     ),
                 )
-                record = self._normalize_dict_row(dict(cur.fetchone()))
+                record = self._normalize_dict_row(self._require_row(cur.fetchone(), "update_dict_data"))
             conn.commit()
         return record | {"dict_name": dict_type_row["dict_name"]}
 

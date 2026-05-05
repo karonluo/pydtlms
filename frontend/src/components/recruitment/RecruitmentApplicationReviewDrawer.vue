@@ -33,7 +33,6 @@ const applicationDetailSections: Array<{ title: string; fields: Array<{ label: s
     title: '基础信息',
     fields: [
       { label: '业务编号', key: 'business_key' },
-      { label: '轮次', key: 'review_round' },
       { label: '姓名', key: 'student_name' },
       { label: '性别', key: 'gender' },
       { label: '电话', key: 'phone_number' },

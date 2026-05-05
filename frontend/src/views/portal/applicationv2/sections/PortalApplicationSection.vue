@@ -15,6 +15,7 @@ defineProps<{
     <div class="toolbar-card">
       <div>
         <strong>研究领域选择</strong>
+        <span>因2027级指标分配尚未最终确定，导师名单将持续迭代，如有疑问可发送邮件至 admissions@pjlab.org.cn 咨询。</span>
       </div>
     </div>
 

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .management_service_shared import *
 
 
 class RuntimeManagementStoreCoreMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
     def _create_postgres_store(self):
         raise NotImplementedError
 

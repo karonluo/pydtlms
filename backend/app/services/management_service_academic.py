@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .management_service_shared import *
 
 
 class RuntimeManagementStoreAcademicMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
     def get_training_workbench(self) -> TrainingWorkbench:
         outbound_counter = Counter(item["approval_status"] for item in self._list("outbound_studies"))
         return TrainingWorkbench(

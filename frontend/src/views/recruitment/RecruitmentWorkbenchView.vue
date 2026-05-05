@@ -1106,8 +1106,6 @@ onMounted(() => {
           <el-table-column prop="first_choice" label="第一志愿" min-width="106" show-overflow-tooltip />
           <el-table-column prop="intended_advisor_name" label="意向导师" width="92" show-overflow-tooltip />
           <el-table-column prop="phone_number" label="电话" width="120" show-overflow-tooltip />
-          <el-table-column prop="graduation_school" label="本科院校" min-width="124" show-overflow-tooltip />
-          <el-table-column prop="intended_field" label="研究方向" min-width="108" show-overflow-tooltip />
           <el-table-column label="材料状态" width="100">
             <template #default="scope">
               <el-tag :type="materialTagType(scope.row.material_status)">{{ scope.row.material_status }}</el-tag>
@@ -1189,9 +1187,6 @@ onMounted(() => {
             </el-form-item>
             <el-form-item label="业务编号">
               <el-input :model-value="applicationForm.business_key || '保存后自动生成'" disabled />
-            </el-form-item>
-            <el-form-item label="轮次">
-              <el-input v-model="applicationForm.review_round" placeholder="如 2026 秋季第一轮" />
             </el-form-item>
             <el-form-item label="姓名" prop="student_name">
               <el-input v-model="applicationForm.student_name" placeholder="请输入姓名" />

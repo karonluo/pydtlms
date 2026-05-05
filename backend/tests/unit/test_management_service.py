@@ -2014,6 +2014,18 @@ def test_portal_application_upsert_requires_submission_declaration() -> None:
         PortalApplicationUpsert.model_validate(payload)
 
 
+def test_portal_application_upsert_rejects_missing_english_certificate_attachment() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["english_proficiencies"][0]["certificate_attachment_url"] = ""
+
+    with pytest.raises(ValidationError, match="英语能力1必须上传英语证明附件"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
 def test_portal_application_upsert_rejects_personal_statement_over_1200_chars() -> None:
     from pydantic import ValidationError
 

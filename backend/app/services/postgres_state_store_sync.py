@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 
 
 class PostgresStateStoreSyncMixin:
+    if TYPE_CHECKING:
+        def ensure_schema(self) -> None: ...
+
+        def _connect(self, database_name: str, autocommit: bool = False) -> psycopg.Connection[Any]: ...
+
+        def __getattr__(self, name: str) -> Any: ...
+
+    @staticmethod
+    def _execute_dynamic(
+        cur: psycopg.Cursor[Any],
+        query: str,
+        params: Any | None = None,
+    ) -> None:
+        cur.execute(cast(Any, query), params)
+
     def update_runtime_system_user(self, user_id: int, payload: dict[str, Any]) -> None:
         del user_id
         self.sync_system_user(payload, None, None)
@@ -1301,7 +1316,8 @@ class PostgresStateStoreSyncMixin:
                     application_payload.get("updated_at") or application_payload.get("applied_at") or portal_student_payload.get("updated_at"),
                 )
                 update_columns = [column for column in application_columns if column not in {"id", "created_at"}]
-                cur.execute(
+                self._execute_dynamic(
+                    cur,
                     f"""
                     INSERT INTO dtlms_recruitment_applications ({', '.join(application_columns)}, is_deleted)
                     VALUES ({', '.join(['%s'] * len(application_columns))}, FALSE)
@@ -1519,7 +1535,7 @@ class PostgresStateStoreSyncMixin:
                         achievement.get("award_certificate_attachment_name"),
                     )
 
-                personal_statement = draft.get("personal_statement") if isinstance(draft.get("personal_statement"), dict) else {}
+                personal_statement: dict[str, Any] = cast(dict[str, Any], draft.get("personal_statement")) if isinstance(draft.get("personal_statement"), dict) else {}
                 if personal_statement:
                     cur.execute(
                         """

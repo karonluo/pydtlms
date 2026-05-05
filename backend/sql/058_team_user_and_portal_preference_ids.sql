@@ -1,27 +1,162 @@
 ALTER TABLE IF EXISTS dtlms_advisors
-    ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES dtlms_users(id);
+  ADD COLUMN IF NOT EXISTS user_id BIGINT;
 
 ALTER TABLE IF EXISTS dtlms_teams
-    ADD COLUMN IF NOT EXISTS lead_user_id BIGINT REFERENCES dtlms_users(id);
+  ADD COLUMN IF NOT EXISTS lead_user_id BIGINT;
 
 ALTER TABLE IF EXISTS dtlms_team_advisors
-    ADD COLUMN IF NOT EXISTS advisor_user_id BIGINT REFERENCES dtlms_users(id);
+  ADD COLUMN IF NOT EXISTS advisor_user_id BIGINT;
 
 ALTER TABLE IF EXISTS dtlms_portal_students
-    ADD COLUMN IF NOT EXISTS selected_team_id BIGINT REFERENCES dtlms_teams(id),
-    ADD COLUMN IF NOT EXISTS selected_advisor_user_id BIGINT REFERENCES dtlms_users(id);
+  ADD COLUMN IF NOT EXISTS selected_team_id BIGINT,
+  ADD COLUMN IF NOT EXISTS selected_advisor_user_id BIGINT;
 
 ALTER TABLE IF EXISTS dtlms_recruitment_applications
-    ADD COLUMN IF NOT EXISTS first_choice_team_id BIGINT REFERENCES dtlms_teams(id),
-    ADD COLUMN IF NOT EXISTS second_choice_team_id BIGINT REFERENCES dtlms_teams(id),
-    ADD COLUMN IF NOT EXISTS intended_advisor_user_id BIGINT REFERENCES dtlms_users(id);
+  ADD COLUMN IF NOT EXISTS first_choice_team_id BIGINT,
+  ADD COLUMN IF NOT EXISTS second_choice_team_id BIGINT,
+  ADD COLUMN IF NOT EXISTS intended_advisor_user_id BIGINT;
 
 ALTER TABLE IF EXISTS dtlms_portal_application_preferences
-    ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES dtlms_teams(id),
-    ADD COLUMN IF NOT EXISTS advisor_user_id BIGINT REFERENCES dtlms_users(id);
+  ADD COLUMN IF NOT EXISTS team_id BIGINT,
+  ADD COLUMN IF NOT EXISTS advisor_user_id BIGINT;
 
 ALTER TABLE IF EXISTS dtlms_students
-    ADD COLUMN IF NOT EXISTS portal_student_id BIGINT REFERENCES dtlms_portal_students(id);
+  ADD COLUMN IF NOT EXISTS portal_student_id BIGINT;
+
+DO $$
+BEGIN
+  IF to_regclass('public.dtlms_advisors') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_advisors_user_id'
+       AND conrelid = 'dtlms_advisors'::regclass
+     ) THEN
+    ALTER TABLE dtlms_advisors
+      ADD CONSTRAINT fk_dtlms_advisors_user_id
+      FOREIGN KEY (user_id) REFERENCES dtlms_users(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_teams') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_teams_lead_user_id'
+       AND conrelid = 'dtlms_teams'::regclass
+     ) THEN
+    ALTER TABLE dtlms_teams
+      ADD CONSTRAINT fk_dtlms_teams_lead_user_id
+      FOREIGN KEY (lead_user_id) REFERENCES dtlms_users(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_team_advisors') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_team_advisors_advisor_user_id'
+       AND conrelid = 'dtlms_team_advisors'::regclass
+     ) THEN
+    ALTER TABLE dtlms_team_advisors
+      ADD CONSTRAINT fk_dtlms_team_advisors_advisor_user_id
+      FOREIGN KEY (advisor_user_id) REFERENCES dtlms_users(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_portal_students') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_portal_students_selected_team_id'
+       AND conrelid = 'dtlms_portal_students'::regclass
+     ) THEN
+    ALTER TABLE dtlms_portal_students
+      ADD CONSTRAINT fk_dtlms_portal_students_selected_team_id
+      FOREIGN KEY (selected_team_id) REFERENCES dtlms_teams(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_portal_students') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_portal_students_selected_advisor_user_id'
+       AND conrelid = 'dtlms_portal_students'::regclass
+     ) THEN
+    ALTER TABLE dtlms_portal_students
+      ADD CONSTRAINT fk_dtlms_portal_students_selected_advisor_user_id
+      FOREIGN KEY (selected_advisor_user_id) REFERENCES dtlms_users(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_recruitment_applications') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_recruitment_applications_first_choice_team_id'
+       AND conrelid = 'dtlms_recruitment_applications'::regclass
+     ) THEN
+    ALTER TABLE dtlms_recruitment_applications
+      ADD CONSTRAINT fk_dtlms_recruitment_applications_first_choice_team_id
+      FOREIGN KEY (first_choice_team_id) REFERENCES dtlms_teams(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_recruitment_applications') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_recruitment_applications_second_choice_team_id'
+       AND conrelid = 'dtlms_recruitment_applications'::regclass
+     ) THEN
+    ALTER TABLE dtlms_recruitment_applications
+      ADD CONSTRAINT fk_dtlms_recruitment_applications_second_choice_team_id
+      FOREIGN KEY (second_choice_team_id) REFERENCES dtlms_teams(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_recruitment_applications') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_recruitment_applications_intended_advisor_user_id'
+       AND conrelid = 'dtlms_recruitment_applications'::regclass
+     ) THEN
+    ALTER TABLE dtlms_recruitment_applications
+      ADD CONSTRAINT fk_dtlms_recruitment_applications_intended_advisor_user_id
+      FOREIGN KEY (intended_advisor_user_id) REFERENCES dtlms_users(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_portal_application_preferences') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_portal_application_preferences_team_id'
+       AND conrelid = 'dtlms_portal_application_preferences'::regclass
+     ) THEN
+    ALTER TABLE dtlms_portal_application_preferences
+      ADD CONSTRAINT fk_dtlms_portal_application_preferences_team_id
+      FOREIGN KEY (team_id) REFERENCES dtlms_teams(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_portal_application_preferences') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_portal_application_preferences_advisor_user_id'
+       AND conrelid = 'dtlms_portal_application_preferences'::regclass
+     ) THEN
+    ALTER TABLE dtlms_portal_application_preferences
+      ADD CONSTRAINT fk_dtlms_portal_application_preferences_advisor_user_id
+      FOREIGN KEY (advisor_user_id) REFERENCES dtlms_users(id) NOT VALID;
+  END IF;
+
+  IF to_regclass('public.dtlms_students') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conname = 'fk_dtlms_students_portal_student_id'
+       AND conrelid = 'dtlms_students'::regclass
+     ) THEN
+    ALTER TABLE dtlms_students
+      ADD CONSTRAINT fk_dtlms_students_portal_student_id
+      FOREIGN KEY (portal_student_id) REFERENCES dtlms_portal_students(id) NOT VALID;
+  END IF;
+END $$;
 
 WITH portal_student_candidates AS (
     SELECT
@@ -582,6 +717,7 @@ SELECT ps.id
 FROM dtlms_portal_students AS ps
 WHERE BTRIM(COALESCE(ps.full_name, '')) IN ('联调考生', '邮件联调考生', '驳回联调考生')
   OR LOWER(BTRIM(COALESCE(ps.email, ''))) LIKE '%@example.com'
+  OR LOWER(BTRIM(COALESCE(ps.email, ''))) LIKE '%@mail.example.com'
    OR BTRIM(COALESCE(ps.phone_number, '')) IN ('13800009999', '13800009998')
    OR UPPER(BTRIM(COALESCE(ps.id_number, ''))) IN ('32000019990101123X', '32000019990101124X');
 
@@ -601,6 +737,7 @@ LEFT JOIN tmp_liaodiao_portal_students AS ps
 WHERE ps.portal_student_id IS NOT NULL
   OR BTRIM(COALESCE(ra.student_name, '')) IN ('联调考生', '邮件联调考生', '驳回联调考生')
   OR LOWER(BTRIM(COALESCE(ra.email, ''))) LIKE '%@example.com'
+  OR LOWER(BTRIM(COALESCE(ra.email, ''))) LIKE '%@mail.example.com'
    OR BTRIM(COALESCE(ra.phone_number, '')) IN ('13800009999', '13800009998')
    OR UPPER(BTRIM(COALESCE(ra.id_number, ''))) IN ('32000019990101123X', '32000019990101124X');
 
@@ -732,6 +869,7 @@ WHERE portal_student_id IN (SELECT portal_student_id FROM tmp_liaodiao_portal_st
 
 DELETE FROM dtlms_login_logs
 WHERE LOWER(BTRIM(COALESCE(username, ''))) LIKE '%@example.com'
+  OR LOWER(BTRIM(COALESCE(username, ''))) LIKE '%@mail.example.com'
    OR BTRIM(COALESCE(username, '')) IN (
      '13800009999',
      '13800009998'

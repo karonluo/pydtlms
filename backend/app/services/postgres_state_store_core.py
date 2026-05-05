@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 class PostgresStateStoreCoreMixin:
+    if TYPE_CHECKING:
+        def _seed_relational_tables(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None: ...
+
     CONNECT_TIMEOUT_SECONDS = 5
     SCHEMA_SENTINEL_REGCLASS = "public.dtlms_users"
     MIGRATION_REGISTRY_TABLE = "dtlms_schema_migrations"
@@ -92,13 +96,17 @@ class PostgresStateStoreCoreMixin:
             raise RuntimeError("No PostgreSQL connection candidates configured")
         raise last_error
 
+    @staticmethod
+    def _execute_dynamic(cur: psycopg.Cursor[Any], query: str, params: Any | None = None) -> None:
+        cur.execute(cast(Any, query), params)
+
     def ensure_database(self) -> None:
         with self._connect("postgres", autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (settings.postgres_db,))
                 exists = cur.fetchone() is not None
                 if not exists:
-                    cur.execute(f'CREATE DATABASE "{settings.postgres_db}"')
+                    self._execute_dynamic(cur, f'CREATE DATABASE "{settings.postgres_db}"')
 
     def ensure_schema(self) -> None:
         if self._schema_ready:
@@ -112,7 +120,7 @@ class PostgresStateStoreCoreMixin:
                     return
                 for file_name in self.SQL_FILES[1:]:
                     sql_text = (self._sql_dir / file_name).read_text(encoding="utf-8")
-                    cur.execute(sql_text)
+                    self._execute_dynamic(cur, sql_text)
         self._schema_ready = True
 
     def _apply_pending_migrations(self, cur: psycopg.Cursor[Any]) -> None:
@@ -125,7 +133,7 @@ class PostgresStateStoreCoreMixin:
             if file_name in applied_migrations:
                 continue
             sql_text = (self._sql_dir / file_name).read_text(encoding="utf-8")
-            cur.execute(sql_text)
+            self._execute_dynamic(cur, sql_text)
             self._mark_migration_applied(cur, file_name)
 
     def _ensure_migration_registry(self, cur: psycopg.Cursor[Any]) -> None:
@@ -139,7 +147,7 @@ class PostgresStateStoreCoreMixin:
         )
 
     def _get_applied_migrations(self, cur: psycopg.Cursor[Any]) -> set[str]:
-        cur.execute(f"SELECT file_name FROM {self.MIGRATION_REGISTRY_TABLE}")
+        self._execute_dynamic(cur, f"SELECT file_name FROM {self.MIGRATION_REGISTRY_TABLE}")
         return {str(row[0]) for row in cur.fetchall()}
 
     def _mark_migration_applied(self, cur: psycopg.Cursor[Any], file_name: str) -> None:
@@ -489,7 +497,7 @@ class PostgresStateStoreCoreMixin:
         return f"exec-{cls._workflow_id_slug(task_definition_key, 18)}-{cls._workflow_id_hash(process_instance_id, task_definition_key, 'execution', length=10)}"
 
     def _fetch_map(self, cur: psycopg.Cursor[Any], query: str) -> dict[str, Any]:
-        cur.execute(query)
+        self._execute_dynamic(cur, query)
         rows = cur.fetchall()
         if not rows:
             return {}
@@ -613,7 +621,7 @@ class PostgresStateStoreCoreMixin:
 
     @classmethod
     def _derive_portal_profile(cls, student: dict[str, Any]) -> dict[str, Any] | None:
-        profile = student.get("profile") if isinstance(student.get("profile"), dict) else {}
+        profile: dict[str, Any] = cast(dict[str, Any], student.get("profile")) if isinstance(student.get("profile"), dict) else {}
         for key in (
             "full_name_pinyin",
             "profile_photo_url",
@@ -635,7 +643,7 @@ class PostgresStateStoreCoreMixin:
 
     @classmethod
     def _derive_portal_application_draft(cls, student: dict[str, Any]) -> dict[str, Any] | None:
-        draft = student.get("application_draft") if isinstance(student.get("application_draft"), dict) else {}
+        draft: dict[str, Any] = cast(dict[str, Any], student.get("application_draft")) if isinstance(student.get("application_draft"), dict) else {}
         preferences = draft.get("preferences") if isinstance(draft.get("preferences"), list) else []
         if not preferences and student.get("selected_team_name"):
             preferences = [
@@ -651,10 +659,10 @@ class PostgresStateStoreCoreMixin:
         if not english_proficiencies and english_level:
             exam_name, _, score_text = english_level.partition(":")
             english_proficiencies = [{"exam_name": exam_name.strip() or english_level, "score_text": score_text.strip() or None}]
-        personal_statement = draft.get("personal_statement") if isinstance(draft.get("personal_statement"), dict) else {}
+        personal_statement: dict[str, Any] = cast(dict[str, Any], draft.get("personal_statement")) if isinstance(draft.get("personal_statement"), dict) else {}
         if student.get("personal_statement_text") and not personal_statement.get("personal_statement_text"):
             personal_statement["personal_statement_text"] = student.get("personal_statement_text")
-        declaration = draft.get("declaration") if isinstance(draft.get("declaration"), dict) else {}
+        declaration: dict[str, Any] = cast(dict[str, Any], draft.get("declaration")) if isinstance(draft.get("declaration"), dict) else {}
         declaration.setdefault("has_read_declaration", bool(student.get("signed_agreement")))
         derived = {
             "selected_plan_id": draft.get("selected_plan_id", student.get("selected_plan_id")),
@@ -869,7 +877,7 @@ class PostgresStateStoreCoreMixin:
 
     @staticmethod
     def _normalize_operation_log_row(row: dict[str, Any]) -> dict[str, Any]:
-        new_value = row.get("new_value") if isinstance(row.get("new_value"), dict) else {}
+        new_value: dict[str, Any] = cast(dict[str, Any], row.get("new_value")) if isinstance(row.get("new_value"), dict) else {}
         return {
             "id": int(row["id"]),
             "operated_at": str(row.get("created_at") or ""),
