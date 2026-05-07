@@ -1,4 +1,4 @@
-from pathlib import Path
+import pytest
 
 from app.services.postgres_state_store import PostgresStateStore
 
@@ -64,16 +64,14 @@ def test_schema_initialized_returns_true_when_formal_schema_exists() -> None:
     assert store._schema_initialized(cursor) is True
 
 
-def test_ensure_schema_skips_sql_execution_when_schema_exists(monkeypatch, tmp_path: Path) -> None:
+def test_ensure_schema_skips_sql_execution_when_schema_exists(monkeypatch) -> None:
     store = PostgresStateStore()
-    store._sql_dir = tmp_path
     cursor = FakeCursor()
     connection = FakeConnection(cursor)
 
     monkeypatch.setattr(store, "ensure_database", lambda: None)
     monkeypatch.setattr(store, "_connect", lambda database_name, autocommit=False: connection)
     monkeypatch.setattr(store, "_schema_initialized", lambda cur: True)
-    monkeypatch.setattr(store, "_apply_pending_migrations", lambda cur: None)
 
     store.ensure_schema()
 
@@ -81,42 +79,20 @@ def test_ensure_schema_skips_sql_execution_when_schema_exists(monkeypatch, tmp_p
     assert cursor.executed == []
 
 
-def test_apply_pending_migrations_bootstraps_legacy_registry_without_replaying_sql(monkeypatch, tmp_path: Path) -> None:
+def test_ensure_schema_raises_when_schema_missing(monkeypatch) -> None:
     store = PostgresStateStore()
-    store._sql_dir = tmp_path
     cursor = FakeCursor(fetchall_results=[[]])
-    recorded: list[str] = []
-
-    monkeypatch.setattr(store, "_ensure_migration_registry", lambda cur: None)
-    monkeypatch.setattr(store, "_mark_migration_applied", lambda cur, file_name: recorded.append(file_name))
-    monkeypatch.setattr(store, "MIGRATION_SQL_FILES", ("051_governance_training_degree_columnar.sql",))
-
-    store._apply_pending_migrations(cursor)
-
-    assert recorded == ["051_governance_training_degree_columnar.sql"]
-    assert cursor.executed == [(f"SELECT file_name FROM {store.MIGRATION_REGISTRY_TABLE}", None)]
-
-
-def test_ensure_schema_executes_sql_files_when_schema_missing(monkeypatch, tmp_path: Path) -> None:
-    store = PostgresStateStore()
-    store._sql_dir = tmp_path
-    cursor = FakeCursor()
     connection = FakeConnection(cursor)
-    expected_sql: list[str] = []
-
-    for file_name in store.SQL_FILES[1:]:
-        sql_text = f"-- {file_name}\nSELECT '{file_name}';"
-        expected_sql.append(sql_text)
-        (tmp_path / file_name).write_text(sql_text, encoding="utf-8")
 
     monkeypatch.setattr(store, "ensure_database", lambda: None)
     monkeypatch.setattr(store, "_connect", lambda database_name, autocommit=False: connection)
     monkeypatch.setattr(store, "_schema_initialized", lambda cur: False)
 
-    store.ensure_schema()
+    with pytest.raises(RuntimeError, match="Automatic SQL file execution has been disabled"):
+        store.ensure_schema()
 
-    assert store._schema_ready is True
-    assert [sql for sql, _ in cursor.executed] == expected_sql
+    assert store._schema_ready is False
+    assert cursor.executed == []
 
 
 def test_seed_portal_application_structures_uses_application_id_for_personal_statement_attachment() -> None:
@@ -308,8 +284,25 @@ def test_list_registered_portal_students_page_marks_returned_forms(monkeypatch) 
 
     assert total == 1
     assert items[0]["application_form_status"] == "驳回重填"
-    assert items[0]["recruitment_application_status"] == "驳回重填"
-    assert items[0]["submitted_at"] is None
+
+
+def test_sync_recruitment_application_status_falls_back_to_db_portal_student_id(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchone_results=[(7,)])
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    store.sync_recruitment_application_status(15, {"application_status": "驳回重填"})
+
+    assert connection.committed is True
+    assert cursor.executed[0] == (
+        "SELECT portal_student_id FROM dtlms_recruitment_applications WHERE id = %s AND is_deleted = FALSE",
+        (15,),
+    )
+    assert cursor.executed[1][1] == ("returned", 15)
+    assert cursor.executed[2][1] == (7,)
 
 
 def test_get_portal_student_detail_hides_submitted_at_for_returned_application(monkeypatch) -> None:
@@ -429,8 +422,11 @@ def test_sync_recruitment_application_status_updates_relational_status(monkeypat
         },
     )
 
-    assert len(cursor.executed) == 1
-    update_sql, update_params = cursor.executed[0]
+    assert len(cursor.executed) == 2
+    lookup_sql, lookup_params = cursor.executed[0]
+    update_sql, update_params = cursor.executed[1]
+    assert "SELECT portal_student_id FROM dtlms_recruitment_applications" in lookup_sql
+    assert lookup_params == (15,)
     assert "UPDATE dtlms_recruitment_applications" in update_sql
     assert update_params == ("returned", 15)
 
@@ -460,6 +456,66 @@ def test_sync_recruitment_application_status_clears_portal_submission_for_resubm
     assert update_params == ("rejected", 15)
     assert "UPDATE dtlms_portal_students" in portal_update_sql
     assert portal_update_params == (7,)
+
+
+def test_sync_portal_application_submission_syncs_workflow_task_when_provided(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchone_results=[None])
+    connection = FakeConnection(cursor)
+    synced_tasks: list[dict] = []
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+    monkeypatch.setattr(store, "_sync_runtime_counters_in_tx", lambda cur, counters: None)
+    monkeypatch.setattr(store, "_sync_operation_log_in_tx", lambda cur, operation_log: None)
+    monkeypatch.setattr(store, "_derive_portal_profile", lambda portal_student_payload: None)
+    monkeypatch.setattr(store, "_derive_portal_application_draft", lambda portal_student_payload: {})
+    monkeypatch.setattr(store, "_execute_dynamic", lambda cur, sql, params=None: cur.execute(sql, params))
+    monkeypatch.setattr(store, "_sync_workflow_task_in_tx", lambda cur, task_payload: synced_tasks.append(task_payload))
+
+    store.sync_portal_application_submission(
+        {
+            "id": 7,
+            "full_name": "张三",
+            "phone_number": "13800001111",
+            "email": "zhangsan@example.com",
+            "id_number": "32000019990101123X",
+            "password_hash": "hashed",
+            "account_status": "启用",
+            "created_at": "2026-04-01 10:00:00",
+            "updated_at": "2026-04-01 10:00:00",
+        },
+        {
+            "id": 15,
+            "portal_student_id": 7,
+            "plan_id": 3,
+            "business_key": "RECRUIT-20260420-0015",
+            "student_name": "张三",
+            "application_status": "报名已提交",
+            "material_status": "材料齐全",
+            "created_at": "2026-04-20 10:00:00",
+            "updated_at": "2026-04-20 10:00:00",
+        },
+        None,
+        workflow_task={
+            "id": 21,
+            "business_key": "RECRUIT-20260420-0015",
+            "status": "待处理",
+            "current_node": "资格审核",
+            "node_key": "qualification_review",
+        },
+    )
+
+    assert synced_tasks == [
+        {
+            "id": 21,
+            "business_key": "RECRUIT-20260420-0015",
+            "status": "待处理",
+            "current_node": "资格审核",
+            "node_key": "qualification_review",
+        }
+    ]
+    assert connection.committed is True
 
 
 def test_derive_portal_profile_includes_id_card_collage_url() -> None:

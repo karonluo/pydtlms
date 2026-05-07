@@ -4,6 +4,7 @@ import type { SelectOption } from './common'
 
 const PORTAL_TOKEN_KEY = 'dtlms-portal-access-token'
 const PORTAL_LONG_RUNNING_TIMEOUT = 60000
+const PORTAL_ATTACHMENT_UPLOAD_TIMEOUT = 300000
 
 export type PortalApplicantProfileData = {
   full_name_pinyin?: string | null
@@ -440,5 +441,6 @@ export function uploadPortalAttachment(file: File, category: PortalAttachmentCat
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    timeout: PORTAL_ATTACHMENT_UPLOAD_TIMEOUT,
   })
 }

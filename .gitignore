@@ -9,5 +9,6 @@ __pycache__/
 backend/.env
 frontend/node_modules/
 frontend/dist/
+frontend/public/portal-attachments/uploads/
 documents/UI设计/
 .DS_Store

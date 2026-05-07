@@ -89,23 +89,11 @@ def _practice_item_has_content(item: "PortalPracticeExperienceItem") -> bool:
     )
 
 
-def _normalize_practice_items(items: Sequence["PortalPracticeExperienceItem"]) -> list["PortalPracticeExperienceItem"]:
-    return [item for item in items if _practice_item_has_content(item)]
-
-
 def _validate_portal_practice_rules(items: Sequence["PortalPracticeExperienceItem"]) -> None:
-    normalized = _normalize_practice_items(items)
-    if len(normalized) > 2:
+    if len(items) > 2:
         raise ValueError("实践经历最多填写 2 条")
 
-    for index, item in enumerate(normalized, start=1):
-        if not _first_non_empty(item.verifier_name):
-            raise ValueError(f"实践经历{index}必须填写证明人姓名")
-        if not _first_non_empty(item.verifier_phone):
-            raise ValueError(f"实践经历{index}必须填写证明人手机")
-        if not _first_non_empty(item.start_month, item.end_month):
-            continue
-
+    for index, item in enumerate(items, start=1):
         missing_fields: list[str] = []
         if not _first_non_empty(item.start_month):
             missing_fields.append("开始年月")
@@ -115,14 +103,14 @@ def _validate_portal_practice_rules(items: Sequence["PortalPracticeExperienceIte
             missing_fields.append("实习实践/工作单位")
         if not _first_non_empty(item.position_name):
             missing_fields.append("岗位")
+        if not _first_non_empty(item.responsibility_text):
+            missing_fields.append("职责")
         if not _first_non_empty(item.verifier_name):
             missing_fields.append("证明人姓名")
         if not _first_non_empty(item.verifier_phone):
             missing_fields.append("证明人手机")
         if missing_fields:
-            raise ValueError(
-                f"实践经历{index}填写了开始年月或结束年月时，除职责外其余字段均必填：缺少{'、'.join(missing_fields)}"
-            )
+            raise ValueError(f"实践经历{index}一旦新增，以下字段必填：{'、'.join(missing_fields)}")
 
 
 def _english_item_has_content(item: "PortalEnglishProficiencyItem") -> bool:
@@ -298,7 +286,7 @@ def _validate_portal_education_rules(items: Sequence["PortalEducationExperienceI
         missing_fields: list[str] = []
         if not _first_non_empty(item.start_month):
             missing_fields.append("开始年月")
-        if not stage.endswith("在读") and not _first_non_empty(item.end_month):
+        if not _first_non_empty(item.end_month):
             missing_fields.append("结束年月")
         if not _first_non_empty(item.school_name):
             missing_fields.append("就读学校")
@@ -441,10 +429,21 @@ def _validate_portal_basic_profile_rules(
 
 
 def _validate_portal_source_channel_rules(source_channel: str | None, source_channel_other: str | None) -> None:
-    if not _first_non_empty(source_channel):
+    allowed_source_channels = {
+        "高校老师推荐",
+        "学长学姐推荐",
+        "上海人工智能实验室官网",
+        "上海人工智能实验室公众号",
+        "浦江书院小红书",
+        "上海人工智能实验室小红书",
+        "其他",
+    }
+
+    normalized_source_channel = _first_non_empty(source_channel)
+    if not normalized_source_channel or normalized_source_channel not in allowed_source_channels:
         raise ValueError("请选择了解项目方式")
 
-    if _first_non_empty(source_channel) == "其他" and not _first_non_empty(source_channel_other):
+    if normalized_source_channel == "其他" and not _first_non_empty(source_channel_other):
         raise ValueError("选择“其他”来源时，请补充说明")
 
 
@@ -931,7 +930,6 @@ class PortalApplicationUpsert(BaseModel):
 
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "PortalApplicationUpsert":
-        self.practice_experiences = _normalize_practice_items(self.practice_experiences)
         self.english_proficiencies = _normalize_english_items(self.english_proficiencies)
         self.achievement_records = _populate_achievement_legacy_fields(self.achievement_records)
         if self.personal_statement is not None:
@@ -1066,7 +1064,6 @@ class PortalApplicationDraftUpsert(BaseModel):
 
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "PortalApplicationDraftUpsert":
-        self.practice_experiences = _normalize_practice_items(self.practice_experiences)
         self.english_proficiencies = _normalize_english_items(self.english_proficiencies)
         self.achievement_records = _populate_achievement_legacy_fields(self.achievement_records)
         if self.personal_statement is not None:

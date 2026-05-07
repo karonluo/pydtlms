@@ -53,6 +53,10 @@ class RuntimeManagementStoreWorkflowMixin:
                 return year_part
         return datetime.now().strftime("%Y")
 
+    def _recruitment_application_business_key_year(self, created_at: str | None = None) -> str:
+        base_year = int(self._workflow_business_key_year(created_at))
+        return f"{base_year + 1:04d}"
+
     def _next_workflow_business_sequence(self, workflow_code: str, business_date: str) -> int:
         cache_key = build_cache_key("workflow", "business-key", workflow_code, business_date)
         try:
@@ -86,7 +90,7 @@ class RuntimeManagementStoreWorkflowMixin:
                 return business_key
 
     def _generate_recruitment_application_business_key(self, created_at: str | None = None) -> str:
-        business_year = self._workflow_business_key_year(created_at)
+        business_year = self._recruitment_application_business_key_year(created_at)
         workflow_code = "SH"
         while True:
             sequence = self._next_workflow_business_sequence(workflow_code, business_year)
@@ -351,6 +355,28 @@ class RuntimeManagementStoreWorkflowMixin:
                 return index, item
         return None
 
+    def _ensure_recruitment_application_workflow_task(
+        self,
+        application: dict[str, Any],
+        *,
+        operator_username: str,
+    ) -> tuple[dict[str, Any] | None, bool, bool]:
+        business_key = str(application.get("business_key") or "").strip()
+        workflow_located = self._workflow_task_index_by_business_key(business_key) if business_key else None
+        if workflow_located is None:
+            self._start_managed_workflow("recruitment_application", application, operator_username=operator_username)
+            workflow_located = self._workflow_task_index_by_business_key(str(application.get("business_key") or "").strip())
+            return (workflow_located[1] if workflow_located is not None else None), workflow_located is not None, workflow_located is not None
+
+        workflow_task, task_changed = self._sync_managed_workflow_task(
+            "recruitment_application",
+            application,
+            existing_task=workflow_located[1],
+        )
+        if task_changed:
+            self._list("workflow_tasks")[workflow_located[0]] = workflow_task
+        return workflow_task, False, task_changed
+
     def _normalize_legacy_workflow_tasks(self) -> bool:
         changed = False
         for index, task in enumerate(self._list("workflow_tasks")):
@@ -489,6 +515,22 @@ class RuntimeManagementStoreWorkflowMixin:
 
     def _migrate_workflow_runtime(self) -> bool:
         changed = False
+        migrated_task_ids: set[int] = set()
+        workflow_tasks = self._list("workflow_tasks")
+        tasks_by_business_key: dict[str, dict[str, Any]] = {}
+        tasks_by_entity: dict[tuple[str, int], dict[str, Any]] = {}
+
+        for task in workflow_tasks:
+            business_key = str(task.get("business_key") or "").strip()
+            if business_key:
+                tasks_by_business_key[business_key] = task
+            flow_code = str(task.get("flow_code") or "").strip()
+            entity_id = int(task.get("entity_id") or 0)
+            if flow_code and entity_id > 0:
+                tasks_by_entity[(flow_code, entity_id)] = task
+
+        pending_new_tasks: list[dict[str, Any]] = []
+
         for flow_code, definition in MANAGED_WORKFLOW_DEFINITIONS.items():
             for item in self._list(definition["business_dataset"]):
                 existing_business_key = str(item.get("business_key") or item.get("candidate_no") or "").strip() or None
@@ -496,22 +538,43 @@ class RuntimeManagementStoreWorkflowMixin:
                     _, item_changed = self._ensure_managed_business_key(flow_code, item, existing_key=existing_business_key)
                     if item_changed:
                         changed = True
-                located = None
+                existing_task = None
                 if existing_business_key:
-                    located = self._workflow_task_index_by_business_key(existing_business_key)
+                    existing_task = tasks_by_business_key.get(existing_business_key)
                 if item.get("business_key"):
-                    located = self._workflow_task_index_by_business_key(str(item["business_key"]))
-                if located is None:
-                    located = self._workflow_task_index_by_entity(flow_code, int(item["id"]))
-                existing_task = located[1] if located else None
+                    existing_task = tasks_by_business_key.get(str(item["business_key"])) or existing_task
+                if existing_task is None:
+                    existing_task = tasks_by_entity.get((flow_code, int(item["id"])))
                 task, task_changed = self._sync_managed_workflow_task(flow_code, item, existing_task=existing_task)
-                if located is None:
-                    self._list("workflow_tasks").insert(0, task)
+                if existing_task is None:
+                    pending_new_tasks.append(task)
                     changed = True
+                    migrated_task_ids.add(int(task["id"]))
                 elif task_changed:
-                    self._list("workflow_tasks")[located[0]] = task
+                    existing_task.clear()
+                    existing_task.update(task)
                     changed = True
+                    migrated_task_ids.add(int(task["id"]))
+
+                current_business_key = str(task.get("business_key") or "").strip()
+                if current_business_key:
+                    tasks_by_business_key[current_business_key] = existing_task or task
+                tasks_by_entity[(flow_code, int(item["id"]))] = existing_task or task
+
+        if pending_new_tasks:
+            workflow_tasks[0:0] = list(reversed(pending_new_tasks))
+        self._migrated_workflow_task_ids = migrated_task_ids
         return changed
+
+    def _persist_migrated_workflow_tasks(self) -> None:
+        migrated_task_ids = {int(item) for item in self._migrated_workflow_task_ids if int(item) > 0}
+        if not migrated_task_ids:
+            return
+        for task in self._list("workflow_tasks"):
+            task_id = int(task.get("id") or 0)
+            if task_id in migrated_task_ids:
+                self._postgres_store.sync_workflow_task(task)
+        self._migrated_workflow_task_ids = set()
 
     def _start_managed_workflow(self, flow_code: str, item: dict[str, Any], operator_username: str) -> None:
         task, _ = self._sync_managed_workflow_task(flow_code, item)

@@ -22,18 +22,18 @@ defineProps<{
     <div class="record-list">
       <section v-for="(item, index) in form.practice_experiences" :key="`practice-${index}`" class="record-card">
         <div class="record-card__header">
-          <div><strong>实践经历 {{ index + 1 }}</strong><span>非必填</span></div>
+          <div><strong>实践经历 {{ index + 1 }}</strong><span>新增后需完整填写</span></div>
           <button type="button" class="link-button" @click="removePractice(index)">删除</button>
         </div>
 
         <div class="section-grid">
-          <label><span>开始年月</span><input v-model="item.start_month" type="month" /></label>
-          <label><span>结束年月</span><input v-model="item.end_month" type="month" /></label>
-          <label><span>实习实践/工作单位</span><input v-model="item.organization_name" placeholder="请输入实习实践/工作单位" /></label>
-          <label><span>岗位</span><input v-model="item.position_name" placeholder="请输入岗位" /></label>
+          <label><span><span class="required-mark">*</span>开始年月</span><input v-model="item.start_month" type="month" /></label>
+          <label><span><span class="required-mark">*</span>结束年月</span><input v-model="item.end_month" type="month" /></label>
+          <label><span><span class="required-mark">*</span>实习实践/工作单位</span><input v-model="item.organization_name" placeholder="请输入实习实践/工作单位" /></label>
+          <label><span><span class="required-mark">*</span>岗位</span><input v-model="item.position_name" placeholder="请输入岗位" /></label>
           <label><span><span class="required-mark">*</span>证明人姓名</span><input v-model="item.verifier_name" placeholder="请输入证明人姓名" /></label>
           <label><span><span class="required-mark">*</span>证明人手机</span><input v-model="item.verifier_phone" placeholder="请输入证明人手机" /></label>
-          <label class="section-grid__full"><span>职责</span><textarea v-model="item.responsibility_text" rows="5" placeholder="请输入职责、项目内容或实践成果" /></label>
+          <label class="section-grid__full"><span><span class="required-mark">*</span>职责</span><textarea v-model="item.responsibility_text" rows="5" placeholder="请输入职责、项目内容或实践成果" /></label>
         </div>
       </section>
     </div>

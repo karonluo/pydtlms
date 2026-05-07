@@ -1,6 +1,19 @@
 <script setup lang="ts">
 import type { PortalApplicationUpsert } from '../../../../api/portal'
 
+function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
+  const preferred = String(fileName || '').trim()
+  if (preferred) {
+    return preferred
+  }
+  const normalized = String(url || '').trim()
+  if (!normalized) {
+    return fallbackLabel
+  }
+  const lastSegment = normalized.split('/').pop() || ''
+  return decodeURIComponent(lastSegment) || fallbackLabel
+}
+
 defineProps<{
   form: PortalApplicationUpsert
   englishExamOptions: string[]
@@ -37,13 +50,13 @@ defineProps<{
         <div class="upload-card">
           <span>英语证明附件</span>
           <a
-            v-if="item.certificate_attachment_url && item.certificate_attachment_name"
+            v-if="item.certificate_attachment_url"
             class="upload-link-input"
             :href="item.certificate_attachment_url"
             target="_blank"
             rel="noopener noreferrer"
-            :title="item.certificate_attachment_name || ''"
-          >{{ item.certificate_attachment_name }}</a>
+            :title="resolveAttachmentDisplayName(item.certificate_attachment_url, item.certificate_attachment_name, '英语证明附件')"
+          >{{ resolveAttachmentDisplayName(item.certificate_attachment_url, item.certificate_attachment_name, '英语证明附件') }}</a>
           <input v-else :value="''" readonly placeholder="英语证明附件必传" />
           <input
             class="upload-file"

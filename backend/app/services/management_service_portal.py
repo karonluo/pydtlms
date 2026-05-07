@@ -95,6 +95,39 @@ class RuntimeManagementStorePortalMixin:
             return "停用"
         return "启用"
 
+    def _find_existing_recruitment_application_for_portal_student(
+        self,
+        student: dict[str, Any],
+        *,
+        plan_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        student_id = int(student.get("id") or 0)
+        phone_number = str(student.get("phone_number") or "").strip()
+        email = str(student.get("email") or "").strip().lower()
+        matches: list[dict[str, Any]] = []
+        for item in self._list("recruitment_applications"):
+            if plan_id is not None and int(item.get("plan_id") or 0) != int(plan_id):
+                continue
+            item_student_id = int(item.get("portal_student_id") or 0)
+            item_phone = str(item.get("phone_number") or "").strip()
+            item_email = str(item.get("email") or "").strip().lower()
+            if item_student_id > 0 and student_id > 0 and item_student_id == student_id:
+                matches.append(item)
+                continue
+            if phone_number and item_phone == phone_number and email and item_email == email:
+                matches.append(item)
+
+        if not matches:
+            return None
+
+        return max(
+            matches,
+            key=lambda item: (
+                str(item.get("applied_at") or item.get("created_at") or ""),
+                int(item.get("id") or 0),
+            ),
+        )
+
     def _build_portal_profile_payload(self, payload: Any) -> dict[str, Any] | None:
         profile = payload.profile.model_dump(exclude_none=True) if payload.profile is not None else {}
         fallback_profile = {
@@ -644,8 +677,13 @@ class RuntimeManagementStorePortalMixin:
             student = self._refresh_portal_student_from_postgres(student_id) or student
             if self._normalize_portal_account_status(student.get("account_status")) != "启用":
                 raise ValueError("账号已停用，无法提交报名")
-            if student.get("submitted_at"):
+            latest_application = self._find_existing_recruitment_application_for_portal_student(student, plan_id=payload.plan_id)
+            latest_application_status = str((latest_application or {}).get("application_status") or "").strip()
+            resubmittable_latest_application = latest_application is not None and latest_application_status in PORTAL_RESUBMITTABLE_APPLICATION_STATUSES
+            if student.get("submitted_at") and not resubmittable_latest_application:
                 raise ValueError("报名申请已提交，当前仅支持只读浏览，不能再修改信息")
+            if resubmittable_latest_application and student.get("submitted_at"):
+                student["submitted_at"] = None
             _, plan = self._find_required("recruitment_plans", payload.plan_id)
             selected_team_id = payload.selected_team_id
             selected_team_name = payload.selected_team_name
@@ -718,15 +756,7 @@ class RuntimeManagementStorePortalMixin:
                 }
             )
 
-            existing_application = next(
-                (
-                    item for item in self._list("recruitment_applications")
-                    if int(item.get("plan_id") or 0) == int(payload.plan_id)
-                    and item.get("phone_number") == student.get("phone_number")
-                    and item.get("email") == student.get("email")
-                ),
-                None,
-            )
+            existing_application = self._find_existing_recruitment_application_for_portal_student(student, plan_id=payload.plan_id)
             created_application = False
             created_workflow_task = False
             if existing_application:
@@ -770,33 +800,30 @@ class RuntimeManagementStorePortalMixin:
                         "application_status": "报名已提交" if resubmitting_rejected_application else previous_application_status,
                     }
                 )
-                workflow_located = self._workflow_task_index_by_business_key(str(existing_application.get("business_key") or ""))
-                workflow_task = None
-                if workflow_located is not None:
-                    workflow_task, task_changed = self._sync_managed_workflow_task("recruitment_application", existing_application, existing_task=workflow_located[1])
-                    if resubmitting_rejected_application:
-                        workflow_task["latest_comment"] = "学生重新提交申请，等待重新审核。"
-                        workflow_task.setdefault("history", []).append(
-                            {
-                                "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "operator_username": student["phone_number"],
-                                "operator_full_name": student["full_name"],
-                                "action": "resubmit",
-                                "action_label": "重新提交",
-                                "from_node": "流程结束",
-                                "to_node": workflow_task.get("current_node") or "资格审核",
-                                "result_status": workflow_task.get("status") or "待处理",
-                                "comment": workflow_task["latest_comment"],
-                            }
-                        )
-                        task_changed = True
-                    if task_changed:
-                        self._list("workflow_tasks")[workflow_located[0]] = workflow_task
-                else:
-                    self._start_managed_workflow("recruitment_application", existing_application, operator_username=student["phone_number"])
+                workflow_task, created_workflow_task, task_changed = self._ensure_recruitment_application_workflow_task(
+                    existing_application,
+                    operator_username=student["phone_number"],
+                )
+                if resubmitting_rejected_application and workflow_task is not None:
+                    workflow_task["latest_comment"] = "学生重新提交申请，等待重新审核。"
+                    workflow_task.setdefault("history", []).append(
+                        {
+                            "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "operator_username": student["phone_number"],
+                            "operator_full_name": student["full_name"],
+                            "action": "resubmit",
+                            "action_label": "重新提交",
+                            "from_node": "流程结束",
+                            "to_node": workflow_task.get("current_node") or "资格审核",
+                            "result_status": workflow_task.get("status") or "待处理",
+                            "comment": workflow_task["latest_comment"],
+                        }
+                    )
+                    task_changed = True
+                if task_changed and workflow_task is not None:
                     workflow_located = self._workflow_task_index_by_business_key(str(existing_application.get("business_key") or ""))
-                    workflow_task = workflow_located[1] if workflow_located is not None else None
-                    created_workflow_task = workflow_located is not None
+                    if workflow_located is not None:
+                        self._list("workflow_tasks")[workflow_located[0]] = workflow_task
                 business_key = str(existing_application["business_key"])
                 application_status = str(existing_application["application_status"])
                 persisted_application = existing_application

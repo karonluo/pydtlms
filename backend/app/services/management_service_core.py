@@ -22,13 +22,22 @@ class RuntimeManagementStoreCoreMixin:
         self._lock = RLock()
         self._postgres_store = self._create_postgres_store()
         self._email_service = self._create_email_service()
+        self._loaded_state_from_postgres = False
+        self._hydrated_state_from_postgres = False
+        self._migrated_workflow_task_ids: set[int] = set()
         self.state = self._load_state()
         self._counters = self.state.setdefault("counters", {})
-        self._migrate_state()
+        state_changed = self._migrate_state()
+        if (self._loaded_state_from_postgres or self._hydrated_state_from_postgres) and state_changed:
+            try:
+                self._persist_migrated_workflow_tasks()
+            except Exception as exc:
+                logger.warning("Persist migrated runtime state to PostgreSQL failed: %s", exc)
 
     def _load_state(self) -> dict[str, Any]:
         postgres_state = self._postgres_store.load_state()
-        if postgres_state:
+        if postgres_state is not None:
+            self._loaded_state_from_postgres = True
             return postgres_state
         return build_runtime_seed_state()
 
@@ -85,12 +94,27 @@ class RuntimeManagementStoreCoreMixin:
             if state_task_ids != postgres_task_ids:
                 self.state["workflow_tasks"] = postgres_workflow_tasks
                 changed = True
-        self._counters.setdefault("teams", max([item.get("id", 0) for item in self.state.setdefault("teams", [])], default=0))
-        self._counters.setdefault("recruitment_plans", max([item.get("id", 0) for item in self.state.setdefault("recruitment_plans", [])], default=0))
+        self._counters["teams"] = max(
+            int(self._counters.get("teams", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("teams", [])], default=0),
+        )
+        self._counters["recruitment_plans"] = max(
+            int(self._counters.get("recruitment_plans", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("recruitment_plans", [])], default=0),
+        )
         self.state.setdefault("portal_students", [])
-        self._counters.setdefault("portal_students", max([item.get("id", 0) for item in self.state["portal_students"]], default=0))
-        self._counters.setdefault("recruitment_applications", max([item.get("id", 0) for item in self.state.setdefault("recruitment_applications", [])], default=0))
-        self._counters.setdefault("workflow_tasks", max([item.get("id", 0) for item in self.state.setdefault("workflow_tasks", [])], default=0))
+        self._counters["portal_students"] = max(
+            int(self._counters.get("portal_students", 0)),
+            max([item.get("id", 0) for item in self.state["portal_students"]], default=0),
+        )
+        self._counters["recruitment_applications"] = max(
+            int(self._counters.get("recruitment_applications", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("recruitment_applications", [])], default=0),
+        )
+        self._counters["workflow_tasks"] = max(
+            int(self._counters.get("workflow_tasks", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("workflow_tasks", [])], default=0),
+        )
         for portal_student in self.state["portal_students"]:
             portal_student["account_status"] = self._normalize_portal_account_status(portal_student.get("account_status"))
             portal_student.setdefault("password_hash", None)
@@ -209,42 +233,60 @@ class RuntimeManagementStoreCoreMixin:
 
     def _load_students_from_postgres(self) -> list[dict[str, Any]] | None:
         try:
-            return self._postgres_store.load_student_state()
+            rows = self._postgres_store.load_student_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
         except Exception as exc:
             logger.warning("Load students from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return None
 
     def _load_teams_from_postgres(self) -> list[dict[str, Any]] | None:
         try:
-            return self._postgres_store.load_team_state()
+            rows = self._postgres_store.load_team_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
         except Exception as exc:
             logger.warning("Load teams from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return None
 
     def _load_recruitment_plans_from_postgres(self) -> list[dict[str, Any]] | None:
         try:
-            return self._postgres_store.load_recruitment_plan_state()
+            rows = self._postgres_store.load_recruitment_plan_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
         except Exception as exc:
             logger.warning("Load recruitment plans from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return None
 
     def _load_portal_students_from_postgres(self) -> list[dict[str, Any]] | None:
         try:
-            return self._postgres_store.load_portal_student_state()
+            rows = self._postgres_store.load_portal_student_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
         except Exception as exc:
             logger.warning("Load portal students from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return None
 
     def _load_recruitment_applications_from_postgres(self) -> list[dict[str, Any]] | None:
         try:
-            return self._postgres_store.load_recruitment_application_state()
+            rows = self._postgres_store.load_recruitment_application_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
         except Exception as exc:
             logger.warning("Load recruitment applications from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return None
 
     def _load_workflow_tasks_from_postgres(self) -> list[dict[str, Any]] | None:
         try:
-            return self._postgres_store.load_workflow_task_state()
+            rows = self._postgres_store.load_workflow_task_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
         except Exception as exc:
             logger.warning("Load workflow tasks from PostgreSQL failed, fallback to current runtime state: %s", exc)
             return None

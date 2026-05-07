@@ -32,6 +32,7 @@ class FakePostgresStateStore:
         self.portal_application_submissions: list[dict] = []
         self.updated_recruitment_applications: list[dict] = []
         self.saved_states: list[dict] = []
+        self.synced_workflow_tasks: list[dict] = []
         self.synced_roles: list[dict] = []
         self.synced_operation_logs: list[dict] = []
         self.workflow_task_snapshot: dict | None = None
@@ -103,6 +104,9 @@ class FakePostgresStateStore:
 
     def sync_recruitment_application_status(self, application_id, payload) -> None:
         self.updated_recruitment_applications.append({"application_id": int(application_id), "payload": dict(payload)})
+
+    def sync_workflow_task(self, task_payload, operation_log=None, *, counters=None) -> None:
+        self.synced_workflow_tasks.append({"task_payload": dict(task_payload), "operation_log": operation_log, "counters": counters})
 
     def sync_role(self, role_payload, operation_log=None, *, counters=None) -> None:
         self.synced_roles.append({"role_payload": role_payload, "operation_log": operation_log, "counters": counters})
@@ -277,7 +281,7 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
         selected_team_name=team_name,
         selected_advisor_name=advisor_name,
         intended_field=team_name,
-        source_channel="实验室官网",
+        source_channel="上海人工智能实验室官网",
         english_proficiencies=[
             {
                 "exam_name": "CET-6",
@@ -985,7 +989,7 @@ def test_update_recruitment_application_persists_full_state(monkeypatch) -> None
             id_number="32000019990101123X",
             material_status="材料齐全",
             application_status="报名已提交",
-            source_channel="导师推荐",
+            source_channel="高校老师推荐",
             source_channel_other="校友引荐",
         ),
     )
@@ -999,7 +1003,7 @@ def test_update_recruitment_application_persists_full_state(monkeypatch) -> None
     assert saved_application["student_name"] == "已更新考生"
     assert saved_application["graduation_school"] == "复旦大学"
     assert saved_application["intended_field"] == "具身智能"
-    assert saved_application["source_channel"] == "导师推荐"
+    assert saved_application["source_channel"] == "高校老师推荐"
     assert saved_application["source_channel_other"] == "校友引荐"
 
 
@@ -1551,8 +1555,9 @@ def test_submit_portal_application_uses_incremental_portal_sync(monkeypatch) -> 
         _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
     )
 
+    expected_year = f"{datetime.now().year + 1:04d}"
     assert response.application_business_key.startswith("SH")
-    assert response.application_business_key[2:6].isdigit()
+    assert response.application_business_key[2:6] == expected_year
     assert response.application_business_key[6:].isdigit()
     assert len(response.application_business_key) == 10
     assert len(fake_postgres.portal_application_submissions) == 1
@@ -1595,11 +1600,240 @@ def test_migrate_workflow_runtime_normalizes_legacy_recruitment_business_key(mon
     normalized_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
 
     assert changed is True
-    assert normalized_application["business_key"].startswith("SH2027")
+    assert normalized_application["business_key"].startswith("SH2028")
     assert len(normalized_application["business_key"]) == 10
     assert normalized_application["candidate_no"] == normalized_application["business_key"]
     assert normalized_task["business_key"] == normalized_application["business_key"]
     assert normalized_task["form_summary"].startswith(f"业务编号：{normalized_application['business_key']}；")
+
+
+def test_submit_portal_application_allows_resubmit_when_submitted_at_is_stale(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009967",
+            email="stale-submit@example.com",
+            full_name="脏提交时间学生",
+            id_number="320000199909099934",
+            password="Secret123!",
+        )
+    )
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "stale-submit@example.com")
+    payload = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
+    first_submit = store.submit_portal_application(student_id, payload)
+
+    reject_task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == first_submit.application_business_key)
+    store.execute_workflow_action(
+        reject_task_id,
+        "reject",
+        "请补充材料后重新提交",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    portal_student = next(item for item in store.state["portal_students"] if item["id"] == student_id)
+    portal_student["submitted_at"] = "2026-05-06 20:00:00"
+
+    second_submit = store.submit_portal_application(student_id, payload)
+
+    reopened_task = next(item for item in store.state["workflow_tasks"] if item["business_key"] == second_submit.application_business_key)
+    assert second_submit.application_status == "报名已提交"
+    assert reopened_task["status"] == "待处理"
+    assert reopened_task["node_key"] == "qualification_review"
+    assert fake_postgres.portal_application_submissions[-1]["workflow_task"]["node_key"] == "qualification_review"
+
+
+def test_init_persists_migrated_workflow_runtime_loaded_from_postgres(monkeypatch) -> None:
+    class StaleWorkflowStateStore(FakePostgresStateStore):
+        def load_state(self):
+            return None
+
+        def load_student_state(self):
+            return []
+
+        def load_team_state(self):
+            return []
+
+        def load_recruitment_plan_state(self):
+            return []
+
+        def load_portal_student_state(self):
+            return []
+
+        def load_recruitment_application_state(self):
+            return [
+                {
+                    "id": 27,
+                    "plan_id": 5,
+                    "portal_student_id": 1,
+                    "student_name": "罗凯",
+                    "business_key": "SH20260008",
+                    "candidate_no": "SH20260008",
+                    "first_choice": "前沿探索中心",
+                    "intended_field": "前沿探索中心",
+                    "material_status": "待补材料",
+                    "application_status": "报名已提交",
+                    "applied_at": "2026-05-01 04:45:27",
+                }
+            ]
+
+        def load_workflow_task_state(self):
+            return [
+                {
+                    "id": 1,
+                    "workflow_name": "招生报名审批流程",
+                    "business_module": "招生管理",
+                    "business_key": "SH20260008",
+                    "title": "罗凯报名审核",
+                    "applicant_name": "罗凯",
+                    "current_handler": "流程结束",
+                    "current_node": "流程结束",
+                    "priority": "中",
+                    "status": "已驳回",
+                    "created_at": "2026-05-01 04:26:31",
+                    "due_at": "2026-05-03 04:26:31",
+                    "form_summary": "业务编号：SH20260008；研究方向：前沿探索中心；材料状态：待补材料",
+                    "latest_comment": "审核不通过",
+                    "flow_code": "recruitment_application",
+                    "node_key": "流程结束",
+                    "entity_id": 27,
+                    "history": [],
+                }
+            ]
+
+    fake_postgres = StaleWorkflowStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr(
+        "app.services.management_service_core.build_runtime_seed_state",
+        lambda: {
+            "counters": {},
+            "roles": [],
+            "profiles": {},
+            "teams": [],
+            "students": [],
+            "recruitment_plans": [],
+            "portal_students": [],
+            "recruitment_applications": [],
+            "workflow_tasks": [],
+            "system_users": [],
+            "audit_policies": [],
+            "scientific_reports": [],
+            "outbound_studies": [],
+            "theses": [],
+            "operation_logs": [],
+            "dict_items": [],
+            "integrations": [],
+        },
+    )
+
+    store = RuntimeManagementStore()
+
+    repaired_task = next(item for item in store.state["workflow_tasks"] if item["id"] == 1)
+    assert repaired_task["status"] == "待处理"
+    assert repaired_task["node_key"] == "qualification_review"
+    assert fake_postgres.synced_workflow_tasks
+    saved_task = fake_postgres.synced_workflow_tasks[-1]["task_payload"]
+    assert saved_task["id"] == 1
+    assert saved_task["status"] == "待处理"
+    assert saved_task["node_key"] == "qualification_review"
+
+
+def test_init_rebases_workflow_task_counter_before_creating_missing_runtime_task(monkeypatch) -> None:
+    class MissingWorkflowTaskStateStore(FakePostgresStateStore):
+        def load_state(self):
+            return {
+                "counters": {"workflow_tasks": 25},
+                "roles": [],
+                "profiles": {},
+                "teams": [],
+                "students": [],
+                "recruitment_plans": [],
+                "portal_students": [],
+                "recruitment_applications": [],
+                "workflow_tasks": [],
+                "system_users": [],
+                "audit_policies": [],
+                "scientific_reports": [],
+                "outbound_studies": [],
+                "theses": [],
+                "operation_logs": [],
+                "dict_items": [],
+                "integrations": [],
+            }
+
+        def load_student_state(self):
+            return []
+
+        def load_team_state(self):
+            return []
+
+        def load_recruitment_plan_state(self):
+            return []
+
+        def load_portal_student_state(self):
+            return []
+
+        def load_recruitment_application_state(self):
+            return [
+                {
+                    "id": 27,
+                    "plan_id": 5,
+                    "portal_student_id": 1,
+                    "student_name": "罗凯",
+                    "business_key": "SH20260007",
+                    "candidate_no": "SH20260007",
+                    "first_choice": "智能制造团队",
+                    "intended_field": "智能制造团队",
+                    "material_status": "待补材料",
+                    "application_status": "报名已提交",
+                    "applied_at": "2026-05-01 04:45:27",
+                }
+            ]
+
+        def load_workflow_task_state(self):
+            return [
+                {
+                    "id": 26,
+                    "workflow_name": "授位审批流程",
+                    "business_module": "学位管理",
+                    "business_key": "SWSQSP202604070002",
+                    "title": "重复 ID 占位任务",
+                    "applicant_name": "测试学生",
+                    "current_handler": "研究生秘书",
+                    "current_node": "材料复核",
+                    "priority": "中",
+                    "status": "处理中",
+                    "created_at": "2026-05-01 04:26:31",
+                    "due_at": "2026-05-03 04:26:31",
+                    "form_summary": "占位任务",
+                    "latest_comment": None,
+                    "flow_code": "thesis",
+                    "node_key": "secretary_review",
+                    "entity_id": 26,
+                    "history": [],
+                }
+            ]
+
+    fake_postgres = MissingWorkflowTaskStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+
+    created_task = next(item for item in store.state["workflow_tasks"] if item["business_key"] == "SH20260007")
+
+    assert created_task["id"] == 27
+    assert len([item for item in store.state["workflow_tasks"] if int(item["id"]) == 26]) == 1
+    assert fake_postgres.synced_workflow_tasks
+    saved_task = fake_postgres.synced_workflow_tasks[-1]["task_payload"]
+    assert saved_task["id"] == 27
+    assert saved_task["business_key"] == "SH20260007"
 
 
 def test_submit_portal_application_blocks_modification_after_submission(monkeypatch) -> None:
@@ -2001,6 +2235,18 @@ def test_portal_application_upsert_requires_source_channel() -> None:
         PortalApplicationUpsert.model_validate(payload)
 
 
+def test_portal_application_upsert_rejects_legacy_source_channel_value() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["source_channel"] = "实验室官网"
+
+    with pytest.raises(ValidationError, match="请选择了解项目方式"):
+        PortalApplicationUpsert.model_validate(payload)
+
+
 def test_portal_application_upsert_requires_submission_declaration() -> None:
     from pydantic import ValidationError
 
@@ -2063,6 +2309,19 @@ def test_portal_application_draft_upsert_validates_only_current_section_when_sco
     validated = PortalApplicationDraftUpsert.model_validate(payload)
 
     assert validated.validation_section_id == "basic-section"
+
+
+def test_portal_application_draft_upsert_rejects_legacy_source_channel_value_for_application_section() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.portal import PortalApplicationDraftUpsert
+
+    payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload["validation_section_id"] = "application-section"
+    payload["source_channel"] = "实验室官网"
+
+    with pytest.raises(ValidationError, match="请选择了解项目方式"):
+        PortalApplicationDraftUpsert.model_validate(payload)
 
 
 def test_portal_application_draft_upsert_allows_current_bachelor_section_without_degree_and_graduation_attachments() -> None:

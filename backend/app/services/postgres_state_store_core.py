@@ -4,16 +4,22 @@ from datetime import datetime
 import hashlib
 import json
 import logging
-from pathlib import Path
 from typing import Any, TYPE_CHECKING, cast
 
 import psycopg
 from psycopg.rows import dict_row
 
-from app.core.config import BACKEND_DIR, settings
+from app.core.config import settings
 
 
 logger = logging.getLogger(__name__)
+
+WORKFLOW_FLOW_DATASET_MAP = {
+    "recruitment_application": "recruitment_applications",
+    "scientific_report": "scientific_reports",
+    "outbound_study": "outbound_studies",
+    "thesis": "theses",
+}
 
 
 class PostgresStateStoreCoreMixin:
@@ -22,50 +28,8 @@ class PostgresStateStoreCoreMixin:
 
     CONNECT_TIMEOUT_SECONDS = 5
     SCHEMA_SENTINEL_REGCLASS = "public.dtlms_users"
-    MIGRATION_REGISTRY_TABLE = "dtlms_schema_migrations"
-    SQL_FILES: tuple[str, ...] = (
-        "000_create_database.sql",
-        "010_init_schema.sql",
-        "015_team_schema_migration.sql",
-        "016_business_key_migration.sql",
-        "017_workflow_flowable_schema.sql",
-        "018_recruitment_application_profile.sql",
-        "020_views.sql",
-        "021_portal_auth_and_profile_fields.sql",
-        "022_portal_application_structured_schema.sql",
-        "024_recruitment_plan_description.sql",
-        "025_portal_student_account_status.sql",
-        "026_portal_profile_photo_and_ethnic_dict.sql",
-        "028_user_profiles_relational.sql",
-        "030_seed_rbac.sql",
-        "050_dict_schema.sql",
-        "052_portal_id_card_collage.sql",
-        "054_portal_achievement_records_v2.sql",
-        "055_portal_personal_statement_v2.sql",
-        "057_portal_education_graduation_certificate.sql",
-        "059_drop_runtime_tables.sql",
-    )
-    MIGRATION_SQL_FILES: tuple[str, ...] = (
-        "015_team_schema_migration.sql",
-        "016_business_key_migration.sql",
-        "017_workflow_flowable_schema.sql",
-        "018_recruitment_application_profile.sql",
-        "021_portal_auth_and_profile_fields.sql",
-        "022_portal_application_structured_schema.sql",
-        "024_recruitment_plan_description.sql",
-        "025_portal_student_account_status.sql",
-        "026_portal_profile_photo_and_ethnic_dict.sql",
-        "028_user_profiles_relational.sql",
-        "050_dict_schema.sql",
-        "052_portal_id_card_collage.sql",
-        "054_portal_achievement_records_v2.sql",
-        "055_portal_personal_statement_v2.sql",
-        "057_portal_education_graduation_certificate.sql",
-        "059_drop_runtime_tables.sql",
-    )
     def __init__(self) -> None:
         self._schema_ready = False
-        self._sql_dir = BACKEND_DIR / "sql"
 
     def _connection_users(self) -> list[str]:
         candidates = [settings.postgres_user]
@@ -115,54 +79,11 @@ class PostgresStateStoreCoreMixin:
         with self._connect(settings.postgres_db, autocommit=True) as conn:
             with conn.cursor() as cur:
                 if self._schema_initialized(cur):
-                    self._apply_pending_migrations(cur)
                     self._schema_ready = True
                     return
-                for file_name in self.SQL_FILES[1:]:
-                    sql_text = (self._sql_dir / file_name).read_text(encoding="utf-8")
-                    self._execute_dynamic(cur, sql_text)
-        self._schema_ready = True
-
-    def _apply_pending_migrations(self, cur: psycopg.Cursor[Any]) -> None:
-        self._ensure_migration_registry(cur)
-        applied_migrations = self._get_applied_migrations(cur)
-        if not applied_migrations:
-            self._bootstrap_legacy_migrations(cur)
-            return
-        for file_name in self.MIGRATION_SQL_FILES:
-            if file_name in applied_migrations:
-                continue
-            sql_text = (self._sql_dir / file_name).read_text(encoding="utf-8")
-            self._execute_dynamic(cur, sql_text)
-            self._mark_migration_applied(cur, file_name)
-
-    def _ensure_migration_registry(self, cur: psycopg.Cursor[Any]) -> None:
-        cur.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.MIGRATION_REGISTRY_TABLE} (
-                file_name VARCHAR(255) PRIMARY KEY,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-
-    def _get_applied_migrations(self, cur: psycopg.Cursor[Any]) -> set[str]:
-        self._execute_dynamic(cur, f"SELECT file_name FROM {self.MIGRATION_REGISTRY_TABLE}")
-        return {str(row[0]) for row in cur.fetchall()}
-
-    def _mark_migration_applied(self, cur: psycopg.Cursor[Any], file_name: str) -> None:
-        cur.execute(
-            f"""
-            INSERT INTO {self.MIGRATION_REGISTRY_TABLE} (file_name)
-            VALUES (%s)
-            ON CONFLICT (file_name) DO NOTHING
-            """,
-            (file_name,),
-        )
-
-    def _bootstrap_legacy_migrations(self, cur: psycopg.Cursor[Any]) -> None:
-        for file_name in self.MIGRATION_SQL_FILES:
-            self._mark_migration_applied(cur, file_name)
+                raise RuntimeError(
+                    "PostgreSQL formal schema is missing. Automatic SQL file execution has been disabled; apply the required schema updates manually before starting the service."
+                )
 
     def load_state(self) -> dict[str, Any] | None:
         self.ensure_schema()
@@ -174,6 +95,262 @@ class PostgresStateStoreCoreMixin:
             with conn.cursor() as cur:
                 self._seed_relational_tables(cur, state)
             conn.commit()
+
+    def normalize_recruitment_application_business_keys(self) -> int:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DROP TABLE IF EXISTS tmp_startup_recruitment_application_business_keys")
+                cur.execute(
+                    """
+                    CREATE TEMP TABLE tmp_startup_recruitment_application_business_keys (
+                        application_id BIGINT PRIMARY KEY,
+                        old_workflow_key VARCHAR(64),
+                        new_business_key VARCHAR(64) NOT NULL
+                    ) ON COMMIT DROP
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO tmp_startup_recruitment_application_business_keys (application_id, old_workflow_key, new_business_key)
+                    WITH numbered AS (
+                        SELECT
+                            ra.id AS application_id,
+                            COALESCE(
+                                workflow_key.old_workflow_key,
+                                NULLIF(BTRIM(COALESCE(ra.business_key, ra.candidate_no, '')), '')
+                            ) AS old_workflow_key,
+                            CONCAT(
+                                'SH',
+                                (
+                                    COALESCE(
+                                        EXTRACT(YEAR FROM COALESCE(ra.applied_at, ra.created_at, CURRENT_TIMESTAMP))::INTEGER,
+                                        EXTRACT(YEAR FROM CURRENT_TIMESTAMP)::INTEGER
+                                    ) + 1
+                                )::TEXT,
+                                LPAD(
+                                    ROW_NUMBER() OVER (
+                                        PARTITION BY COALESCE(
+                                            EXTRACT(YEAR FROM COALESCE(ra.applied_at, ra.created_at, CURRENT_TIMESTAMP))::INTEGER,
+                                            EXTRACT(YEAR FROM CURRENT_TIMESTAMP)::INTEGER
+                                        ) + 1
+                                        ORDER BY COALESCE(ra.applied_at, ra.created_at, CURRENT_TIMESTAMP), ra.id
+                                    )::TEXT,
+                                    4,
+                                    '0'
+                                )
+                            ) AS new_business_key
+                        FROM dtlms_recruitment_applications ra
+                                                LEFT JOIN LATERAL (
+                                                        SELECT NULLIF(BTRIM(ht.business_key_), '') AS old_workflow_key
+                                                        FROM dtlms_wf_hi_varinst hv_entity
+                                                        JOIN dtlms_wf_hi_varinst hv_flow
+                                                            ON hv_flow.proc_inst_id_ = hv_entity.proc_inst_id_
+                                                         AND hv_flow.name_ = 'flowCode'
+                                                        JOIN dtlms_wf_hi_taskinst ht
+                                                            ON ht.proc_inst_id_ = hv_entity.proc_inst_id_
+                                                        WHERE hv_entity.name_ = 'entityId'
+                                                            AND COALESCE(hv_entity.text_value_, hv_entity.json_value_ ->> 'value', '') = ra.id::TEXT
+                                                            AND COALESCE(hv_flow.text_value_, hv_flow.json_value_ ->> 'value', '') = 'recruitment_application'
+                                                            AND NULLIF(BTRIM(COALESCE(ht.business_key_, '')), '') IS NOT NULL
+                                                        ORDER BY ht.start_time_ DESC, ht.id_ DESC
+                                                        LIMIT 1
+                                                ) workflow_key ON TRUE
+                        WHERE ra.is_deleted = FALSE
+                    )
+                    SELECT application_id, old_workflow_key, new_business_key
+                    FROM numbered
+                    """
+                )
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM dtlms_recruitment_applications ra
+                    JOIN tmp_startup_recruitment_application_business_keys mapping
+                      ON mapping.application_id = ra.id
+                    WHERE ra.is_deleted = FALSE
+                      AND (
+                        ra.business_key IS DISTINCT FROM mapping.new_business_key
+                        OR ra.candidate_no IS DISTINCT FROM mapping.new_business_key
+                      )
+                    """
+                )
+                changed_row = cur.fetchone()
+                changed_count = int(changed_row[0] if changed_row else 0)
+                if changed_count > 0:
+                    cur.execute(
+                        """
+                        UPDATE dtlms_recruitment_applications ra
+                        SET business_key = CONCAT('__TMP_SH__', ra.id::TEXT),
+                            candidate_no = CONCAT('__TMP_SH__', ra.id::TEXT),
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM tmp_startup_recruitment_application_business_keys mapping
+                        WHERE ra.id = mapping.application_id
+                          AND ra.is_deleted = FALSE
+                          AND (
+                            ra.business_key IS DISTINCT FROM mapping.new_business_key
+                            OR ra.candidate_no IS DISTINCT FROM mapping.new_business_key
+                          )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        UPDATE dtlms_recruitment_applications ra
+                        SET business_key = mapping.new_business_key,
+                            candidate_no = mapping.new_business_key,
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM tmp_startup_recruitment_application_business_keys mapping
+                        WHERE ra.id = mapping.application_id
+                          AND ra.is_deleted = FALSE
+                          AND (
+                            ra.business_key IS DISTINCT FROM mapping.new_business_key
+                            OR ra.candidate_no IS DISTINCT FROM mapping.new_business_key
+                          )
+                        """
+                    )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_hi_procinst procinst
+                    SET business_key_ = mapping.new_business_key
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND procinst.business_key_ = mapping.old_workflow_key
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_hi_taskinst taskinst
+                    SET business_key_ = mapping.new_business_key
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND taskinst.business_key_ = mapping.old_workflow_key
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_hi_actinst actinst
+                    SET business_key_ = mapping.new_business_key
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND actinst.business_key_ = mapping.old_workflow_key
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_ru_execution execution
+                    SET business_key_ = mapping.new_business_key
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND execution.business_key_ = mapping.old_workflow_key
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_ru_task runtime_task
+                    SET business_key_ = mapping.new_business_key,
+                        form_key_ = CASE
+                            WHEN runtime_task.form_key_ = mapping.old_workflow_key THEN mapping.new_business_key
+                            ELSE runtime_task.form_key_
+                        END,
+                        description_ = CASE
+                            WHEN COALESCE(runtime_task.description_, '') LIKE '业务编号：%'
+                                THEN regexp_replace(runtime_task.description_, '^业务编号：[^；]*；', '业务编号：' || mapping.new_business_key || '；')
+                            ELSE runtime_task.description_
+                        END
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND (
+                          runtime_task.business_key_ = mapping.old_workflow_key
+                          OR runtime_task.form_key_ = mapping.old_workflow_key
+                      )
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_ru_variable runtime_variable
+                    SET text_value_ = CASE
+                            WHEN runtime_variable.name_ = 'businessKey' THEN mapping.new_business_key
+                            WHEN runtime_variable.name_ = 'formSummary' AND COALESCE(runtime_variable.text_value_, '') LIKE '业务编号：%'
+                                THEN regexp_replace(runtime_variable.text_value_, '^业务编号：[^；]*；', '业务编号：' || mapping.new_business_key || '；')
+                            ELSE runtime_variable.text_value_
+                        END,
+                        json_value_ = CASE
+                            WHEN runtime_variable.name_ = 'businessKey'
+                                THEN jsonb_set(COALESCE(runtime_variable.json_value_, '{}'::jsonb), '{value}', to_jsonb(mapping.new_business_key::TEXT), TRUE)
+                            WHEN runtime_variable.name_ = 'formSummary'
+                                THEN jsonb_set(
+                                    COALESCE(runtime_variable.json_value_, '{}'::jsonb),
+                                    '{value}',
+                                    to_jsonb(
+                                        regexp_replace(
+                                            COALESCE(runtime_variable.json_value_ ->> 'value', ''),
+                                            '^业务编号：[^；]*；',
+                                            '业务编号：' || mapping.new_business_key || '；'
+                                        )::TEXT
+                                    ),
+                                    TRUE
+                                )
+                            ELSE runtime_variable.json_value_
+                        END
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND (
+                          (runtime_variable.name_ = 'businessKey' AND COALESCE(runtime_variable.text_value_, runtime_variable.json_value_ ->> 'value', '') = mapping.old_workflow_key)
+                          OR (
+                              runtime_variable.name_ = 'formSummary'
+                              AND COALESCE(runtime_variable.text_value_, runtime_variable.json_value_ ->> 'value', '') LIKE '业务编号：' || mapping.old_workflow_key || '；%'
+                          )
+                      )
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_wf_hi_varinst history_variable
+                    SET text_value_ = CASE
+                            WHEN history_variable.name_ = 'businessKey' THEN mapping.new_business_key
+                            WHEN history_variable.name_ = 'formSummary' AND COALESCE(history_variable.text_value_, '') LIKE '业务编号：%'
+                                THEN regexp_replace(history_variable.text_value_, '^业务编号：[^；]*；', '业务编号：' || mapping.new_business_key || '；')
+                            ELSE history_variable.text_value_
+                        END,
+                        json_value_ = CASE
+                            WHEN history_variable.name_ = 'businessKey'
+                                THEN jsonb_set(COALESCE(history_variable.json_value_, '{}'::jsonb), '{value}', to_jsonb(mapping.new_business_key::TEXT), TRUE)
+                            WHEN history_variable.name_ = 'formSummary'
+                                THEN jsonb_set(
+                                    COALESCE(history_variable.json_value_, '{}'::jsonb),
+                                    '{value}',
+                                    to_jsonb(
+                                        regexp_replace(
+                                            COALESCE(history_variable.json_value_ ->> 'value', ''),
+                                            '^业务编号：[^；]*；',
+                                            '业务编号：' || mapping.new_business_key || '；'
+                                        )::TEXT
+                                    ),
+                                    TRUE
+                                )
+                            ELSE history_variable.json_value_
+                        END,
+                        last_updated_time_ = CURRENT_TIMESTAMP
+                    FROM tmp_startup_recruitment_application_business_keys mapping
+                    WHERE mapping.old_workflow_key IS NOT NULL
+                      AND mapping.old_workflow_key IS DISTINCT FROM mapping.new_business_key
+                      AND (
+                          (history_variable.name_ = 'businessKey' AND COALESCE(history_variable.text_value_, history_variable.json_value_ ->> 'value', '') = mapping.old_workflow_key)
+                          OR (
+                              history_variable.name_ = 'formSummary'
+                              AND COALESCE(history_variable.text_value_, history_variable.json_value_ ->> 'value', '') LIKE '业务编号：' || mapping.old_workflow_key || '；%'
+                          )
+                      )
+                    """
+                )
+            conn.commit()
+        return changed_count
 
     def get_user_profile(self, username: str) -> dict[str, Any] | None:
         self.ensure_schema()
@@ -1029,6 +1206,7 @@ class PostgresStateStoreCoreMixin:
     def _normalize_workflow_task_snapshot_row(cls, row: dict[str, Any]) -> dict[str, Any]:
         task_key = str(row.get("task_key") or "")
         task_id = int(task_key.replace("TASK-", "") or 0)
+        flow_code = str(row.get("flow_code") or "").strip() or None
         candidate_groups = row.get("candidate_groups")
         if isinstance(candidate_groups, dict) and "value" in candidate_groups:
             candidate_groups = candidate_groups["value"]
@@ -1055,7 +1233,8 @@ class PostgresStateStoreCoreMixin:
             "process_instance_id": row.get("proc_inst_id_"),
             "execution_id": row.get("exec_id_"),
             "task_definition_key": row.get("task_def_key_"),
-            "flow_code": row.get("flow_code"),
+            "flow_code": flow_code,
+            "business_dataset": WORKFLOW_FLOW_DATASET_MAP.get(flow_code),
             "node_key": row.get("node_key") or row.get("task_def_key_"),
             "entity_id": int(row.get("entity_id") or 0),
             "candidate_groups": [str(item) for item in (candidate_groups or []) if str(item).strip()],

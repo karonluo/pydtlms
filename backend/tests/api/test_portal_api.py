@@ -60,6 +60,7 @@ def _build_valid_education_experiences() -> list[dict[str, object]]:
             'sort_order': 2,
             'education_stage': '本科在读',
             'start_month': '2019-09',
+            'end_month': '2023-06',
             'school_name': '江南大学',
             'major_name': '自动化',
             'average_score': '89',
@@ -305,7 +306,7 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
             json={
                 'plan_id': 3,
                 'profile': _build_valid_profile_payload(),
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -454,7 +455,7 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
                     'native_place': '江苏无锡',
                     'political_status': '中共党员',
                 },
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -522,7 +523,7 @@ def test_portal_application_submission_rejects_short_personal_statement(monkeypa
             json={
                 'plan_id': 3,
                 'profile': _build_valid_profile_payload(),
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -575,7 +576,7 @@ def test_portal_application_submission_rejects_missing_resume_attachment(monkeyp
             json={
                 'plan_id': 3,
                 'profile': _build_valid_profile_payload(),
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -624,7 +625,7 @@ def test_portal_application_submission_rejects_bachelor_graduate_without_master_
             json={
                 'plan_id': 3,
                 'profile': _build_valid_profile_payload(),
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -775,6 +776,7 @@ def test_portal_application_submission_rejects_non_bachelor_second_education_exp
 def test_portal_application_draft_rejects_incomplete_practice_with_dates(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.get_portal_student', lambda student_id: _portal_student_record(student_id))
 
         response = client.post(
             '/api/v1/portal/applications/draft',
@@ -796,7 +798,80 @@ def test_portal_application_draft_rejects_incomplete_practice_with_dates(monkeyp
 
         assert response.status_code == 422
         assert '实践经历1' in response.text
-        assert '除职责外其余字段均必填' in response.text
+        assert '一旦新增' in response.text
+
+
+def test_portal_application_draft_rejects_current_education_without_end_month(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.get_portal_student', lambda student_id: _portal_student_record(student_id))
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'education_experiences': [
+                    {
+                        'sort_order': 1,
+                        'education_stage': '高中毕业',
+                        'start_month': '2016-09',
+                        'end_month': '2019-06',
+                        'school_name': '无锡市第一中学',
+                        'verifier_name': '王老师',
+                        'verifier_phone': '13800002222',
+                    },
+                    {
+                        'sort_order': 2,
+                        'education_stage': '本科在读',
+                        'start_month': '2019-09',
+                        'end_month': '',
+                        'school_name': '江南大学',
+                        'major_name': '自动化',
+                        'average_score': '89',
+                        'gpa': '3.8',
+                        'ranking': '12/120',
+                        'transcript_attachment_url': '/portal-attachments/uploads/student-7/education_transcript/transcript-a.pdf',
+                        'verifier_name': '李老师',
+                        'verifier_phone': '13800003333',
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '教育经历2以下字段必填：结束年月' in response.text
+
+
+def test_portal_application_draft_rejects_incomplete_practice_once_added(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.get_portal_student', lambda student_id: _portal_student_record(student_id))
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'practice_experiences': [
+                    {
+                        'start_month': '',
+                        'end_month': '',
+                        'organization_name': '上海某研究院',
+                        'position_name': '算法实习生',
+                        'responsibility_text': '',
+                        'verifier_name': '周老师',
+                        'verifier_phone': '13800001111',
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '实践经历1一旦新增' in response.text
+        assert '开始年月' in response.text
+        assert '结束年月' in response.text
+        assert '职责' in response.text
 
 
 def test_portal_application_submission_rejects_more_than_two_practice_experiences(monkeypatch) -> None:
@@ -846,21 +921,10 @@ def test_portal_application_submission_rejects_more_than_two_practice_experience
         assert '实践经历最多填写 2 条' in response.text
 
 
-def test_portal_application_submission_strips_blank_practice_placeholder(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_submit(student_id, payload):
-        captured['student_id'] = student_id
-        captured['payload'] = payload.model_dump(mode='json', exclude_none=True)
-        return {
-            'student': _portal_student_payload(student_id),
-            'application_business_key': 'RECRUIT-20260429-0007',
-            'application_status': '报名已提交',
-        }
-
+def test_portal_application_submission_rejects_blank_practice_placeholder(monkeypatch) -> None:
     with TestClient(app) as client:
         monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+        monkeypatch.setattr('app.api.v1.portal.get_portal_student', lambda student_id: _portal_student_record(student_id))
 
         response = client.post(
             '/api/v1/portal/applications',
@@ -868,7 +932,7 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
             json={
                 'plan_id': 3,
                 'profile': _build_valid_profile_payload(),
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,
@@ -904,10 +968,37 @@ def test_portal_application_submission_strips_blank_practice_placeholder(monkeyp
             },
         )
 
-        assert response.status_code == 200
-        payload = captured['payload']
-        assert payload['practice_experiences'] == []
-        assert 'practice_experience' not in payload
+        assert response.status_code == 422
+        assert '实践经历1一旦新增' in response.text
+
+
+def test_portal_application_draft_rejects_blank_practice_once_added(monkeypatch) -> None:
+    with TestClient(app) as client:
+        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
+        monkeypatch.setattr('app.api.v1.portal.get_portal_student', lambda student_id: _portal_student_record(student_id))
+
+        response = client.post(
+            '/api/v1/portal/applications/draft',
+            headers={'Authorization': 'Bearer portal-token'},
+            json={
+                'plan_id': 3,
+                'validation_section_id': 'practice-section',
+                'practice_experiences': [
+                    {
+                        'start_month': '',
+                        'end_month': '',
+                        'organization_name': '',
+                        'position_name': '',
+                        'responsibility_text': '',
+                        'verifier_name': '',
+                        'verifier_phone': '',
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert '实践经历1一旦新增' in response.text
 
 
 def test_portal_application_submission_rejects_missing_english_proficiency(monkeypatch) -> None:
@@ -1488,7 +1579,7 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
             headers={'Authorization': 'Bearer portal-token'},
             json={
                 'plan_id': 3,
-                'source_channel': '实验室官网',
+                'source_channel': '上海人工智能实验室官网',
                 'preferences': [
                     {
                         'preference_order': 1,

@@ -1,6 +1,19 @@
 <script setup lang="ts">
 import type { PortalApplicationUpsert } from '../../../../api/portal'
 
+function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
+  const preferred = String(fileName || '').trim()
+  if (preferred) {
+    return preferred
+  }
+  const normalized = String(url || '').trim()
+  if (!normalized) {
+    return fallbackLabel
+  }
+  const lastSegment = normalized.split('/').pop() || ''
+  return decodeURIComponent(lastSegment) || fallbackLabel
+}
+
 function isPreviewableAttachment(fileName: string | null | undefined, fileUrl: string | null | undefined) {
   const candidate = String(fileName || fileUrl || '').toLowerCase()
   return candidate.endsWith('.pdf')
@@ -41,14 +54,14 @@ defineProps<{
       <div class="upload-card">
         <span><span class="required-mark">*</span>个人简历附件</span>
         <a
-          v-if="form.personal_statement!.resume_attachment_url && form.personal_statement!.resume_attachment_name"
+          v-if="form.personal_statement!.resume_attachment_url"
           class="upload-link-input"
           :href="form.personal_statement!.resume_attachment_url"
           :target="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? '_blank' : undefined"
           :rel="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? 'noopener noreferrer' : undefined"
-          :download="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? undefined : (form.personal_statement!.resume_attachment_name || true)"
-          :title="form.personal_statement!.resume_attachment_name || ''"
-        >{{ form.personal_statement!.resume_attachment_name }}</a>
+          :download="isPreviewableAttachment(form.personal_statement!.resume_attachment_name, form.personal_statement!.resume_attachment_url) ? undefined : (resolveAttachmentDisplayName(form.personal_statement!.resume_attachment_url, form.personal_statement!.resume_attachment_name, '个人简历附件') || true)"
+          :title="resolveAttachmentDisplayName(form.personal_statement!.resume_attachment_url, form.personal_statement!.resume_attachment_name, '个人简历附件')"
+        >{{ resolveAttachmentDisplayName(form.personal_statement!.resume_attachment_url, form.personal_statement!.resume_attachment_name, '个人简历附件') }}</a>
         <input v-else :value="''" readonly placeholder="支持 PDF / Word 简历" />
         <input
           class="upload-file"
@@ -63,13 +76,13 @@ defineProps<{
       <div class="upload-card">
         <span>其他支撑材料（选填）</span>
         <a
-          v-if="form.personal_statement!.supporting_material_attachment_url && form.personal_statement!.supporting_material_attachment_name"
+          v-if="form.personal_statement!.supporting_material_attachment_url"
           class="upload-link-input"
           :href="form.personal_statement!.supporting_material_attachment_url"
           target="_blank"
           rel="noopener noreferrer"
-          :title="form.personal_statement!.supporting_material_attachment_name || ''"
-        >{{ form.personal_statement!.supporting_material_attachment_name }}</a>
+          :title="resolveAttachmentDisplayName(form.personal_statement!.supporting_material_attachment_url, form.personal_statement!.supporting_material_attachment_name, '其他支撑材料')"
+        >{{ resolveAttachmentDisplayName(form.personal_statement!.supporting_material_attachment_url, form.personal_statement!.supporting_material_attachment_name, '其他支撑材料') }}</a>
         <input v-else :value="''" readonly placeholder="建议上传 zip 压缩包，单文件上传" />
         <input
           class="upload-file"

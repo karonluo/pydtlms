@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .management_service_shared import *
 
 
 class RuntimeManagementStoreSystemMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
     def get_dict_types(self, keyword: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> DictTypeListResponse:
         records = self._postgres_store.list_dict_types(keyword=keyword, status=status)
         items = [DictTypeRecord(**item) for item in records]

@@ -19,7 +19,7 @@ const PortalHomeView = () => import('../views/home/PortalHomeView.vue')
 const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
 const StudentPortalApplicationV2View = () => import('../views/portal/StudentPortalApplicationV2View.vue')
 
-const APP_TITLE = '博士生生命周期管理系统'
+const APP_TITLE = '上海人工智能实验室联培博士生申请系统'
 
 const router = createRouter({
   history: createWebHistory(),

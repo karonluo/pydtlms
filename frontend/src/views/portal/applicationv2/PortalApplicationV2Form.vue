@@ -76,6 +76,7 @@ const sourceChannelOptions = [
   '上海人工智能实验室小红书',
   '其他',
 ]
+const sourceChannelOptionSet = new Set(sourceChannelOptions)
 const genderOptions = ['男', '女']
 const idTypeOptions = ['居民身份证', '护照', '港澳居民来往内地通行证']
 const educationStageOptionsByOrder: Record<number, string[]> = {
@@ -191,10 +192,6 @@ function isHighSchoolStage(stage: string | null | undefined) {
   return trimText(stage) === '高中毕业'
 }
 
-function isCurrentEducationStage(stage: string | null | undefined) {
-  return trimText(stage).endsWith('在读')
-}
-
 function recommendedNextEducationStage(items?: PortalEducationExperienceItem[] | null) {
   const currentItems = items || []
   if (currentItems.length <= 1) {
@@ -293,7 +290,7 @@ function validateEducationRules(items?: PortalEducationExperienceItem[] | null) 
     if (!trimText(item.start_month)) {
       missingFields.push('开始年月')
     }
-    if (!isCurrentEducationStage(stage) && !trimText(item.end_month)) {
+    if (!trimText(item.end_month)) {
       missingFields.push('结束年月')
     }
     if (!trimText(item.school_name)) {
@@ -383,23 +380,13 @@ function ensurePracticeExperienceShape(items?: Array<Partial<PortalPracticeExper
 }
 
 function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
-  const meaningfulItems = (items || []).filter((item) => practiceItemHasContent(item))
+  const meaningfulItems = items || []
   if (meaningfulItems.length > 2) {
     return '实践经历最多填写 2 条'
   }
 
   for (let index = 0; index < meaningfulItems.length; index += 1) {
     const item = meaningfulItems[index]
-    if (!trimText(item.verifier_name)) {
-      return `实践经历${index + 1}必须填写证明人姓名`
-    }
-    if (!trimText(item.verifier_phone)) {
-      return `实践经历${index + 1}必须填写证明人手机`
-    }
-    if (!trimText(item.start_month) && !trimText(item.end_month)) {
-      continue
-    }
-
     const missingFields: string[] = []
     if (!trimText(item.start_month)) {
       missingFields.push('开始年月')
@@ -413,6 +400,9 @@ function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
     if (!trimText(item.position_name)) {
       missingFields.push('岗位')
     }
+    if (!trimText(item.responsibility_text)) {
+      missingFields.push('职责')
+    }
     if (!trimText(item.verifier_name)) {
       missingFields.push('证明人姓名')
     }
@@ -420,7 +410,7 @@ function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
       missingFields.push('证明人手机')
     }
     if (missingFields.length) {
-      return `实践经历${index + 1}填写了开始年月或结束年月时，除职责外其余字段均必填：缺少${missingFields.join('、')}`
+      return `实践经历${index + 1}一旦新增，以下字段必填：${missingFields.join('、')}`
     }
   }
 
@@ -695,11 +685,13 @@ function validateBasicRules(profileData?: PortalApplicantProfileData | null, req
 }
 
 function validateSourceChannelRules(sourceChannel?: string | null, sourceChannelOther?: string | null) {
-  if (!trimText(sourceChannel)) {
+  const normalizedSourceChannel = normalizeSourceChannelValue(sourceChannel)
+
+  if (!normalizedSourceChannel) {
     return '请选择了解项目方式'
   }
 
-  if (trimText(sourceChannel) === '其他' && !trimText(sourceChannelOther)) {
+  if (normalizedSourceChannel === '其他' && !trimText(sourceChannelOther)) {
     return '选择“其他”来源时，请补充说明'
   }
 
@@ -988,6 +980,11 @@ function trimText(value: string | null | undefined) {
   return String(value || '').trim()
 }
 
+function normalizeSourceChannelValue(value: string | null | undefined) {
+  const normalized = trimText(value)
+  return sourceChannelOptionSet.has(normalized) ? normalized : ''
+}
+
 function findTeamById(teamId: number | null | undefined) {
   return teams.value.find((item) => item.id === Number(teamId || 0)) || null
 }
@@ -1238,7 +1235,7 @@ function applyProfile(profile: PortalStudentRecord) {
       id_type: profile.profile?.id_type || profile.id_type || '居民身份证',
       mailing_address: profile.profile?.mailing_address || profile.mailing_address || '',
     },
-    source_channel: draft?.source_channel || '',
+    source_channel: normalizeSourceChannelValue(draft?.source_channel),
     source_channel_other: draft?.source_channel_other || '',
     preferences: ensureTwoPreferences(
       draft?.preferences?.length
@@ -1427,7 +1424,7 @@ function buildProgressSnapshot() {
   return {
     preference_count: (form.preferences || []).filter((item) => trimText(item.research_center_name)).length,
     education_count: (form.education_experiences || []).filter((item) => trimText(item.school_name)).length,
-    practice_count: (form.practice_experiences || []).filter((item) => practiceItemHasContent(item)).length,
+    practice_count: (form.practice_experiences || []).length,
     english_count: (form.english_proficiencies || []).filter((item) => englishItemHasContent(item)).length,
     family_count: (form.family_members || []).filter((item) => familyMemberHasContent(item)).length,
     achievement_count: (form.achievement_records || []).filter((item) => achievementItemHasContent(normalizeAchievementItem(item))).length,
@@ -1468,7 +1465,7 @@ function buildSectionStatuses(): PortalSectionStatus[] {
   const educationCompleted = completedEducationItems.length >= 2 && !validateEducationRules(educationItems)
 
   const practiceItems = form.practice_experiences || []
-  const practiceStarted = practiceItems.some((item) => practiceItemHasContent(item))
+  const practiceStarted = practiceItems.length > 0
   const practiceCompleted = practiceStarted && !validatePracticeRules(practiceItems)
 
   const englishItems = form.english_proficiencies || []
@@ -1559,7 +1556,6 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       start_month: trimText(item.start_month) || null,
       end_month: trimText(item.end_month) || null,
     }))
-    .filter((item) => practiceItemHasContent(item))
 
   const englishProficiencies = (form.english_proficiencies || [])
     .map((item) => ({
@@ -1636,7 +1632,7 @@ function buildSubmitPayload(): PortalApplicationUpsert {
       emergency_contact_name: trimText(profileData.emergency_contact_name) || null,
       emergency_contact_phone: trimText(profileData.emergency_contact_phone) || null,
     },
-    source_channel: trimText(form.source_channel) || null,
+    source_channel: normalizeSourceChannelValue(form.source_channel) || null,
     source_channel_other: trimText(form.source_channel_other) || null,
     preferences: orderedPreferences,
     education_experiences: orderedEducation,

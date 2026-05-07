@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import perf_counter
+
 from .management_service_shared import Any, Lock, NotificationEmailService, PostgresStateStore, get_cache_client
 from .management_service_core import RuntimeManagementStoreCoreMixin
 from .management_service_workflow import RuntimeManagementStoreWorkflowMixin
@@ -46,5 +48,19 @@ class LazyRuntimeManagementStore:
 
 
 store = LazyRuntimeManagementStore()
+
+
+def repair_startup_postgres_state() -> dict[str, int]:
+    postgres_store = PostgresStateStore()
+    renamed_recruitment_application_keys = postgres_store.normalize_recruitment_application_business_keys()
+    return {
+        "renamed_recruitment_application_keys": renamed_recruitment_application_keys,
+    }
+
+
+def warm_up_runtime_management_store() -> float:
+    start = perf_counter()
+    store._get_instance()
+    return perf_counter() - start
 
 

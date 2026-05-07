@@ -2,6 +2,19 @@
 import { computed } from 'vue'
 import type { PortalApplicationUpsert, PortalEducationExperienceItem } from '../../../../api/portal'
 
+function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
+  const preferred = String(fileName || '').trim()
+  if (preferred) {
+    return preferred
+  }
+  const normalized = String(url || '').trim()
+  if (!normalized) {
+    return fallbackLabel
+  }
+  const lastSegment = normalized.split('/').pop() || ''
+  return decodeURIComponent(lastSegment) || fallbackLabel
+}
+
 const props = defineProps<{
   form: PortalApplicationUpsert
   getEducationStageOptions: (index: number) => string[]
@@ -39,7 +52,7 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
         <div class="section-grid">
           <label><span><span v-if="actualIndex < 2" class="required-mark">*</span>教育阶段</span><select v-model="item.education_stage" @change="handleEducationStageChange(item)"><option value="">请选择</option><option v-for="stage in getEducationStageOptions(actualIndex)" :key="stage" :value="stage">{{ stage }}</option></select></label>
           <label><span><span class="required-mark">*</span>开始年月</span><input v-model="item.start_month" type="month" /></label>
-          <label><span><span v-if="!item.education_stage.endsWith('在读')" class="required-mark">*</span>结束年月</span><input v-model="item.end_month" type="month" /></label>
+          <label><span><span class="required-mark">*</span>结束年月</span><input v-model="item.end_month" type="month" /></label>
           <label><span><span v-if="actualIndex < 2" class="required-mark">*</span>就读学校</span><input v-model="item.school_name" placeholder="请输入就读学校" /></label>
           <label v-if="item.education_stage !== '高中毕业'"><span><span class="required-mark">*</span>就读专业</span><input v-model="item.major_name" placeholder="请输入就读专业" /></label>
           <label v-if="item.education_stage !== '高中毕业'"><span><span class="required-mark">*</span>期间平均成绩</span><input v-model="item.average_score" placeholder="如 88.5" /></label>
@@ -53,13 +66,13 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
           <div v-if="item.education_stage !== '高中毕业'" class="upload-card">
             <span>成绩单附件</span>
             <a
-              v-if="item.transcript_attachment_url && item.transcript_attachment_name"
+              v-if="item.transcript_attachment_url"
               class="upload-link-input"
               :href="item.transcript_attachment_url"
               target="_blank"
               rel="noopener noreferrer"
-              :title="item.transcript_attachment_name || ''"
-            >{{ item.transcript_attachment_name }}</a>
+              :title="resolveAttachmentDisplayName(item.transcript_attachment_url, item.transcript_attachment_name, '成绩单附件')"
+            >{{ resolveAttachmentDisplayName(item.transcript_attachment_url, item.transcript_attachment_name, '成绩单附件') }}</a>
             <input v-else :value="''" readonly placeholder="未上传时不可提交" />
             <input
               class="upload-file"
@@ -73,13 +86,13 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
           <div v-if="item.education_stage !== '高中毕业' && item.education_stage.endsWith('毕业')" class="upload-card">
             <span>学位证附件</span>
             <a
-              v-if="item.degree_certificate_attachment_url && item.degree_certificate_attachment_name"
+              v-if="item.degree_certificate_attachment_url"
               class="upload-link-input"
               :href="item.degree_certificate_attachment_url"
               target="_blank"
               rel="noopener noreferrer"
-              :title="item.degree_certificate_attachment_name || ''"
-            >{{ item.degree_certificate_attachment_name }}</a>
+              :title="resolveAttachmentDisplayName(item.degree_certificate_attachment_url, item.degree_certificate_attachment_name, '学位证附件')"
+            >{{ resolveAttachmentDisplayName(item.degree_certificate_attachment_url, item.degree_certificate_attachment_name, '学位证附件') }}</a>
             <input v-else :value="''" readonly placeholder="未上传时不可提交" />
             <input
               class="upload-file"
@@ -93,13 +106,13 @@ const displayedEducationItems = computed(() => (props.form.education_experiences
           <div v-if="item.education_stage !== '高中毕业' && item.education_stage.endsWith('毕业')" class="upload-card">
             <span>毕业证附件</span>
             <a
-              v-if="item.graduation_certificate_attachment_url && item.graduation_certificate_attachment_name"
+              v-if="item.graduation_certificate_attachment_url"
               class="upload-link-input"
               :href="item.graduation_certificate_attachment_url"
               target="_blank"
               rel="noopener noreferrer"
-              :title="item.graduation_certificate_attachment_name || ''"
-            >{{ item.graduation_certificate_attachment_name }}</a>
+              :title="resolveAttachmentDisplayName(item.graduation_certificate_attachment_url, item.graduation_certificate_attachment_name, '毕业证附件')"
+            >{{ resolveAttachmentDisplayName(item.graduation_certificate_attachment_url, item.graduation_certificate_attachment_name, '毕业证附件') }}</a>
             <input v-else :value="''" readonly placeholder="未上传时不可提交" />
             <input
               class="upload-file"

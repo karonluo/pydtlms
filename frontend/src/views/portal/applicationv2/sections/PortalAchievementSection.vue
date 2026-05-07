@@ -13,6 +13,19 @@ function isAwardAchievement(type: string | null | undefined) {
   return trimText(type) === '获奖经历'
 }
 
+function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
+  const preferred = String(fileName || '').trim()
+  if (preferred) {
+    return preferred
+  }
+  const normalized = String(url || '').trim()
+  if (!normalized) {
+    return fallbackLabel
+  }
+  const lastSegment = normalized.split('/').pop() || ''
+  return decodeURIComponent(lastSegment) || fallbackLabel
+}
+
 defineProps<{
   form: PortalApplicationUpsert
   achievementTypeOptions: string[]
@@ -68,13 +81,13 @@ defineProps<{
             <div class="upload-card section-grid__full">
               <span>获奖证明上传</span>
               <a
-                v-if="item.award_certificate_attachment_url && item.award_certificate_attachment_name"
+                v-if="item.award_certificate_attachment_url"
                 class="upload-link-input"
                 :href="item.award_certificate_attachment_url"
                 target="_blank"
                 rel="noopener noreferrer"
-                :title="item.award_certificate_attachment_name || ''"
-              >{{ item.award_certificate_attachment_name }}</a>
+                :title="resolveAttachmentDisplayName(item.award_certificate_attachment_url, item.award_certificate_attachment_name, '获奖证明')"
+              >{{ resolveAttachmentDisplayName(item.award_certificate_attachment_url, item.award_certificate_attachment_name, '获奖证明') }}</a>
               <input v-else :value="''" readonly placeholder="请上传获奖证明附件" />
               <input
                 class="upload-file"

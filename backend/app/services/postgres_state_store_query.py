@@ -484,31 +484,10 @@ class PostgresStateStoreQueryMixin:
         return results
 
     def load_workflow_task_state(self) -> list[dict[str, Any]]:
-        self.ensure_schema()
-        with self._connect(settings.postgres_db) as conn:
-            conn.row_factory = dict_row
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT ht.id_
-                    FROM dtlms_wf_hi_taskinst ht
-                    ORDER BY ht.start_time_ DESC, ht.id_ DESC
-                    """
-                )
-                task_keys = [str(row.get("id_") or "") for row in cur.fetchall()]
-
-        results: list[dict[str, Any]] = []
-        for task_key in task_keys:
-            if not task_key.startswith("TASK-"):
-                continue
-            try:
-                task_id = int(task_key.replace("TASK-", ""))
-            except ValueError:
-                continue
-            snapshot = self.get_workflow_task_snapshot(task_id)
-            if snapshot is not None:
-                results.append(snapshot)
-        return results
+        # Reuse the PostgreSQL paged workflow query so startup does one batched read
+        # instead of replaying a per-task snapshot query for every history row.
+        items, _ = self.list_workflow_tasks_page(page=1, page_size=1_000_000)
+        return items
 
     def get_portal_student_detail(self, student_id: int) -> dict[str, Any] | None:
         self.ensure_schema()

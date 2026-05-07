@@ -1010,6 +1010,14 @@ class PostgresStateStoreSyncMixin:
         with self._connect(settings.postgres_db) as conn:
             with conn.cursor() as cur:
                 application_status = self._map_application_status(str(payload.get("application_status") or ""))
+                portal_student_id = int(payload.get("portal_student_id") or 0)
+                if portal_student_id <= 0:
+                    cur.execute(
+                        "SELECT portal_student_id FROM dtlms_recruitment_applications WHERE id = %s AND is_deleted = FALSE",
+                        (int(application_id),),
+                    )
+                    portal_student_row = cur.fetchone()
+                    portal_student_id = int((portal_student_row or [0])[0] or 0)
                 cur.execute(
                     """
                     UPDATE dtlms_recruitment_applications
@@ -1019,7 +1027,6 @@ class PostgresStateStoreSyncMixin:
                     """,
                     (application_status, int(application_id)),
                 )
-                portal_student_id = int(payload.get("portal_student_id") or 0)
                 if application_status in {"returned", "rejected"} and portal_student_id > 0:
                     cur.execute(
                         """
@@ -1605,6 +1612,9 @@ class PostgresStateStoreSyncMixin:
                         material_list_attachment or f"/materials/{application_payload.get('candidate_no') or application_payload.get('business_key')}.zip",
                     ),
                 )
+
+                if workflow_task is not None:
+                    self._sync_workflow_task_in_tx(cur, workflow_task)
             conn.commit()
 
     def delete_runtime_recruitment_application(self, application_id: int) -> None:
