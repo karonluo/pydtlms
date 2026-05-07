@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from app.schemas.workflow import WorkflowActionOption
+
 from .management_service_shared import *
 
 
 class RuntimeManagementStoreWorkflowMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
     def _workflow_action_result(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> dict[str, Any]:
         return {
             "task": self._build_workflow_task_record(task, principal_roles=principal_roles),
@@ -245,7 +252,7 @@ class RuntimeManagementStoreWorkflowMixin:
         roles = self._workflow_definition(flow_code)["nodes"][node_key]["handler_roles"]
         if roles == ["advisor"] and item.get("advisor_name"):
             return str(item["advisor_name"])
-        return " / ".join(ROLE_DISPLAY_NAMES.get(role, role) for role in roles)
+        return " / ".join(str(ROLE_DISPLAY_NAMES.get(str(role), str(role)) or str(role)) for role in roles)
 
     def _workflow_title(self, flow_code: str, item: dict[str, Any]) -> str:
         if flow_code == "recruitment_application":
@@ -291,7 +298,7 @@ class RuntimeManagementStoreWorkflowMixin:
             "roles": list(payload.get("roles", [])),
         }
 
-    def _workflow_action_options(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> list[dict[str, str]]:
+    def _workflow_action_options(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> list[WorkflowActionOption]:
         flow_code = task.get("flow_code")
         node_key = task.get("node_key")
         if not flow_code or not node_key:
@@ -301,7 +308,10 @@ class RuntimeManagementStoreWorkflowMixin:
             return []
         if principal_roles and not set(node["handler_roles"]).intersection(principal_roles):
             return []
-        return [{"action": action_code, "label": action_config["label"]} for action_code, action_config in node["actions"].items()]
+        return [
+            WorkflowActionOption(action=str(action_code), label=str(action_config["label"]))
+            for action_code, action_config in node["actions"].items()
+        ]
 
     def _fallback_workflow_due_at(self, task: dict[str, Any]) -> str:
         due_at = task.get("due_at")
@@ -439,7 +449,8 @@ class RuntimeManagementStoreWorkflowMixin:
                 "驳回重填": (None, "已驳回"),
                 "不录取": (None, "已驳回"),
             }
-            node_key, task_status = mapping.get(item.get("application_status"), ("qualification_review", "待处理"))
+            application_status = str(item.get("application_status") or "")
+            node_key, task_status = mapping.get(application_status, ("qualification_review", "待处理"))
             return {"node_key": node_key, "task_status": task_status}
         if flow_code == "scientific_report":
             if item.get("report_status") == "已通过":
