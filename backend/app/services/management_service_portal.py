@@ -5,6 +5,158 @@ from .management_service_shared import *
 
 class RuntimeManagementStorePortalMixin:
     @staticmethod
+    def _portal_application_summary_form_status(submitted_at: str | None, application_status: str | None) -> str:
+        normalized_status = str(application_status or "").strip()
+        if normalized_status == "驳回重填":
+            return "驳回重填"
+        if normalized_status == "未提交":
+            return "未提交报名"
+        if normalized_status == "待中心考核-第一志愿":
+            return "第一志愿考核"
+        if normalized_status == "待中心考核-第二志愿":
+            return "第二志愿考核"
+        if normalized_status in {"结果公布", "报名终止", "预录取"}:
+            return "已结束报名流程"
+        if submitted_at:
+            return "已填写报名"
+        return "未提交报名"
+
+    def _build_portal_workflow_progress_summary(self, submitted_at: str | None, application_status: str | None) -> PortalWorkflowProgressSummary:
+        normalized_status = str(application_status or "").strip()
+        application_form_status = self._portal_application_summary_form_status(submitted_at, normalized_status or None)
+        stage_labels = [
+            ("online_application", "在线申请"),
+            ("material_review", "资料审核"),
+            ("background_review", "背景评估"),
+            ("center_assessment", "中心考核"),
+            ("result_publish", "结果公布"),
+            ("pre_admission", "预录取"),
+        ]
+        stages = [PortalWorkflowStageItem(key=key, label=label) for key, label in stage_labels]
+
+        if normalized_status == "驳回重填":
+            stages[0].status = "returned"
+            stages[0].description = "申请已被驳回，请完善后重新提交"
+            stages[1].status = "returned"
+            return PortalWorkflowProgressSummary(
+                current_stage_key="online_application",
+                current_stage_label="在线申请",
+                application_form_status=application_form_status,
+                recruitment_application_status="驳回重填",
+                stages=stages,
+            )
+
+        if not submitted_at and not normalized_status:
+            stages[0].status = "current"
+            stages[0].description = "请先完成在线申请并提交报名"
+            return PortalWorkflowProgressSummary(
+                current_stage_key="online_application",
+                current_stage_label="在线申请",
+                application_form_status=application_form_status,
+                recruitment_application_status="未提交",
+                stages=stages,
+            )
+
+        current_stage_key = "material_review"
+        current_stage_label = "资料审核"
+        result_label: str | None = None
+
+        if normalized_status in {"报名已提交", "待审核", ""}:
+            stages[0].status = "completed"
+            stages[1].status = "current"
+            stages[1].description = "已提交报名，等待审核"
+            current_stage_key = "material_review"
+            current_stage_label = "资料审核"
+            normalized_status = normalized_status or "待审核"
+        elif normalized_status in {"资格审核通过", "材料评分中", "待背景评估"}:
+            stages[0].status = "completed"
+            stages[1].status = "completed"
+            stages[2].status = "current"
+            stages[2].description = "资料审核已通过，等待背景评估"
+            current_stage_key = "background_review"
+            current_stage_label = "背景评估"
+            normalized_status = "待背景评估"
+        elif normalized_status in {"面试待安排", "面试完成", "待中心考核", "待中心考核-第一志愿", "待中心考核-第二志愿"}:
+            stages[0].status = "completed"
+            stages[1].status = "completed"
+            stages[2].status = "completed"
+            stages[3].status = "current"
+            current_stage_key = "center_assessment"
+            current_stage_label = "中心考核"
+            if normalized_status == "待中心考核-第二志愿":
+                stages[3].description = "当前进入第二志愿考核阶段"
+            else:
+                stages[3].description = "等待研究中心完成考核结果处理"
+                normalized_status = "待中心考核"
+        elif normalized_status in {"结果公布"}:
+            stages[0].status = "completed"
+            stages[1].status = "completed"
+            stages[2].status = "completed"
+            stages[3].status = "completed"
+            stages[4].status = "current"
+            stages[4].description = "结果待发布，请留意门户与邮件通知"
+            current_stage_key = "result_publish"
+            current_stage_label = "结果公布"
+        elif normalized_status in {"预录取", "同意录取"}:
+            stages[0].status = "completed"
+            stages[1].status = "completed"
+            stages[2].status = "completed"
+            stages[3].status = "completed"
+            stages[4].status = "completed"
+            stages[5].status = "current"
+            stages[5].description = "结果已发布，请按要求完成预录取确认"
+            current_stage_key = "pre_admission"
+            current_stage_label = "预录取"
+            normalized_status = "预录取"
+            result_label = "已进入预录取"
+        elif normalized_status in {"不录取", "报名终止"}:
+            stages[0].status = "completed"
+            stages[1].status = "completed"
+            stages[2].status = "completed"
+            stages[3].status = "terminated"
+            stages[4].status = "current"
+            stages[4].description = "当前报名流程已结束"
+            current_stage_key = "result_publish"
+            current_stage_label = "结果公布"
+            normalized_status = "报名终止"
+            result_label = "不合格"
+        else:
+            stages[0].status = "completed"
+            stages[1].status = "current"
+            stages[1].description = "当前状态待系统进一步归类"
+
+        return PortalWorkflowProgressSummary(
+            current_stage_key=current_stage_key,
+            current_stage_label=current_stage_label,
+            application_form_status=application_form_status,
+            recruitment_application_status=normalized_status or None,
+            result_label=result_label,
+            stages=stages,
+        )
+
+    def _get_latest_portal_application_status(self, student: dict[str, Any]) -> str | None:
+        student_id = int(student.get("id") or 0)
+        if student_id <= 0:
+            return None
+        selected_plan_id = student.get("selected_plan_id")
+        applications = [
+            application for application in self._list("recruitment_applications")
+            if int(application.get("portal_student_id") or 0) == student_id
+        ]
+        if not applications:
+            return None
+
+        def _sort_key(application: dict[str, Any]) -> tuple[int, str, int]:
+            same_plan = 0
+            if selected_plan_id is not None and int(application.get("plan_id") or 0) == int(selected_plan_id):
+                same_plan = 1
+            timestamp = str(application.get("applied_at") or application.get("created_at") or "")
+            return (same_plan, timestamp, int(application.get("id") or 0))
+
+        latest_application = max(applications, key=_sort_key)
+        return str(latest_application.get("application_status") or "").strip() or None
+
+    @staticmethod
     def _portal_plan_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
         year_text = str(item.get("academic_year") or "").strip()
         try:
@@ -14,10 +166,24 @@ class RuntimeManagementStorePortalMixin:
         semester_order = {"春": 1, "夏": 2, "秋": 3, "冬": 4}.get(str(item.get("semester") or "").strip(), 0)
         return academic_year, semester_order, int(item.get("id") or 0)
 
+    def _get_latest_recruitment_plan_id(self) -> int | None:
+        plans = list(self._list("recruitment_plans"))
+        if not plans:
+            return None
+        latest_plan = max(plans, key=self._portal_plan_sort_key)
+        plan_id = int(latest_plan.get("id") or 0)
+        return plan_id if plan_id > 0 else None
+
     def _build_portal_student_record(self, item: dict[str, Any]) -> PortalStudentRecord:
         normalized = dict(item)
         normalized["account_status"] = self._normalize_portal_account_status(normalized.get("account_status"))
         normalized["submitted_at"] = self._normalize_portal_timestamp(normalized.get("submitted_at"))
+        application_status = str(normalized.get("recruitment_application_status") or normalized.get("application_status") or "").strip() or None
+        if application_status is None:
+            application_status = self._get_latest_portal_application_status(normalized)
+        normalized["recruitment_application_status"] = application_status
+        normalized["application_form_status"] = self._portal_application_summary_form_status(normalized.get("submitted_at"), application_status)
+        normalized["workflow_progress"] = self._build_portal_workflow_progress_summary(normalized.get("submitted_at"), application_status)
         profile = normalized.get("profile")
         if isinstance(profile, dict):
             profile_payload = dict(profile)
@@ -129,7 +295,7 @@ class RuntimeManagementStorePortalMixin:
         )
 
     def _build_portal_profile_payload(self, payload: Any) -> dict[str, Any] | None:
-        profile = payload.profile.model_dump(exclude_none=True) if payload.profile is not None else {}
+        profile = payload.profile.model_dump(mode="python") if payload.profile is not None else {}
         fallback_profile = {
             "gender": payload.gender,
             "birth_date": payload.birth_date,
@@ -184,10 +350,10 @@ class RuntimeManagementStorePortalMixin:
                     "is_optional": False,
                 }
             ]
-        personal_statement = payload.personal_statement.model_dump(exclude_none=True) if payload.personal_statement is not None else {}
+        personal_statement = payload.personal_statement.model_dump(mode="python") if payload.personal_statement is not None else {}
         if payload.personal_statement_text and not personal_statement.get("personal_statement_text"):
             personal_statement["personal_statement_text"] = payload.personal_statement_text
-        declaration = payload.declaration.model_dump(exclude_none=True) if payload.declaration is not None else {}
+        declaration = payload.declaration.model_dump(mode="python") if payload.declaration is not None else {}
         declaration.setdefault("has_read_declaration", bool(payload.signed_agreement))
         return {
             "selected_plan_id": payload.plan_id,
@@ -396,6 +562,7 @@ class RuntimeManagementStorePortalMixin:
         request_started_at = perf_counter()
         with self._lock:
             now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            latest_plan_id = self._get_latest_recruitment_plan_id()
             if any(item.get("phone_number") == payload.phone_number for item in self._list("portal_students")):
                 raise ValueError("该手机号已注册，请直接登录")
             if any(item.get("email") == payload.email for item in self._list("portal_students")):
@@ -433,7 +600,7 @@ class RuntimeManagementStorePortalMixin:
                     "recommendation_notes": None,
                     "personal_statement_text": None,
                     "signed_agreement": False,
-                    "selected_plan_id": None,
+                    "selected_plan_id": latest_plan_id,
                     "selected_team_name": None,
                     "selected_advisor_name": None,
                     "self_evaluation": None,
@@ -443,10 +610,9 @@ class RuntimeManagementStorePortalMixin:
                 }
             )
             self._list("portal_students").insert(0, item)
-            operation_log = self._record_operation("学生门户", "门户注册", str(item["id"]), "注册", f'学生 {item["full_name"]} 完成门户注册', operator_username=item["phone_number"])
             persist_started_at = perf_counter()
             try:
-                self._persist_portal_student_change(item, operation_log, update_student_counter=True)
+                self._persist_portal_student_change(item, None, update_student_counter=True)
                 persist_mode = "incremental"
                 persist_elapsed_ms = round((perf_counter() - persist_started_at) * 1000, 2)
             except Exception as exc:
@@ -664,9 +830,8 @@ class RuntimeManagementStorePortalMixin:
                     "application_draft": application_draft,
                 }
             )
-            operation_log = self._record_operation("学生门户", "申请草稿", str(student_id), "保存草稿", f'学生 {student["full_name"]} 保存报名草稿', operator_username=student["phone_number"])
             try:
-                self._persist_portal_student_change(student, operation_log)
+                self._persist_portal_student_change(student, None)
             except Exception:
                 self._save()
             return self._build_portal_student_record(student)
@@ -878,19 +1043,18 @@ class RuntimeManagementStorePortalMixin:
                 business_key = str(persisted_application["business_key"])
                 application_status = str(persisted_application["application_status"])
 
-            operation_log = self._record_operation("学生门户", "报名提交", str(student_id), "提交报名", f'学生 {student["full_name"]} 提交报名申请', operator_username=student["phone_number"])
             try:
                 if persisted_application is not None:
                     self._persist_portal_application_submission(
                         student,
                         persisted_application,
-                        operation_log,
+                        None,
                         workflow_task=workflow_task,
                         created_application=created_application,
                         created_workflow_task=created_workflow_task,
                     )
                 else:
-                    self._persist_portal_student_change(student, operation_log)
+                    self._persist_portal_student_change(student, None)
             except Exception:
                 self._save()
             return PortalApplicationSubmissionResponse(

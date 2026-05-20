@@ -89,6 +89,20 @@ class DataSyncLog(Base, TimestampMixin):
     failure_reason: Mapped[str | None] = mapped_column(Text)
 
 
+class NotificationDeliveryLog(Base, TimestampMixin):
+    __tablename__ = "dtlms_notification_delivery_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    template_code: Mapped[str | None] = mapped_column(String(64))
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    send_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    business_key: Mapped[str | None] = mapped_column(String(64))
+    triggered_by: Mapped[str | None] = mapped_column(String(64))
+
+
 class NotificationTemplate(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "dtlms_notification_templates"
 

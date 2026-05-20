@@ -82,6 +82,8 @@ export type SystemUserRecord = {
   role_code: string
   role_name: string
   department_name: string
+  introduction?: string | null
+  email?: string | null
   phone_number?: string | null
   account_status: string
   last_login_at?: string | null
@@ -93,6 +95,8 @@ export type SystemUserUpsert = {
   full_name: string
   role_code: string
   department_name: string
+  introduction?: string | null
+  email?: string | null
   phone_number?: string | null
   account_status: string
   password?: string | null
@@ -153,6 +157,20 @@ export type SyncLogRecord = {
   sync_status: string
   record_count: number
   executed_at: string
+  failure_reason?: string | null
+}
+
+
+export type NotificationDeliveryLogRecord = {
+  id: number
+  channel: string
+  template_code?: string | null
+  recipient: string
+  subject: string
+  send_status: string
+  sent_at: string
+  business_key?: string | null
+  triggered_by?: string | null
   failure_reason?: string | null
 }
 
@@ -372,4 +390,13 @@ export function listSyncLogs(params?: PaginationParams & {
   source_system?: string
 }) {
   return http.get<PagedResponse<SyncLogRecord>>('/system/sync-logs', { params })
+}
+
+
+export function listNotificationDeliveryLogs(params?: PaginationParams & {
+  keyword?: string
+  channel?: string
+  send_status?: string
+}) {
+  return http.get<PagedResponse<NotificationDeliveryLogRecord>>('/system/notification-delivery-logs', { params })
 }

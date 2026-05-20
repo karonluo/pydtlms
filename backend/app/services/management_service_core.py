@@ -39,7 +39,7 @@ class RuntimeManagementStoreCoreMixin:
         if postgres_state is not None:
             self._loaded_state_from_postgres = True
             return postgres_state
-        return build_runtime_seed_state()
+        return {"counters": {}}
 
     def _write_state(self, state: dict[str, Any] | None = None) -> None:
         payload = state or self.state
@@ -47,10 +47,28 @@ class RuntimeManagementStoreCoreMixin:
 
     def _migrate_state(self) -> bool:
         changed = False
-        role_lookup = {item["role_code"]: item for item in self.state.setdefault("roles", [])}
-        profiles = self.state.setdefault("profiles", {})
         if "teams" not in self.state:
             self.state["teams"] = self._bootstrap_teams_from_students()
+            changed = True
+        postgres_roles = self._load_roles_from_postgres()
+        if postgres_roles is not None and self.state.setdefault("roles", []) != postgres_roles:
+            self.state["roles"] = postgres_roles
+            changed = True
+        postgres_system_users = self._load_system_users_from_postgres()
+        if postgres_system_users is not None and self.state.setdefault("system_users", []) != postgres_system_users:
+            self.state["system_users"] = postgres_system_users
+            changed = True
+        postgres_profiles = self._load_profiles_from_postgres()
+        if postgres_profiles is not None and self.state.setdefault("profiles", {}) != postgres_profiles:
+            self.state["profiles"] = postgres_profiles
+            changed = True
+        postgres_audit_policies = self._load_audit_policies_from_postgres()
+        if postgres_audit_policies is not None and self.state.setdefault("audit_policies", []) != postgres_audit_policies:
+            self.state["audit_policies"] = postgres_audit_policies
+            changed = True
+        postgres_integrations = self._load_integrations_from_postgres()
+        if postgres_integrations is not None and self.state.setdefault("integrations", []) != postgres_integrations:
+            self.state["integrations"] = postgres_integrations
             changed = True
         postgres_students = self._load_students_from_postgres()
         if postgres_students is not None:
@@ -98,6 +116,22 @@ class RuntimeManagementStoreCoreMixin:
             int(self._counters.get("teams", 0)),
             max([item.get("id", 0) for item in self.state.setdefault("teams", [])], default=0),
         )
+        self._counters["roles"] = max(
+            int(self._counters.get("roles", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("roles", [])], default=0),
+        )
+        self._counters["system_users"] = max(
+            int(self._counters.get("system_users", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("system_users", [])], default=0),
+        )
+        self._counters["audit_policies"] = max(
+            int(self._counters.get("audit_policies", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("audit_policies", [])], default=0),
+        )
+        self._counters["integrations"] = max(
+            int(self._counters.get("integrations", 0)),
+            max([item.get("id", 0) for item in self.state.setdefault("integrations", [])], default=0),
+        )
         self._counters["recruitment_plans"] = max(
             int(self._counters.get("recruitment_plans", 0)),
             max([item.get("id", 0) for item in self.state.setdefault("recruitment_plans", [])], default=0),
@@ -137,6 +171,8 @@ class RuntimeManagementStoreCoreMixin:
             portal_student.setdefault("created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             portal_student.setdefault("updated_at", portal_student.get("created_at"))
 
+        role_lookup = {item["role_code"]: item for item in self.state.setdefault("roles", [])}
+        profiles = self.state.setdefault("profiles", {})
         for user in self.state.setdefault("system_users", []):
             if not user.get("password_hash"):
                 default_password = DEFAULT_PASSWORD_BY_USERNAME.get(user.get("username"), DEFAULT_USER_PASSWORD)
@@ -238,7 +274,7 @@ class RuntimeManagementStoreCoreMixin:
                 self._hydrated_state_from_postgres = True
             return rows
         except Exception as exc:
-            logger.warning("Load students from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            logger.warning("Load students from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
             return None
 
     def _load_teams_from_postgres(self) -> list[dict[str, Any]] | None:
@@ -248,7 +284,7 @@ class RuntimeManagementStoreCoreMixin:
                 self._hydrated_state_from_postgres = True
             return rows
         except Exception as exc:
-            logger.warning("Load teams from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            logger.warning("Load teams from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
             return None
 
     def _load_recruitment_plans_from_postgres(self) -> list[dict[str, Any]] | None:
@@ -258,7 +294,7 @@ class RuntimeManagementStoreCoreMixin:
                 self._hydrated_state_from_postgres = True
             return rows
         except Exception as exc:
-            logger.warning("Load recruitment plans from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            logger.warning("Load recruitment plans from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
             return None
 
     def _load_portal_students_from_postgres(self) -> list[dict[str, Any]] | None:
@@ -268,7 +304,7 @@ class RuntimeManagementStoreCoreMixin:
                 self._hydrated_state_from_postgres = True
             return rows
         except Exception as exc:
-            logger.warning("Load portal students from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            logger.warning("Load portal students from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
             return None
 
     def _load_recruitment_applications_from_postgres(self) -> list[dict[str, Any]] | None:
@@ -278,7 +314,7 @@ class RuntimeManagementStoreCoreMixin:
                 self._hydrated_state_from_postgres = True
             return rows
         except Exception as exc:
-            logger.warning("Load recruitment applications from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            logger.warning("Load recruitment applications from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
             return None
 
     def _load_workflow_tasks_from_postgres(self) -> list[dict[str, Any]] | None:
@@ -288,7 +324,57 @@ class RuntimeManagementStoreCoreMixin:
                 self._hydrated_state_from_postgres = True
             return rows
         except Exception as exc:
-            logger.warning("Load workflow tasks from PostgreSQL failed, fallback to current runtime state: %s", exc)
+            logger.warning("Load workflow tasks from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
+            return None
+
+    def _load_roles_from_postgres(self) -> list[dict[str, Any]] | None:
+        try:
+            rows = self._postgres_store.load_role_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
+        except Exception as exc:
+            logger.warning("Load roles from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
+            return None
+
+    def _load_system_users_from_postgres(self) -> list[dict[str, Any]] | None:
+        try:
+            rows = self._postgres_store.load_system_user_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
+        except Exception as exc:
+            logger.warning("Load system users from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
+            return None
+
+    def _load_profiles_from_postgres(self) -> dict[str, dict[str, Any]] | None:
+        try:
+            rows = self._postgres_store.load_user_profile_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
+        except Exception as exc:
+            logger.warning("Load user profiles from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
+            return None
+
+    def _load_audit_policies_from_postgres(self) -> list[dict[str, Any]] | None:
+        try:
+            rows = self._postgres_store.load_audit_policy_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
+        except Exception as exc:
+            logger.warning("Load audit policies from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
+            return None
+
+    def _load_integrations_from_postgres(self) -> list[dict[str, Any]] | None:
+        try:
+            rows = self._postgres_store.load_integration_state()
+            if rows is not None:
+                self._hydrated_state_from_postgres = True
+            return rows
+        except Exception as exc:
+            logger.warning("Load integrations from PostgreSQL failed, current state will stay database-only/empty: %s", exc)
             return None
 
     def _refresh_students_from_postgres(self) -> None:
@@ -370,7 +456,17 @@ class RuntimeManagementStoreCoreMixin:
         self._counters[key] = int(self._counters.get(key, 0)) + 1
         return self._counters[key]
 
-    def _record_operation(self, module_name: str, entity_name: str, entity_id: str, action: str, summary: str, operator_username: str = "admin") -> dict[str, Any]:
+    def _record_operation(
+        self,
+        module_name: str,
+        entity_name: str,
+        entity_id: str,
+        action: str,
+        summary: str,
+        operator_username: str = "admin",
+        *,
+        result: str = "success",
+    ) -> dict[str, Any]:
         entry = {
             "id": self._next_id("operation_logs"),
             "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -379,10 +475,76 @@ class RuntimeManagementStoreCoreMixin:
             "entity_name": entity_name,
             "entity_id": entity_id,
             "action": action,
-            "result": "success",
+            "result": result,
             "summary": summary,
         }
-        self.state["operation_logs"].insert(0, entry)
+        self._list("operation_logs").insert(0, entry)
+        return entry
+
+    def _persist_operation_log(self, operation_log: dict[str, Any]) -> None:
+        try:
+            self._postgres_store.sync_operation_log(
+                operation_log,
+                counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+            )
+        except Exception as exc:
+            logger.warning("Persist operation log failed: %s", exc)
+
+    def record_operation_event(
+        self,
+        module_name: str,
+        entity_name: str,
+        entity_id: str,
+        action: str,
+        summary: str,
+        operator_username: str = "admin",
+        *,
+        result: str = "success",
+    ) -> dict[str, Any]:
+        operation_log = self._record_operation(
+            module_name,
+            entity_name,
+            entity_id,
+            action,
+            summary,
+            operator_username=operator_username,
+            result=result,
+        )
+        self._persist_operation_log(operation_log)
+        return operation_log
+
+    def _record_notification_delivery_log(
+        self,
+        *,
+        channel: str,
+        recipient: str,
+        subject: str,
+        send_status: str,
+        template_code: str | None = None,
+        failure_reason: str | None = None,
+        business_key: str | None = None,
+        triggered_by: str | None = None,
+    ) -> dict[str, Any]:
+        entry = {
+            "id": self._next_id("notification_delivery_logs"),
+            "channel": channel,
+            "template_code": template_code,
+            "recipient": recipient,
+            "subject": subject,
+            "send_status": send_status,
+            "failure_reason": failure_reason,
+            "business_key": business_key,
+            "triggered_by": triggered_by or "system",
+            "sent_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        self._list("notification_delivery_logs").insert(0, entry)
+        try:
+            self._postgres_store.sync_notification_delivery_log(
+                entry,
+                counters={"notification_delivery_logs": int(self._counters.get("notification_delivery_logs", 0))},
+            )
+        except Exception as exc:
+            logger.warning("Persist notification delivery log failed: %s", exc)
         return entry
 
     def _list(self, name: str) -> list[dict[str, Any]]:
@@ -795,10 +957,12 @@ class RuntimeManagementStoreCoreMixin:
 
     def _build_role_record(self, item: dict[str, Any]) -> RoleRecord:
         user_count = len([user for user in self._list("system_users") if user["role_code"] == item["role_code"]])
-        return RoleRecord(**item, user_count=user_count)
+        normalized = {key: value for key, value in item.items() if key != "user_count"}
+        return RoleRecord(**normalized, user_count=user_count)
 
     def _build_system_user_record(self, item: dict[str, Any]) -> SystemUserRecord:
         role = self._role_lookup().get(item["role_code"])
+        profile = self.state.setdefault("profiles", {}).get(item["username"], {})
         return SystemUserRecord(
             id=item["id"],
             username=item["username"],
@@ -806,6 +970,8 @@ class RuntimeManagementStoreCoreMixin:
             role_code=item["role_code"],
             role_name=role["role_name"] if role else item["role_code"],
             department_name=item["department_name"],
+            introduction=item.get("introduction") or profile.get("introduction"),
+            email=item.get("email") or profile.get("email"),
             phone_number=item.get("phone_number"),
             account_status=item["account_status"],
             last_login_at=item.get("last_login_at"),
@@ -823,6 +989,19 @@ class RuntimeManagementStoreCoreMixin:
         if invalid:
             raise ValueError(f"Invalid permissions: {', '.join(invalid)}")
         return list(dict.fromkeys(permissions))
+
+    def _expand_granted_permissions(self, permissions: list[str]) -> list[str]:
+        normalized_permissions = [str(item) for item in permissions if str(item).strip()]
+        if "*" in normalized_permissions:
+            return ["*"]
+        expanded_permissions = list(dict.fromkeys(normalized_permissions))
+        for permission in list(expanded_permissions):
+            module_name, separator, action_name = permission.partition(":")
+            if separator and action_name == "write":
+                read_permission = f"{module_name}:read"
+                if read_permission not in expanded_permissions:
+                    expanded_permissions.append(read_permission)
+        return expanded_permissions
 
     def get_permission_catalog(self) -> PermissionCatalogResponse:
         return PermissionCatalogResponse(items=[PermissionOption(**item) for item in PERMISSION_CATALOG])
@@ -969,7 +1148,7 @@ class RuntimeManagementStoreCoreMixin:
         )
 
     def authenticate_system_user(self, username: str, password: str) -> dict[str, Any] | None:
-        candidate = next((item for item in self._list("system_users") if item["username"] == username), None)
+        candidate = self._load_system_user_auth_context(username)
         if not candidate:
             return None
         if candidate["account_status"] != "启用":
@@ -980,15 +1159,14 @@ class RuntimeManagementStoreCoreMixin:
         return self.get_principal_context(username)
 
     def get_principal_context(self, username: str) -> dict[str, Any]:
-        user = next((item for item in self._list("system_users") if item["username"] == username), None)
+        user = self._load_system_user_auth_context(username)
         if not user or user["account_status"] != "启用":
             raise KeyError(username)
-        role = self._ensure_role_exists(user["role_code"])
         return {
             "username": user["username"],
             "full_name": user["full_name"],
-            "roles": [role["role_code"]],
-            "permissions": role.get("permissions", []),
+            "roles": [user["role_code"]],
+            "permissions": self._expand_granted_permissions(user.get("permissions", [])),
         }
 
     def touch_last_login(self, username: str) -> None:
@@ -998,6 +1176,7 @@ class RuntimeManagementStoreCoreMixin:
                     updated_user = {**item, "last_login_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                     self._list("system_users")[index] = updated_user
                     self._postgres_store.update_runtime_system_user(int(updated_user["id"]), updated_user)
+                    self._bump_system_user_list_cache_version()
                     return
             raise KeyError(username)
 
@@ -1014,6 +1193,7 @@ class RuntimeManagementStoreCoreMixin:
                         self._postgres_store.insert_runtime_operation_log(operation_log)
                     except Exception:
                         self._save()
+                    self._delete_cache_keys(self._system_user_auth_cache_key(username))
                     return
             raise KeyError(username)
 

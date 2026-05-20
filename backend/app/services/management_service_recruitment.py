@@ -1,9 +1,48 @@
 from __future__ import annotations
 
+from app.schemas.portal import PortalApplicationDeclarationData, PortalPersonalStatementData
+from app.schemas.recruitment import RecruitApplicationRecord, RecruitPortalApplicationDetail
+
 from .management_service_shared import *
 
 
 class RuntimeManagementStoreRecruitmentMixin:
+    @staticmethod
+    def _build_recruitment_portal_application_detail(application: RecruitApplicationRecord) -> RecruitPortalApplicationDetail:
+        personal_statement = application.personal_statement or PortalPersonalStatementData()
+        if not personal_statement.supporting_material_attachment_url and application.material_list_attachment:
+            personal_statement = personal_statement.model_copy(
+                update={
+                    "supporting_material_attachment_url": application.material_list_attachment,
+                    "supporting_material_attachment_name": application.material_list_attachment_name,
+                }
+            )
+        return RecruitPortalApplicationDetail(
+            application_id=application.id,
+            plan_id=application.plan_id,
+            business_key=application.business_key,
+            candidate_no=application.candidate_no,
+            student_name=application.student_name,
+            phone_number=application.phone_number,
+            email=application.email,
+            id_number=application.id_number,
+            application_status=application.application_status,
+            material_status=application.material_status,
+            reviewer_name=application.reviewer_name,
+            submitted_at=application.applied_at,
+            profile=application.profile,
+            source_channel=application.source_channel or application.discovery_channel,
+            source_channel_other=application.source_channel_other,
+            preferences=list(application.preferences or []),
+            education_experiences=list(application.education_experiences or []),
+            practice_experiences=list(application.practice_experiences or []),
+            english_proficiencies=list(application.english_proficiencies or []),
+            family_members=list(application.family_members or []),
+            achievement_records=list(application.achievement_records or []),
+            personal_statement=personal_statement,
+            declaration=application.declaration or PortalApplicationDeclarationData(has_read_declaration=False),
+        )
+
     def _build_recruit_plan_record(self, item: dict[str, Any]) -> RecruitPlanRecord:
         application_count = len([application for application in self._list("recruitment_applications") if application["plan_id"] == item["id"]])
         return RecruitPlanRecord(
@@ -60,15 +99,8 @@ class RuntimeManagementStoreRecruitmentMixin:
             records = [RecruitPlanRecord(**item) for item in items]
             return RecruitPlanListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query recruitment plans from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = [self._build_recruit_plan_record(item) for item in self._list("recruitment_plans")]
-        if keyword:
-            items = [item for item in items if self._matches_keyword(item.plan_name, item.academic_term, item.plan_description, keyword=keyword)]
-        if semester:
-            items = [item for item in items if item.semester == semester]
-        paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
-        return RecruitPlanListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query recruitment plans from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("招生计划数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_recruitment_plan(self, payload: RecruitPlanUpsert) -> RecruitPlanRecord:
         with self._lock:
@@ -145,33 +177,8 @@ class RuntimeManagementStoreRecruitmentMixin:
             records = [RecruitApplicationRecord(**item) for item in items]
             return RecruitApplicationListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query recruitment applications from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("recruitment_applications"))
-        if plan_id is not None:
-            items = [item for item in items if item["plan_id"] == plan_id]
-        if status:
-            items = [item for item in items if item["application_status"] == status]
-        if keyword:
-            term = keyword.lower()
-            items = [
-                item
-                for item in items
-                if term in str(item.get("business_key") or "").lower()
-                or term in str(item.get("candidate_no") or "").lower()
-                or term in item["student_name"].lower()
-                or term in str(item.get("graduation_school") or "").lower()
-                or term in str(item.get("graduate_school") or "").lower()
-                or term in str(item.get("intended_field") or "").lower()
-                or term in str(item.get("first_choice") or "").lower()
-                or term in str(item.get("second_choice") or "").lower()
-                or term in str(item.get("intended_advisor_name") or "").lower()
-                or term in str(item.get("phone_number") or "").lower()
-                or term in str(item.get("email") or "").lower()
-            ]
-        records = [RecruitApplicationRecord(**item) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return RecruitApplicationListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query recruitment applications from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("招生报名数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def get_recruitment_application_detail(self, application_id: int) -> RecruitApplicationRecord:
         try:
@@ -179,10 +186,12 @@ class RuntimeManagementStoreRecruitmentMixin:
             if item is not None:
                 return RecruitApplicationRecord(**item)
         except Exception as exc:
-            logger.warning("Query recruitment application detail from PostgreSQL failed, fallback to in-memory data: %s", exc)
+            logger.warning("Query recruitment application detail from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("招生报名详情当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
-        _, item = self._find_required("recruitment_applications", application_id)
-        return RecruitApplicationRecord(**item)
+    def get_recruitment_portal_application_detail(self, application_id: int) -> RecruitPortalApplicationDetail:
+        application = self.get_recruitment_application_detail(application_id)
+        return self._build_recruitment_portal_application_detail(application)
 
     def create_recruitment_application(self, payload: RecruitApplicationUpsert, principal: Any | None = None) -> RecruitApplicationRecord:
         with self._lock:

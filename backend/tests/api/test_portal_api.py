@@ -3,6 +3,7 @@ from threading import RLock
 
 from fastapi.testclient import TestClient
 
+from app.api.v1 import portal as portal_api
 from app.main import app
 from app.schemas.recruitment import RecruitApplicationRecord
 from app.schemas.portal import PortalRegistrationEmailCodeResponse, PortalRegistrationResponse, PortalStudentRecord
@@ -25,6 +26,23 @@ def _portal_student_payload(student_id: int = 7) -> dict[str, object]:
         'selected_advisor_name': '刘亚',
         'self_evaluation': '具备算法与控制方向研究基础',
         'submitted_at': '2026-04-13 10:00:00',
+        'application_form_status': '已填写报名',
+        'recruitment_application_status': '待审核',
+        'workflow_progress': {
+            'current_stage_key': 'material_review',
+            'current_stage_label': '资料审核',
+            'application_form_status': '已填写报名',
+            'recruitment_application_status': '待审核',
+            'result_label': None,
+            'stages': [
+                {'key': 'online_application', 'label': '在线申请', 'status': 'completed'},
+                {'key': 'material_review', 'label': '资料审核', 'status': 'current', 'description': '已提交报名，等待审核'},
+                {'key': 'background_review', 'label': '背景评估', 'status': 'pending'},
+                {'key': 'center_assessment', 'label': '中心考核', 'status': 'pending'},
+                {'key': 'result_publish', 'label': '结果公布', 'status': 'pending'},
+                {'key': 'pre_admission', 'label': '预录取', 'status': 'pending'},
+            ],
+        },
     }
 
 
@@ -89,8 +107,22 @@ def _build_valid_profile_payload() -> dict[str, object]:
 
 def test_portal_register_returns_profile(monkeypatch) -> None:
     with TestClient(app) as client:
+        log_calls: list[dict[str, object]] = []
         monkeypatch.setattr('app.api.v1.portal.validate_portal_registration_email_code', lambda email, verification_code: None)
         monkeypatch.setattr('app.api.v1.portal.clear_portal_registration_email_code', lambda email: None)
+        monkeypatch.setattr(
+            'app.api.v1.portal.record_portal_operation_event',
+            lambda entity_name, entity_id, action, summary, operator_username, result='success': log_calls.append(
+                {
+                    'entity_name': entity_name,
+                    'entity_id': entity_id,
+                    'action': action,
+                    'summary': summary,
+                    'operator_username': operator_username,
+                    'result': result,
+                }
+            ),
+        )
         monkeypatch.setattr(
             'app.api.v1.portal.register_portal_student',
             lambda payload: PortalRegistrationResponse(message='注册成功，请登录后继续填写申请表', student=_portal_student_record()),
@@ -113,6 +145,46 @@ def test_portal_register_returns_profile(monkeypatch) -> None:
         assert payload['message'] == '注册成功，请登录后继续填写申请表'
         assert payload['student']['full_name'] == '张三'
         assert payload['student']['selected_team_name'] == '智能制造联合团队'
+        assert log_calls[-1]['entity_name'] == '门户注册'
+        assert log_calls[-1]['action'] == '注册'
+        assert log_calls[-1]['result'] == 'success'
+
+
+def test_portal_register_failure_writes_operation_log(monkeypatch) -> None:
+    with TestClient(app) as client:
+        log_calls: list[dict[str, object]] = []
+        monkeypatch.setattr('app.api.v1.portal.validate_portal_registration_email_code', lambda email, verification_code: None)
+        monkeypatch.setattr(
+            'app.api.v1.portal.record_portal_operation_event',
+            lambda entity_name, entity_id, action, summary, operator_username, result='success': log_calls.append(
+                {
+                    'entity_name': entity_name,
+                    'entity_id': entity_id,
+                    'action': action,
+                    'summary': summary,
+                    'operator_username': operator_username,
+                    'result': result,
+                }
+            ),
+        )
+        monkeypatch.setattr('app.api.v1.portal.register_portal_student', lambda payload: (_ for _ in ()).throw(ValueError('该邮箱已注册，请直接登录')))
+
+        response = client.post(
+            '/api/v1/portal/register',
+            json={
+                'phone_number': '13800001111',
+                'email': 'zhangsan@example.com',
+                'full_name': '张三',
+                'id_number': '32000019990101123X',
+                'password': 'Secret123!',
+                'email_verification_code': '123456',
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == '该邮箱已注册，请直接登录'
+        assert log_calls[-1]['entity_name'] == '门户注册'
+        assert log_calls[-1]['result'] == 'failed'
 
 
 def test_portal_send_registration_email_code_returns_message(monkeypatch) -> None:
@@ -161,8 +233,22 @@ def test_portal_send_login_email_code_returns_message(monkeypatch) -> None:
 
 def test_portal_login_returns_session(monkeypatch) -> None:
     with TestClient(app) as client:
+        log_calls: list[dict[str, object]] = []
         monkeypatch.setattr('app.api.v1.portal.login_portal_student', lambda payload: _portal_student_record())
         monkeypatch.setattr('app.api.v1.portal.create_portal_access_token', lambda student_id, full_name: f'portal-{student_id}')
+        monkeypatch.setattr(
+            'app.api.v1.portal.record_portal_operation_event',
+            lambda entity_name, entity_id, action, summary, operator_username, result='success': log_calls.append(
+                {
+                    'entity_name': entity_name,
+                    'entity_id': entity_id,
+                    'action': action,
+                    'summary': summary,
+                    'operator_username': operator_username,
+                    'result': result,
+                }
+            ),
+        )
 
         response = client.post(
             '/api/v1/portal/login',
@@ -177,6 +263,41 @@ def test_portal_login_returns_session(monkeypatch) -> None:
         assert payload['access_token'] == 'portal-7'
         assert payload['token_type'] == 'bearer'
         assert payload['student']['id'] == 7
+        assert log_calls[-1]['entity_name'] == '门户登录'
+        assert log_calls[-1]['action'] == '密码登录'
+        assert log_calls[-1]['result'] == 'success'
+
+
+def test_portal_login_failure_writes_operation_log(monkeypatch) -> None:
+    with TestClient(app) as client:
+        log_calls: list[dict[str, object]] = []
+        monkeypatch.setattr('app.api.v1.portal.login_portal_student', lambda payload: (_ for _ in ()).throw(ValueError('账号或密码错误')))
+        monkeypatch.setattr(
+            'app.api.v1.portal.record_portal_operation_event',
+            lambda entity_name, entity_id, action, summary, operator_username, result='success': log_calls.append(
+                {
+                    'entity_name': entity_name,
+                    'entity_id': entity_id,
+                    'action': action,
+                    'summary': summary,
+                    'operator_username': operator_username,
+                    'result': result,
+                }
+            ),
+        )
+
+        response = client.post(
+            '/api/v1/portal/login',
+            json={
+                'account': '13800001111',
+                'password': 'Secret123!',
+            },
+        )
+
+        assert response.status_code == 401
+        assert response.json()['detail'] == '账号或密码错误'
+        assert log_calls[-1]['entity_name'] == '门户登录'
+        assert log_calls[-1]['result'] == 'failed'
 
 
 def test_portal_login_by_email_code_returns_session(monkeypatch) -> None:
@@ -226,6 +347,11 @@ def test_portal_me_returns_profile(monkeypatch) -> None:
         assert response.status_code == 200
         assert response.json()['id'] == 7
         assert response.json()['graduation_school'] == '江南大学'
+        assert response.json()['application_form_status'] == '已填写报名'
+        assert response.json()['recruitment_application_status'] == '待审核'
+        assert response.json()['workflow_progress']['current_stage_label'] == '资料审核'
+        assert response.json()['workflow_progress']['stages'][1]['status'] == 'current'
+        assert response.json()['workflow_progress']['stages'][1]['description'] == '已提交报名，等待审核'
 
 
 def test_portal_plans_and_teams_require_auth_and_return_data(monkeypatch) -> None:
@@ -339,92 +465,139 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
 
 
 def test_portal_attachment_upload_returns_public_url(monkeypatch, tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            log_calls: list[dict[str, object]] = []
+            monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+            monkeypatch.setattr(
+                'app.api.v1.portal.record_portal_operation_event',
+                lambda entity_name, entity_id, action, summary, operator_username, result='success': log_calls.append(
+                    {
+                        'entity_name': entity_name,
+                        'entity_id': entity_id,
+                        'action': action,
+                        'summary': summary,
+                        'operator_username': operator_username,
+                        'result': result,
+                    }
+                ),
+            )
 
-        response = client.post(
-            '/api/v1/portal/attachments/upload',
-            headers={'Authorization': 'Bearer portal-token'},
-            data={'category': 'resume'},
-            files={'file': ('resume.pdf', b'%PDF-1.7 mock file', 'application/pdf')},
-        )
+            response = client.post(
+                '/api/v1/portal/attachments/upload',
+                headers={'Authorization': 'Bearer portal-token'},
+                data={'category': 'resume'},
+                files={'file': ('resume.pdf', b'%PDF-1.7 mock file', 'application/pdf')},
+            )
 
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload['category'] == 'resume'
-        assert payload['file_name'] == 'resume.pdf'
-        assert payload['url'].startswith('/portal-attachments/uploads/student-7/resume/')
-        uploaded_files = list((tmp_path / 'student-7' / 'resume').glob('resume-*'))
-        assert len(uploaded_files) == 1
-        assert uploaded_files[0].read_bytes() == b'%PDF-1.7 mock file'
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload['category'] == 'resume'
+            assert payload['file_name'] == 'resume.pdf'
+            assert payload['url'].startswith('/api/v1/portal/attachments/student-7/resume/')
+            assert log_calls[-1]['entity_name'] == '附件上传'
+            assert log_calls[-1]['result'] == 'success'
+            uploaded_files = list((tmp_path / 'student-7' / 'resume').glob('resume-*'))
+            assert len(uploaded_files) == 1
+            assert uploaded_files[0].read_bytes() == b'%PDF-1.7 mock file'
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
 
 
 def test_portal_id_card_collage_upload_accepts_jpg(monkeypatch, tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
 
-        response = client.post(
-            '/api/v1/portal/attachments/upload',
-            headers={'Authorization': 'Bearer portal-token'},
-            data={'category': 'id_card_collage'},
-            files={'file': ('id-card.jpg', b'\xff\xd8\xff mock jpeg', 'image/jpeg')},
-        )
+            response = client.post(
+                '/api/v1/portal/attachments/upload',
+                headers={'Authorization': 'Bearer portal-token'},
+                data={'category': 'id_card_collage'},
+                files={'file': ('id-card.jpg', b'\xff\xd8\xff mock jpeg', 'image/jpeg')},
+            )
 
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload['category'] == 'id_card_collage'
-        assert payload['file_name'] == 'id-card.jpg'
-        assert payload['url'].startswith('/portal-attachments/uploads/student-7/id_card_collage/')
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload['category'] == 'id_card_collage'
+            assert payload['file_name'] == 'id-card.jpg'
+            assert payload['url'].startswith('/api/v1/portal/attachments/student-7/id_card_collage/')
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
 
 
 def test_portal_attachment_upload_rejects_unsupported_file_type(monkeypatch, tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            log_calls: list[dict[str, object]] = []
+            monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+            monkeypatch.setattr(
+                'app.api.v1.portal.record_portal_operation_event',
+                lambda entity_name, entity_id, action, summary, operator_username, result='success': log_calls.append(
+                    {
+                        'entity_name': entity_name,
+                        'entity_id': entity_id,
+                        'action': action,
+                        'summary': summary,
+                        'operator_username': operator_username,
+                        'result': result,
+                    }
+                ),
+            )
 
-        response = client.post(
-            '/api/v1/portal/attachments/upload',
-            headers={'Authorization': 'Bearer portal-token'},
-            data={'category': 'resume'},
-            files={'file': ('resume.txt', b'plain text', 'text/plain')},
-        )
+            response = client.post(
+                '/api/v1/portal/attachments/upload',
+                headers={'Authorization': 'Bearer portal-token'},
+                data={'category': 'resume'},
+                files={'file': ('resume.txt', b'plain text', 'text/plain')},
+            )
 
-        assert response.status_code == 400
-        assert response.json()['detail'] == '附件格式不受支持'
+            assert response.status_code == 400
+            assert response.json()['detail'] == '附件格式不受支持'
+        assert log_calls[-1]['entity_name'] == '附件上传'
+        assert log_calls[-1]['result'] == 'failed'
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
 
 
 def test_portal_attachment_upload_accepts_octet_stream_when_suffix_is_valid(monkeypatch, tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
 
-        response = client.post(
-            '/api/v1/portal/attachments/upload',
-            headers={'Authorization': 'Bearer portal-token'},
-            data={'category': 'resume'},
-            files={'file': ('resume.pdf', b'%PDF-1.7 octet stream', 'application/octet-stream')},
-        )
+            response = client.post(
+                '/api/v1/portal/attachments/upload',
+                headers={'Authorization': 'Bearer portal-token'},
+                data={'category': 'resume'},
+                files={'file': ('resume.pdf', b'%PDF-1.7 octet stream', 'application/octet-stream')},
+            )
 
-        assert response.status_code == 200
-        assert response.json()['category'] == 'resume'
+            assert response.status_code == 200
+            assert response.json()['category'] == 'resume'
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
 
 
 def test_portal_attachment_upload_accepts_powershell_form_content_type(monkeypatch, tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setattr('app.api.v1.portal.PORTAL_ATTACHMENT_UPLOAD_DIR', tmp_path)
 
-        response = client.post(
-            '/api/v1/portal/attachments/upload',
-            headers={'Authorization': 'Bearer portal-token'},
-            data={'category': 'resume'},
-            files={'file': ('resume.pdf', b'%PDF-1.7 powershell form', 'application/x-msdownload')},
-        )
+            response = client.post(
+                '/api/v1/portal/attachments/upload',
+                headers={'Authorization': 'Bearer portal-token'},
+                data={'category': 'resume'},
+                files={'file': ('resume.pdf', b'%PDF-1.7 powershell form', 'application/x-msdownload')},
+            )
 
-        assert response.status_code == 200
-        assert response.json()['category'] == 'resume'
+            assert response.status_code == 200
+            assert response.json()['category'] == 'resume'
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
 
 
 def test_portal_application_submission_accepts_structured_attachment_fields(monkeypatch) -> None:

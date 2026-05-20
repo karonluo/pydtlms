@@ -14,12 +14,15 @@ from typing import Any, TypeVar
 from passlib.context import CryptContext
 
 from app.core.cache import build_cache_key, get_cache_client
-from app.schemas.contact import validate_optional_phone_number
+from app.core.exceptions import DatabaseUnavailableError
+from app.schemas.contact import validate_email, validate_optional_email, validate_optional_phone_number, validate_phone_number
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.portal import (
     PortalApplicationSubmissionResponse,
     PortalApplicationDraftUpsert,
     PortalApplicationUpsert,
+    PortalWorkflowProgressSummary,
+    PortalWorkflowStageItem,
     PortalLoginRequest,
     PortalPasswordChangeRequest,
     PortalPlanListResponse,
@@ -54,6 +57,10 @@ from app.schemas.student import (
     CenterRecord,
     CenterUpsert,
     RegisteredPortalStudentActionResponse,
+    RegisteredPortalStudentExportJobCreateResponse,
+    RegisteredPortalStudentExportJobListResponse,
+    RegisteredPortalStudentExportJobRecord,
+    RegisteredPortalStudentExportRequest,
     RegisteredPortalStudentEmailRequest,
     RegisteredPortalStudentListResponse,
     RegisteredPortalStudentRecord,
@@ -80,6 +87,8 @@ from app.schemas.system import (
     IntegrationListResponse,
     IntegrationRecord,
     IntegrationUpsert,
+    NotificationDeliveryLogListResponse,
+    NotificationDeliveryLogRecord,
     OperationLogListResponse,
     OperationLogRecord,
     PermissionCatalogResponse,
@@ -126,7 +135,6 @@ from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, Workflo
 from app.services.email_service import NotificationEmailService
 from app.services.postgres_state_store import PostgresStateStore
 from app.services.recruitment_excel_service import build_recruitment_template
-from app.services.runtime_seed_data import build_runtime_seed_state
 
 
 PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -217,6 +225,14 @@ DEFAULT_PORTAL_ETHNIC_GROUP_VALUES = (
     "珞巴族",
     "基诺族",
 )
+CACHE_NULL_SENTINEL_KEY = "__cached_null__"
+CACHE_NULL_TTL_SECONDS = 60
+CACHE_TTL_JITTER_SECONDS = 30
+SYSTEM_USER_AUTH_CACHE_TTL_SECONDS = 120
+SYSTEM_USER_LIST_CACHE_TTL_SECONDS = 60
+USER_PROFILE_CACHE_TTL_SECONDS = 300
+CACHE_REBUILD_LOCKS: dict[str, Lock] = {}
+CACHE_REBUILD_LOCKS_GUARD = Lock()
 ROLE_DISPLAY_NAMES = {
     "platform_admin": "学合管理员",
     "advisor": "导师",

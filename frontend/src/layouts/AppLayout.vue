@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import {
+  Bell,
   DataAnalysis,
   DocumentChecked,
   Files,
   Histogram,
+  Loading,
   Reading,
   Setting,
   SwitchButton,
   UserFilled,
+  WarningFilled,
+  CircleCheckFilled,
 } from '@element-plus/icons-vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
+import type { RegisteredPortalStudentExportJobRecord } from '../api/students'
 import { useAuthStore } from '../stores/auth'
+import { useExportJobStore } from '../stores/exportJobs'
 
 type MenuItem = {
   path: string
@@ -37,7 +44,9 @@ type MenuGroup = {
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const exportJobStore = useExportJobStore()
 const openedGroups = ref<string[]>([])
+const exportJobDialogVisible = ref(false)
 
 const menuGroups: MenuGroup[] = [
   {
@@ -115,6 +124,7 @@ const menuGroups: MenuGroup[] = [
         icon: Files,
         items: [
           { path: '/system/operation-logs', label: '操作日志', icon: Files, requiredPermission: 'audit:read' },
+          { path: '/system/notification-logs', label: '通知发送日志', icon: Files, requiredPermission: 'audit:read' },
           { path: '/system/sync-logs', label: '同步日志', icon: Files, requiredPermission: 'audit:read' },
         ],
       },
@@ -169,7 +179,48 @@ function goProfile() {
   router.push('/profile')
 }
 
+function resolveExportJobStatusLabel(status: string) {
+  if (status === 'completed') return '导出成功'
+  if (status === 'failed') return '导出失败'
+  if (status === 'running') return '导出中'
+  return '等待处理'
+}
+
+function resolveExportJobTime(job: { completed_at?: string | null; failed_at?: string | null; started_at?: string | null; created_at: string }) {
+  return job.completed_at || job.failed_at || job.started_at || job.created_at
+}
+
+async function openExportJobDialog() {
+  exportJobDialogVisible.value = true
+  await exportJobStore.fetchJobs()
+  await exportJobStore.acknowledgeJobs()
+}
+
+async function handleDownloadExportJob(job: RegisteredPortalStudentExportJobRecord) {
+  try {
+    await exportJobStore.downloadJob(job)
+    ElMessage.success('导出文件已开始下载')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '下载失败')
+  }
+}
+
 watch(() => route.path, syncOpenedGroups, { immediate: true })
+watch(
+  () => authStore.isAuthenticated,
+  (isAuthenticated) => {
+    if (isAuthenticated) {
+      exportJobStore.startPolling()
+      return
+    }
+    exportJobStore.clear()
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  exportJobStore.stopPolling()
+})
 </script>
 
 <template>
@@ -222,6 +273,15 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
         <div class="header-actions">
           <el-tag type="success" effect="light">登录成功</el-tag>
 
+          <el-badge :value="exportJobStore.unreadCount || undefined" :hidden="!exportJobStore.unreadCount" class="export-job-badge">
+            <el-button circle plain class="export-job-button" @click="openExportJobDialog">
+              <el-icon v-if="exportJobStore.iconStatus === 'danger'" class="is-danger"><WarningFilled /></el-icon>
+              <el-icon v-else-if="exportJobStore.iconStatus === 'success'" class="is-success"><CircleCheckFilled /></el-icon>
+              <el-icon v-else-if="exportJobStore.hasActiveJobs" class="is-warning"><Loading /></el-icon>
+              <el-icon v-else><Bell /></el-icon>
+            </el-button>
+          </el-badge>
+
           <button class="user-panel" type="button" @click="goProfile">
             <div class="user-panel__avatar">{{ headerAvatarText }}</div>
             <div class="user-panel__meta">
@@ -243,6 +303,51 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
         </div>
       </el-main>
     </el-container>
+
+    <el-dialog v-model="exportJobDialogVisible" title="导出通知" width="680px" destroy-on-close>
+      <div class="export-job-dialog">
+        <div class="export-job-dialog__summary">
+          <div>
+            <span class="export-job-dialog__label">未读结果</span>
+            <strong>{{ exportJobStore.unreadCount }}</strong>
+          </div>
+          <div>
+            <span class="export-job-dialog__label">进行中任务</span>
+            <strong>{{ exportJobStore.jobs.filter((job) => job.status === 'pending' || job.status === 'running').length }}</strong>
+          </div>
+          <div>
+            <span class="export-job-dialog__label">最近记录</span>
+            <strong>{{ exportJobStore.jobs.length }}</strong>
+          </div>
+        </div>
+
+        <div v-if="!exportJobStore.jobs.length" class="export-job-panel__empty">暂无导出记录</div>
+        <div v-else class="export-job-list">
+          <div v-for="job in exportJobStore.jobs" :key="job.job_id" class="export-job-item">
+            <div class="export-job-item__meta">
+              <strong>{{ resolveExportJobStatusLabel(job.status) }}</strong>
+              <span>{{ resolveExportJobTime(job) }}</span>
+            </div>
+            <p>{{ job.file_name }}</p>
+            <div v-if="job.status === 'completed'" class="export-job-item__actions">
+              <span class="export-job-link">{{ job.download_url || '下载地址生成中' }}</span>
+              <el-button link type="primary" :loading="exportJobStore.downloadingJobId === job.job_id" @click="handleDownloadExportJob(job)">
+                点击下载
+              </el-button>
+            </div>
+            <div v-else-if="job.status === 'failed'" class="export-job-item__actions is-error">
+              <span>{{ job.error_message || '导出失败，请重试' }}</span>
+            </div>
+            <div v-else class="export-job-item__actions">
+              <span>开始导出等待完成</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="exportJobDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
@@ -379,6 +484,112 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
   gap: 10px;
 }
 
+.export-job-badge {
+  display: inline-flex;
+}
+
+.export-job-button {
+  border-color: var(--border-strong);
+}
+
+.export-job-button :deep(.el-icon.is-danger) {
+  color: var(--danger);
+}
+
+.export-job-button :deep(.el-icon.is-success) {
+  color: var(--success);
+}
+
+.export-job-button :deep(.el-icon.is-warning) {
+  color: var(--warning);
+}
+
+.export-job-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.export-job-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.export-job-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.export-job-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.export-job-dialog__summary strong {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.export-job-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.export-job-panel__header span,
+.export-job-panel__empty,
+.export-job-item__meta span,
+.export-job-item__actions span,
+.export-job-link {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.export-job-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.export-job-item {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: grid;
+  gap: 8px;
+}
+
+.export-job-item p {
+  margin: 0;
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+.export-job-item__meta,
+.export-job-item__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.export-job-item__actions.is-error {
+  justify-content: flex-start;
+}
+
+.export-job-link {
+  flex: 1;
+  word-break: break-all;
+}
+
 .user-panel {
   display: flex;
   align-items: center;
@@ -464,6 +675,10 @@ watch(() => route.path, syncOpenedGroups, { immediate: true })
   .header-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .export-job-dialog__summary {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

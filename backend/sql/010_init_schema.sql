@@ -669,6 +669,20 @@ CREATE TABLE IF NOT EXISTS dtlms_data_sync_logs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS dtlms_notification_delivery_logs (
+    id BIGSERIAL PRIMARY KEY,
+    channel VARCHAR(32) NOT NULL,
+    template_code VARCHAR(64),
+    recipient VARCHAR(255) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    send_status VARCHAR(32) NOT NULL,
+    failure_reason TEXT,
+    business_key VARCHAR(64),
+    triggered_by VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS dtlms_notification_templates (
     id BIGSERIAL PRIMARY KEY,
     template_code VARCHAR(64) NOT NULL UNIQUE,
@@ -733,3 +747,6 @@ CREATE INDEX IF NOT EXISTS idx_admission_decision_status ON dtlms_admission_deci
 CREATE INDEX IF NOT EXISTS idx_operation_logs_module_time ON dtlms_operation_logs(module_name, created_at);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_entity ON dtlms_operation_logs(entity_name, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_source_target ON dtlms_data_sync_logs(source_system, target_system, created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_status_time ON dtlms_notification_delivery_logs(send_status, created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_channel_time ON dtlms_notification_delivery_logs(channel, created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_recipient ON dtlms_notification_delivery_logs(recipient);

@@ -1,9 +1,11 @@
 import type { PagedResponse, PaginationParams, SelectOption } from './common'
 import type {
+  PortalAchievementRecordItem,
   PortalApplicantProfileData,
   PortalApplicationDeclarationData,
   PortalApplicationPreferenceItem,
   PortalEducationExperienceItem,
+  PortalEnglishProficiencyItem,
   PortalFamilyMemberItem,
   PortalPersonalStatementData,
   PortalPracticeExperienceItem,
@@ -90,7 +92,9 @@ export type RecruitApplicationRecord = {
   preferences?: PortalApplicationPreferenceItem[]
   education_experiences?: PortalEducationExperienceItem[]
   practice_experiences?: PortalPracticeExperienceItem[]
+  english_proficiencies?: PortalEnglishProficiencyItem[]
   family_members?: PortalFamilyMemberItem[]
+  achievement_records?: PortalAchievementRecordItem[]
   personal_statement?: PortalPersonalStatementData | null
   declaration?: PortalApplicationDeclarationData | null
 }
@@ -98,6 +102,33 @@ export type RecruitApplicationRecord = {
 
 export type RecruitApplicationUpsert = Omit<RecruitApplicationRecord, 'id' | 'business_key'> & {
   business_key?: string | null
+}
+
+
+export type RecruitPortalApplicationDetail = {
+  application_id: number
+  plan_id: number
+  business_key: string
+  candidate_no?: string | null
+  student_name: string
+  phone_number?: string | null
+  email?: string | null
+  id_number?: string | null
+  application_status: string
+  material_status: string
+  reviewer_name?: string | null
+  submitted_at?: string | null
+  profile?: PortalApplicantProfileData | null
+  source_channel?: string | null
+  source_channel_other?: string | null
+  preferences?: PortalApplicationPreferenceItem[]
+  education_experiences?: PortalEducationExperienceItem[]
+  practice_experiences?: PortalPracticeExperienceItem[]
+  english_proficiencies?: PortalEnglishProficiencyItem[]
+  family_members?: PortalFamilyMemberItem[]
+  achievement_records?: PortalAchievementRecordItem[]
+  personal_statement?: PortalPersonalStatementData | null
+  declaration?: PortalApplicationDeclarationData | null
 }
 
 
@@ -216,6 +247,11 @@ export function createRecruitmentApplication(payload: RecruitApplicationUpsert) 
 
 export function getRecruitmentApplicationDetail(id: number) {
   return http.get<RecruitApplicationRecord>(`/recruitment/applications/${id}`)
+}
+
+
+export function getRecruitmentPortalApplicationDetail(id: number) {
+  return http.get<RecruitPortalApplicationDetail>(`/recruitment/applications/${id}/portal-detail`)
 }
 
 

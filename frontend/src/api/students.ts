@@ -76,6 +76,39 @@ export type RegisteredPortalStudentEmailRequest = {
 }
 
 
+export type RegisteredPortalStudentExportRequest = {
+  ids?: number[]
+  keyword?: string
+  application_form_status?: string
+}
+
+
+export type RegisteredPortalStudentExportJobRecord = {
+  job_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  file_name: string
+  created_at: string
+  started_at?: string | null
+  completed_at?: string | null
+  failed_at?: string | null
+  error_message?: string | null
+  download_url?: string | null
+  is_read: boolean
+}
+
+
+export type RegisteredPortalStudentExportJobListResponse = {
+  items: RegisteredPortalStudentExportJobRecord[]
+  unread_count: number
+}
+
+
+export type RegisteredPortalStudentExportJobCreateResponse = {
+  message: string
+  job: RegisteredPortalStudentExportJobRecord
+}
+
+
 export type CenterRecord = {
   id: number
   center_name: string
@@ -146,6 +179,31 @@ export function getStudentOptions() {
 
 export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string }) {
   return http.get<RegisteredPortalStudentListResponse>('/students/portal-registrations', { params })
+}
+
+
+export function exportRegisteredPortalStudents(payload: RegisteredPortalStudentExportRequest) {
+  return http.post<Blob>('/students/portal-registrations/export', payload, { responseType: 'blob' })
+}
+
+
+export function createRegisteredPortalStudentExportJob(payload: RegisteredPortalStudentExportRequest) {
+  return http.post<RegisteredPortalStudentExportJobCreateResponse>('/students/portal-registrations/export-jobs', payload)
+}
+
+
+export function listRegisteredPortalStudentExportJobs() {
+  return http.get<RegisteredPortalStudentExportJobListResponse>('/students/portal-registrations/export-jobs')
+}
+
+
+export function markRegisteredPortalStudentExportJobsRead() {
+  return http.post('/students/portal-registrations/export-jobs/read')
+}
+
+
+export function downloadRegisteredPortalStudentExportJob(jobId: string) {
+  return http.get<Blob>(`/students/portal-registrations/export-jobs/${jobId}/download`, { responseType: 'blob' })
 }
 
 

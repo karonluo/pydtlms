@@ -11,9 +11,25 @@ class RuntimeManagementStoreWorkflowMixin:
     if TYPE_CHECKING:
         def __getattr__(self, name: str) -> Any: ...
 
-    def _workflow_action_result(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> dict[str, Any]:
+    WORKFLOW_REQUIRED_PERMISSIONS = {
+        "recruitment_application": {"recruitment:write", "workflow:write"},
+        "scientific_report": {"training:write", "workflow:write"},
+        "outbound_study": {"training:write", "workflow:write"},
+        "thesis": {"degree:write", "workflow:write"},
+    }
+
+    def _workflow_action_result(
+        self,
+        task: dict[str, Any],
+        principal_roles: list[str] | None = None,
+        principal_permissions: list[str] | None = None,
+    ) -> dict[str, Any]:
         return {
-            "task": self._build_workflow_task_record(task, principal_roles=principal_roles),
+            "task": self._build_workflow_task_record(
+                task,
+                principal_roles=principal_roles,
+                principal_permissions=principal_permissions,
+            ),
             "history": [self._build_workflow_history_record(item) for item in task.get("history", [])],
         }
 
@@ -291,14 +307,39 @@ class RuntimeManagementStoreWorkflowMixin:
                 "username": getattr(principal, "username", "system"),
                 "full_name": getattr(principal, "full_name", getattr(principal, "username", "system")),
                 "roles": list(getattr(principal, "roles", [])),
+                "permissions": list(getattr(principal, "permissions", [])),
             }
         return {
             "username": payload.get("username", "system"),
             "full_name": payload.get("full_name", payload.get("username", "system")),
             "roles": list(payload.get("roles", [])),
+            "permissions": list(payload.get("permissions", [])),
         }
 
-    def _workflow_action_options(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> list[WorkflowActionOption]:
+    def _workflow_required_permissions(self, flow_code: str) -> set[str]:
+        return set(self.WORKFLOW_REQUIRED_PERMISSIONS.get(flow_code, {"workflow:write"}))
+
+    def _principal_can_handle_workflow_node(
+        self,
+        flow_code: str,
+        node: dict[str, Any],
+        *,
+        principal_roles: list[str] | None = None,
+        principal_permissions: list[str] | None = None,
+    ) -> bool:
+        granted_permissions = {str(item) for item in principal_permissions or [] if str(item).strip()}
+        if granted_permissions:
+            if "*" in granted_permissions:
+                return True
+            return self._workflow_required_permissions(flow_code).issubset(granted_permissions)
+        return bool(principal_roles and set(node["handler_roles"]).intersection(principal_roles))
+
+    def _workflow_action_options(
+        self,
+        task: dict[str, Any],
+        principal_roles: list[str] | None = None,
+        principal_permissions: list[str] | None = None,
+    ) -> list[WorkflowActionOption]:
         flow_code = task.get("flow_code")
         node_key = task.get("node_key")
         if not flow_code or not node_key:
@@ -306,7 +347,12 @@ class RuntimeManagementStoreWorkflowMixin:
         node = self._workflow_definition(flow_code)["nodes"].get(node_key)
         if not node:
             return []
-        if principal_roles and not set(node["handler_roles"]).intersection(principal_roles):
+        if (principal_roles or principal_permissions) and not self._principal_can_handle_workflow_node(
+            str(flow_code),
+            node,
+            principal_roles=principal_roles,
+            principal_permissions=principal_permissions,
+        ):
             return []
         return [
             WorkflowActionOption(action=str(action_code), label=str(action_config["label"]))
@@ -322,7 +368,12 @@ class RuntimeManagementStoreWorkflowMixin:
             return created_at
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    def _build_workflow_task_record(self, task: dict[str, Any], principal_roles: list[str] | None = None) -> WorkflowTaskRecord:
+    def _build_workflow_task_record(
+        self,
+        task: dict[str, Any],
+        principal_roles: list[str] | None = None,
+        principal_permissions: list[str] | None = None,
+    ) -> WorkflowTaskRecord:
         return WorkflowTaskRecord(
             id=int(task["id"]),
             workflow_name=str(task.get("workflow_name") or "未命名流程"),
@@ -338,7 +389,11 @@ class RuntimeManagementStoreWorkflowMixin:
             due_at=self._fallback_workflow_due_at(task),
             form_summary=str(task.get("form_summary") or ""),
             latest_comment=task.get("latest_comment"),
-            available_actions=self._workflow_action_options(task, principal_roles=principal_roles),
+            available_actions=self._workflow_action_options(
+                task,
+                principal_roles=principal_roles,
+                principal_permissions=principal_permissions,
+            ),
             process_definition_key=task.get("process_definition_key"),
             process_definition_id=task.get("process_definition_id"),
             process_instance_id=task.get("process_instance_id"),
@@ -623,7 +678,7 @@ class RuntimeManagementStoreWorkflowMixin:
     def _persist_portal_student_change(
         self,
         student: dict[str, Any],
-        operation_log: dict[str, Any],
+        operation_log: dict[str, Any] | None,
         *,
         update_student_counter: bool = False,
     ) -> None:
@@ -636,7 +691,7 @@ class RuntimeManagementStoreWorkflowMixin:
         self,
         student: dict[str, Any],
         application: dict[str, Any],
-        operation_log: dict[str, Any],
+        operation_log: dict[str, Any] | None,
         *,
         workflow_task: dict[str, Any] | None = None,
         created_application: bool = False,
@@ -693,16 +748,16 @@ class RuntimeManagementStoreWorkflowMixin:
             task = self._postgres_store.get_workflow_task_snapshot(task_id)
             if task is not None:
                 return {
-                    "task": self._build_workflow_task_record(task, principal_roles=principal_summary["roles"]),
+                    "task": self._build_workflow_task_record(
+                        task,
+                        principal_roles=principal_summary["roles"],
+                        principal_permissions=principal_summary["permissions"],
+                    ),
                     "history": [self._build_workflow_history_record(item) for item in task.get("history", [])],
                 }
         except Exception as exc:
-            logger.warning("Load workflow task detail from PostgreSQL failed, fallback to in-memory state: %s", exc)
-        _, task = self._find_required("workflow_tasks", task_id)
-        return {
-            "task": self._build_workflow_task_record(task, principal_roles=principal_summary["roles"]),
-            "history": [self._build_workflow_history_record(item) for item in task.get("history", [])],
-        }
+            logger.warning("Load workflow task detail from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("流程任务详情当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def execute_workflow_action(self, task_id: int, action: str, comment: str | None, principal: Any) -> dict[str, Any]:
         principal_summary = self._principal_summary(principal)
@@ -720,12 +775,21 @@ class RuntimeManagementStoreWorkflowMixin:
                     and isinstance(latest_history, dict)
                     and str(latest_history.get("action") or "").strip() == str(action or "").strip()
                 ):
-                    return self._workflow_action_result(task, principal_roles=principal_summary["roles"])
+                    return self._workflow_action_result(
+                        task,
+                        principal_roles=principal_summary["roles"],
+                        principal_permissions=principal_summary["permissions"],
+                    )
                 raise ValueError("当前任务不是流程驱动任务，不能执行流程动作")
             definition = self._workflow_definition(flow_code)
             node = definition["nodes"][node_key]
-            if not set(node["handler_roles"]).intersection(principal_summary["roles"]):
-                raise PermissionError("当前角色无权执行该流程活动")
+            if not self._principal_can_handle_workflow_node(
+                str(flow_code),
+                node,
+                principal_roles=principal_summary["roles"],
+                principal_permissions=principal_summary["permissions"],
+            ):
+                raise PermissionError("当前账号无权执行该流程活动")
             action_definition = node["actions"].get(action)
             if not action_definition:
                 raise ValueError("当前节点不支持该流程动作")
@@ -781,7 +845,11 @@ class RuntimeManagementStoreWorkflowMixin:
             if flow_code == "recruitment_application":
                 notification_payload = self._build_recruitment_email_notification(updated_entity)
                 sync_student_master = str(updated_entity.get("application_status") or "").strip() in ADMITTED_RECRUITMENT_APPLICATION_STATUSES
-            result = self._workflow_action_result(updated_task, principal_roles=principal_summary["roles"])
+            result = self._workflow_action_result(
+                updated_task,
+                principal_roles=principal_summary["roles"],
+                principal_permissions=principal_summary["permissions"],
+            )
             if sync_student_master:
                 self._sync_student_master_from_recruitment_application(updated_entity)
 
@@ -863,21 +931,18 @@ class RuntimeManagementStoreWorkflowMixin:
                 page=page,
                 page_size=page_size,
             )
-            records = [self._build_workflow_task_record(item, principal_roles=principal_summary["roles"]) for item in items]
+            records = [
+                self._build_workflow_task_record(
+                    item,
+                    principal_roles=principal_summary["roles"],
+                    principal_permissions=principal_summary["permissions"],
+                )
+                for item in items
+            ]
             return WorkflowTaskListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query workflow tasks from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("workflow_tasks"))
-        if status:
-            items = [item for item in items if item["status"] == status]
-        if module:
-            items = [item for item in items if item["business_module"] == module]
-        if keyword:
-            items = [item for item in items if self._matches_keyword(item["workflow_name"], item["business_key"], item["title"], item["applicant_name"], item["current_handler"], keyword=keyword)]
-        records = [self._build_workflow_task_record(item, principal_roles=principal_summary["roles"]) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return WorkflowTaskListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query workflow tasks from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("流程任务数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_workflow_task(self, payload: WorkflowTaskUpsert) -> WorkflowTaskRecord:
         with self._lock:

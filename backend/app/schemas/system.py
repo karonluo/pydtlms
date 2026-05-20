@@ -1,7 +1,7 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import PaginationResponseBase, SelectOption
-from app.schemas.contact import validate_optional_phone_number
+from app.schemas.contact import validate_optional_email, validate_optional_phone_number
 
 
 class PermissionOption(BaseModel):
@@ -38,6 +38,8 @@ class SystemUserRecord(BaseModel):
     role_code: str
     role_name: str
     department_name: str
+    introduction: str | None = None
+    email: str | None = None
     phone_number: str | None = None
     account_status: str
     last_login_at: str | None = None
@@ -48,14 +50,35 @@ class SystemUserUpsert(BaseModel):
     full_name: str
     role_code: str
     department_name: str
+    introduction: str | None = None
+    email: str | None = None
     phone_number: str | None = None
     account_status: str
     password: str | None = None
+
+    @field_validator("introduction")
+    @classmethod
+    def normalize_introduction(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str | None) -> str | None:
+        return validate_optional_email(value)
 
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number_field(cls, value: str | None) -> str | None:
         return validate_optional_phone_number(value)
+
+    @model_validator(mode="after")
+    def validate_advisor_introduction(self) -> "SystemUserUpsert":
+        if self.role_code == "advisor" and not self.introduction:
+            raise ValueError("导师角色必须填写介绍")
+        return self
 
 
 class SystemUserListResponse(PaginationResponseBase):
@@ -128,6 +151,23 @@ class SyncLogRecord(BaseModel):
 
 class SyncLogListResponse(PaginationResponseBase):
     items: list[SyncLogRecord]
+
+
+class NotificationDeliveryLogRecord(BaseModel):
+    id: int
+    channel: str
+    template_code: str | None = None
+    recipient: str
+    subject: str
+    send_status: str
+    sent_at: str
+    business_key: str | None = None
+    triggered_by: str | None = None
+    failure_reason: str | None = None
+
+
+class NotificationDeliveryLogListResponse(PaginationResponseBase):
+    items: list[NotificationDeliveryLogRecord]
 
 
 class PermissionCatalogResponse(BaseModel):

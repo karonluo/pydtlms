@@ -49,24 +49,8 @@ class RuntimeManagementStoreAcademicMixin:
             records = [TrainingPlanRecord(**item) for item in items]
             return TrainingPlanListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query training plans from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("training_plans"))
-        if keyword:
-            items = [
-                item
-                for item in items
-                if self._matches_keyword(item["student_no"], item["student_name"], item["scientific_goal"], keyword=keyword)
-            ]
-        if plan_status:
-            items = [item for item in items if item["plan_status"] == plan_status]
-        if advisor_name:
-            items = [item for item in items if item["advisor_name"] == advisor_name]
-        if report_cycle:
-            items = [item for item in items if item["report_cycle"] == report_cycle]
-        records = [TrainingPlanRecord(**item) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return TrainingPlanListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query training plans from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("培养方案数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_training_plan(self, payload: TrainingPlanUpsert) -> TrainingPlanRecord:
         with self._lock:
@@ -136,22 +120,8 @@ class RuntimeManagementStoreAcademicMixin:
             records = [ScientificReportRecord(**item) for item in items]
             return ScientificReportListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query scientific reports from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("scientific_reports"))
-        if status:
-            items = [item for item in items if item["report_status"] == status]
-        if keyword:
-            items = [
-                item
-                for item in items
-                if self._matches_keyword(item.get("business_key"), item["student_no"], item["student_name"], item["period_label"], item["summary"], keyword=keyword)
-            ]
-        if reviewer_name:
-            items = [item for item in items if item.get("reviewer_name") == reviewer_name]
-        records = [ScientificReportRecord(**item) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return ScientificReportListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query scientific reports from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("科研报告数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_scientific_report(self, payload: ScientificReportUpsert, principal: Any | None = None) -> ScientificReportRecord:
         with self._lock:
@@ -244,24 +214,8 @@ class RuntimeManagementStoreAcademicMixin:
             records = [OutboundStudyRecord(**item) for item in items]
             return OutboundStudyListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query outbound studies from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("outbound_studies"))
-        if status:
-            items = [item for item in items if item["approval_status"] == status]
-        if keyword:
-            items = [
-                item
-                for item in items
-                if self._matches_keyword(item.get("business_key"), item["student_no"], item["student_name"], item["destination"], item.get("expected_outcome"), keyword=keyword)
-            ]
-        if study_type:
-            items = [item for item in items if item["study_type"] == study_type]
-        if advisor_name:
-            items = [item for item in items if item["advisor_name"] == advisor_name]
-        records = [OutboundStudyRecord(**item) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return OutboundStudyListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query outbound studies from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("外出研修数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_outbound_study(self, payload: OutboundStudyUpsert, principal: Any | None = None) -> OutboundStudyRecord:
         with self._lock:
@@ -379,28 +333,8 @@ class RuntimeManagementStoreAcademicMixin:
             records = [ThesisRecord(**item) for item in items]
             return ThesisListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query theses from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("theses"))
-        if degree_status:
-            items = [item for item in items if item["degree_status"] == degree_status]
-        if advisor_name:
-            items = [item for item in items if item["advisor_name"] == advisor_name]
-        if thesis_status:
-            items = [item for item in items if item["thesis_status"] == thesis_status]
-        if keyword:
-            term = keyword.lower()
-            items = [
-                item
-                for item in items
-                if term in str(item.get("business_key") or "").lower()
-                or term in item["student_no"].lower()
-                or term in item["student_name"].lower()
-                or term in item["title"].lower()
-            ]
-        records = [ThesisRecord(**item) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return ThesisListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query theses from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("论文主档数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_thesis(self, payload: ThesisUpsert, principal: Any | None = None) -> ThesisRecord:
         with self._lock:
@@ -486,20 +420,8 @@ class RuntimeManagementStoreAcademicMixin:
             records = [ThesisReviewRecord(**item) for item in items]
             return ThesisReviewListResponse(items=records, total=total, page=page, page_size=page_size)
         except Exception as exc:
-            logger.warning("Query thesis reviews from PostgreSQL with pagination failed, fallback to in-memory pagination: %s", exc)
-
-        items = list(self._list("thesis_reviews"))
-        if thesis_id is not None:
-            items = [item for item in items if item["thesis_id"] == thesis_id]
-        if expert_name:
-            items = [item for item in items if item["expert_name"] == expert_name]
-        if review_status:
-            items = [item for item in items if item["review_status"] == review_status]
-        if keyword:
-            items = [item for item in items if self._matches_keyword(item["thesis_title"], item["expert_name"], item.get("review_comment"), keyword=keyword)]
-        records = [ThesisReviewRecord(**item) for item in items]
-        paged_items, total = self._paginate_items(records, page=page, page_size=page_size)
-        return ThesisReviewListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+            logger.warning("Query thesis reviews from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("论文评审数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_thesis_review(self, payload: ThesisReviewUpsert) -> ThesisReviewRecord:
         with self._lock:

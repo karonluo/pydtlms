@@ -364,6 +364,7 @@ class PostgresStateStoreCoreMixin:
                         full_name,
                         role_name,
                         department_name,
+                        introduction,
                         phone_number,
                         email,
                         theme_color
@@ -382,12 +383,13 @@ class PostgresStateStoreCoreMixin:
                 cur.execute(
                     """
                     INSERT INTO dtlms_user_profiles (
-                        username, full_name, role_name, department_name, phone_number, email, theme_color
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        username, full_name, role_name, department_name, introduction, phone_number, email, theme_color
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (username) DO UPDATE
                     SET full_name = EXCLUDED.full_name,
                         role_name = EXCLUDED.role_name,
                         department_name = EXCLUDED.department_name,
+                        introduction = EXCLUDED.introduction,
                         phone_number = EXCLUDED.phone_number,
                         email = EXCLUDED.email,
                         theme_color = EXCLUDED.theme_color,
@@ -398,6 +400,7 @@ class PostgresStateStoreCoreMixin:
                         profile_payload.get("full_name"),
                         profile_payload.get("role_name") or "未分配角色",
                         profile_payload.get("department_name") or "",
+                        profile_payload.get("introduction"),
                         profile_payload.get("phone_number"),
                         profile_payload.get("email"),
                         profile_payload.get("theme_color") or "#0f4cbd",
@@ -470,6 +473,54 @@ class PostgresStateStoreCoreMixin:
             with conn.cursor() as cur:
                 self._sync_runtime_counters_in_tx(cur, counters)
                 self._sync_operation_log_in_tx(cur, operation_log)
+            conn.commit()
+
+    def _sync_notification_delivery_log_in_tx(self, cur: psycopg.Cursor[Any], notification_log: dict[str, Any] | None) -> None:
+        if not notification_log:
+            return
+        cur.execute(
+            """
+            INSERT INTO dtlms_notification_delivery_logs (
+                id, channel, template_code, recipient, subject, send_status,
+                failure_reason, business_key, triggered_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE
+            SET channel = EXCLUDED.channel,
+                template_code = EXCLUDED.template_code,
+                recipient = EXCLUDED.recipient,
+                subject = EXCLUDED.subject,
+                send_status = EXCLUDED.send_status,
+                failure_reason = EXCLUDED.failure_reason,
+                business_key = EXCLUDED.business_key,
+                triggered_by = EXCLUDED.triggered_by,
+                updated_at = EXCLUDED.updated_at
+            """,
+            (
+                int(notification_log["id"]),
+                notification_log.get("channel"),
+                notification_log.get("template_code"),
+                notification_log.get("recipient"),
+                notification_log.get("subject"),
+                notification_log.get("send_status"),
+                notification_log.get("failure_reason"),
+                notification_log.get("business_key"),
+                notification_log.get("triggered_by"),
+                notification_log.get("sent_at"),
+                notification_log.get("sent_at"),
+            ),
+        )
+
+    def sync_notification_delivery_log(
+        self,
+        notification_log: dict[str, Any],
+        *,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                self._sync_notification_delivery_log_in_tx(cur, notification_log)
             conn.commit()
 
     def _fetch_student_key_map(self, cur: psycopg.Cursor[Any]) -> dict[str, int]:
@@ -858,6 +909,16 @@ class PostgresStateStoreCoreMixin:
         has_content = any(value not in (None, "", [], {}) for key, value in derived.items() if key != "selected_plan_id") or derived.get("selected_plan_id") is not None
         return derived if has_content else None
 
+    @classmethod
+    def _merge_portal_application_draft(cls, base_draft: dict[str, Any] | None, overlay_draft: dict[str, Any] | None) -> dict[str, Any] | None:
+        merged: dict[str, Any] = dict(base_draft or {})
+        if isinstance(overlay_draft, dict):
+            for key, value in overlay_draft.items():
+                merged[key] = value
+
+        has_content = any(value not in (None, "", [], {}) for key, value in merged.items() if key != "selected_plan_id") or merged.get("selected_plan_id") is not None
+        return merged if has_content else None
+
     @staticmethod
     def _match_portal_application(student: dict[str, Any], application_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         student_id = int(student.get("id") or 0)
@@ -1057,7 +1118,7 @@ class PostgresStateStoreCoreMixin:
         new_value: dict[str, Any] = cast(dict[str, Any], row.get("new_value")) if isinstance(row.get("new_value"), dict) else {}
         return {
             "id": int(row["id"]),
-            "operated_at": str(row.get("created_at") or ""),
+            "operated_at": PostgresStateStoreCoreMixin._stringify_datetime(row.get("created_at")) or "",
             "operator_username": str(row.get("operator_username") or ""),
             "module_name": str(row.get("module_name") or ""),
             "entity_name": str(row.get("entity_name") or ""),
@@ -1073,12 +1134,20 @@ class PostgresStateStoreCoreMixin:
             "id": int(row["id"]),
             "plan_id": int(row.get("plan_id") or 0),
             "business_key": str(row.get("business_key") or ""),
+            "portal_student_id": int(row.get("portal_student_id") or 0) or None,
             "candidate_no": row.get("candidate_no"),
             "review_round": row.get("review_round"),
             "student_name": str(row.get("student_name") or ""),
+            "first_choice_team_id": int(row.get("first_choice_team_id") or 0) or None,
             "first_choice": row.get("first_choice"),
+            "second_choice_team_id": int(row.get("second_choice_team_id") or 0) or None,
             "second_choice": row.get("second_choice"),
+            "full_name_pinyin": row.get("full_name_pinyin"),
+            "profile_photo_url": row.get("profile_photo_url"),
+            "id_card_collage_url": row.get("id_card_collage_url"),
             "gender": row.get("gender"),
+            "birth_date": row.get("birth_date"),
+            "ethnic_group": row.get("ethnic_group"),
             "political_status": row.get("political_status"),
             "marital_status": row.get("marital_status"),
             "religious_belief": row.get("religious_belief"),
@@ -1086,6 +1155,8 @@ class PostgresStateStoreCoreMixin:
             "phone_number": row.get("phone_number"),
             "email": row.get("email"),
             "mailing_address": row.get("mailing_address"),
+            "emergency_contact_name": row.get("emergency_contact_name"),
+            "emergency_contact_phone": row.get("emergency_contact_phone"),
             "id_type": row.get("id_type"),
             "id_number": row.get("id_number"),
             "graduation_school": str(row.get("graduation_school") or ""),
@@ -1101,6 +1172,7 @@ class PostgresStateStoreCoreMixin:
             "graduate_major": row.get("graduate_major"),
             "highest_degree": str(row.get("highest_degree") or ""),
             "intended_field": row.get("intended_field"),
+            "intended_advisor_user_id": int(row.get("intended_advisor_user_id") or 0) or None,
             "intended_advisor_name": row.get("intended_advisor_name"),
             "discovery_channel": row.get("discovery_channel"),
             "source_channel": row.get("source_channel"),
@@ -1167,6 +1239,21 @@ class PostgresStateStoreCoreMixin:
             "sync_status": str(row.get("sync_status") or ""),
             "record_count": int(row.get("record_count") or 0),
             "executed_at": cls._stringify_datetime(row.get("created_at")) or "",
+            "failure_reason": row.get("failure_reason"),
+        }
+
+    @classmethod
+    def _normalize_notification_delivery_log_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "channel": str(row.get("channel") or ""),
+            "template_code": row.get("template_code"),
+            "recipient": str(row.get("recipient") or ""),
+            "subject": str(row.get("subject") or ""),
+            "send_status": str(row.get("send_status") or ""),
+            "sent_at": cls._stringify_datetime(row.get("created_at")) or "",
+            "business_key": row.get("business_key"),
+            "triggered_by": row.get("triggered_by"),
             "failure_reason": row.get("failure_reason"),
         }
 
@@ -1259,6 +1346,8 @@ class PostgresStateStoreCoreMixin:
             "role_code": str(row.get("role_code") or ""),
             "role_name": str(row.get("role_name") or row.get("role_code") or ""),
             "department_name": str(row.get("department_name") or ""),
+            "introduction": row.get("introduction"),
+            "email": row.get("email"),
             "phone_number": row.get("phone_number"),
             "account_status": str(row.get("account_status") or ""),
             "last_login_at": cls._stringify_datetime(row.get("last_login_at")),
@@ -1271,7 +1360,14 @@ class PostgresStateStoreCoreMixin:
         if hasattr(value, "strftime"):
             return value.strftime("%Y-%m-%d %H:%M:%S")
         text = str(value).strip()
-        return text or None
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return text
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
     @staticmethod
     def _split_delimited_values(value: Any) -> list[str]:

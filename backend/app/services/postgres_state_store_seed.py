@@ -46,6 +46,7 @@ class PostgresStateStoreSeedMixin:
         thesis_map = self._seed_degree(cur, state, student_map, advisor_map)
         self._seed_operation_logs(cur, state)
         self._seed_sync_logs(cur, state)
+        self._seed_notification_delivery_logs(cur, state)
         self._seed_system_configs(cur, state)
         self._seed_training_plan_versions(cur, state, training_plan_map)
         self._seed_admission_decisions(cur, state, plan_map)
@@ -989,6 +990,31 @@ class PostgresStateStoreSeedMixin:
                     item.get("failure_reason"),
                     item["executed_at"],
                     item["executed_at"],
+                ),
+            )
+
+    def _seed_notification_delivery_logs(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
+        cur.execute("TRUNCATE TABLE dtlms_notification_delivery_logs RESTART IDENTITY CASCADE")
+        for item in state.get("notification_delivery_logs", []):
+            cur.execute(
+                """
+                INSERT INTO dtlms_notification_delivery_logs (
+                    id, channel, template_code, recipient, subject, send_status,
+                    failure_reason, business_key, triggered_by, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    int(item["id"]),
+                    item["channel"],
+                    item.get("template_code"),
+                    item["recipient"],
+                    item["subject"],
+                    item["send_status"],
+                    item.get("failure_reason"),
+                    item.get("business_key"),
+                    item.get("triggered_by"),
+                    item["sent_at"],
+                    item["sent_at"],
                 ),
             )
 

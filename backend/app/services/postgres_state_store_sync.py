@@ -161,12 +161,13 @@ class PostgresStateStoreSyncMixin:
                     cur.execute(
                         """
                         INSERT INTO dtlms_user_profiles (
-                            username, full_name, role_name, department_name, phone_number, email, theme_color
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            username, full_name, role_name, department_name, introduction, phone_number, email, theme_color
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (username) DO UPDATE
                         SET full_name = EXCLUDED.full_name,
                             role_name = EXCLUDED.role_name,
                             department_name = EXCLUDED.department_name,
+                            introduction = EXCLUDED.introduction,
                             phone_number = EXCLUDED.phone_number,
                             email = EXCLUDED.email,
                             theme_color = EXCLUDED.theme_color,
@@ -177,6 +178,7 @@ class PostgresStateStoreSyncMixin:
                             profile_payload.get("full_name") or user_payload.get("full_name"),
                             profile_payload.get("role_name") or user_payload.get("role_code") or "未分配角色",
                             profile_payload.get("department_name") or user_payload.get("department_name") or "",
+                            profile_payload.get("introduction"),
                             profile_payload.get("phone_number") or user_payload.get("phone_number"),
                             profile_payload.get("email"),
                             profile_payload.get("theme_color") or "#0f4cbd",
@@ -1070,8 +1072,9 @@ class PostgresStateStoreSyncMixin:
                         family_info, education_experience, practice_experience, personal_profile,
                         recommendation_notes, personal_statement_text, signed_agreement, selected_plan_id,
                         selected_team_id, selected_team_name, selected_advisor_user_id, selected_advisor_name,
+                        application_draft,
                         self_evaluation, submitted_at, account_status, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE
                     SET full_name = EXCLUDED.full_name,
                         phone_number = EXCLUDED.phone_number,
@@ -1103,6 +1106,7 @@ class PostgresStateStoreSyncMixin:
                         selected_team_name = EXCLUDED.selected_team_name,
                         selected_advisor_user_id = EXCLUDED.selected_advisor_user_id,
                         selected_advisor_name = EXCLUDED.selected_advisor_name,
+                        application_draft = EXCLUDED.application_draft,
                         self_evaluation = EXCLUDED.self_evaluation,
                         submitted_at = EXCLUDED.submitted_at,
                         account_status = EXCLUDED.account_status,
@@ -1140,6 +1144,7 @@ class PostgresStateStoreSyncMixin:
                         portal_student_payload.get("selected_team_name"),
                         portal_student_payload.get("selected_advisor_user_id"),
                         portal_student_payload.get("selected_advisor_name"),
+                        self._json_payload(portal_student_payload.get("application_draft")) if portal_student_payload.get("application_draft") is not None else None,
                         portal_student_payload.get("self_evaluation"),
                         portal_student_payload.get("submitted_at"),
                         self._normalize_portal_account_status(portal_student_payload.get("account_status")),
@@ -1694,8 +1699,8 @@ class PostgresStateStoreSyncMixin:
                         family_info, education_experience, practice_experience, personal_profile,
                         recommendation_notes, personal_statement_text, signed_agreement, selected_plan_id,
                         selected_team_id, selected_team_name, selected_advisor_user_id, selected_advisor_name,
-                        self_evaluation, submitted_at, account_status, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        application_draft, self_evaluation, submitted_at, account_status, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE
                     SET full_name = EXCLUDED.full_name,
                         phone_number = EXCLUDED.phone_number,
@@ -1727,6 +1732,7 @@ class PostgresStateStoreSyncMixin:
                         selected_team_name = EXCLUDED.selected_team_name,
                         selected_advisor_user_id = EXCLUDED.selected_advisor_user_id,
                         selected_advisor_name = EXCLUDED.selected_advisor_name,
+                        application_draft = EXCLUDED.application_draft,
                         self_evaluation = EXCLUDED.self_evaluation,
                         submitted_at = EXCLUDED.submitted_at,
                         account_status = EXCLUDED.account_status,
@@ -1764,6 +1770,7 @@ class PostgresStateStoreSyncMixin:
                         portal_student_payload.get("selected_team_name"),
                         portal_student_payload.get("selected_advisor_user_id"),
                         portal_student_payload.get("selected_advisor_name"),
+                        self._json_payload(portal_student_payload.get("application_draft")) if portal_student_payload.get("application_draft") is not None else None,
                         portal_student_payload.get("self_evaluation"),
                         portal_student_payload.get("submitted_at"),
                         self._normalize_portal_account_status(portal_student_payload.get("account_status")),

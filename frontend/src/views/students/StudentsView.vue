@@ -5,15 +5,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute } from 'vue-router'
 
-import RecruitmentApplicationReviewDrawer from '../../components/recruitment/RecruitmentApplicationReviewDrawer.vue'
+import RecruitmentPortalApplicationDrawer from '../../components/recruitment/RecruitmentPortalApplicationDrawer.vue'
 import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
 import { useServerPagination } from '../../composables/useServerPagination'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
-import { getRecruitmentApplicationDetail, type RecruitApplicationRecord } from '../../api/recruitment'
+import { getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail } from '../../api/recruitment'
 import {
   activateRegisteredPortalStudent,
   batchDeleteCenters,
+  createRegisteredPortalStudentExportJob,
   createCenter,
   createStudent,
   deactivateRegisteredPortalStudent,
@@ -40,8 +41,10 @@ import {
   type StudentUpsert,
 } from '../../api/students'
 import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
+import { useExportJobStore } from '../../stores/exportJobs'
 
 const route = useRoute()
+const exportJobStore = useExportJobStore()
 const loading = ref(false)
 const bootstrapping = ref(false)
 const submitting = ref(false)
@@ -50,12 +53,15 @@ const deleteCenterDialogVisible = ref(false)
 const portalEmailDialogVisible = ref(false)
 const portalEmailSubmitting = ref(false)
 const portalEmailResultDialogVisible = ref(false)
+const exportJobResultDialogVisible = ref(false)
 const resetPasswordDialogVisible = ref(false)
+const exportSubmitting = ref(false)
 const resetPasswordSubmitting = ref(false)
 const deleteCenterSubmitting = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedCenterIds = ref<number[]>([])
+const selectedRegisteredPortalStudentIds = ref<number[]>([])
 const deletingCenter = ref<CenterRecord | null>(null)
 const studentStatusColors = ref<DictColorMap>({})
 const portalEmailTarget = ref<RegisteredPortalStudentRecord | null>(null)
@@ -64,13 +70,14 @@ const portalEmailResultContext = ref<{ recipient: string; subject: string } | nu
 const resetPasswordTarget = ref<RegisteredPortalStudentRecord | null>(null)
 const resetPasswordResult = ref<RegisteredPortalStudentActionResponse | null>(null)
 const portalApplicationDetailVisible = ref(false)
-const portalViewingApplication = ref<RecruitApplicationRecord | null>(null)
+const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
 const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
 const portalWorkflowTaskLoading = ref(false)
 const portalWorkflowActionSubmitting = ref(false)
 const portalWorkflowCommentDialogVisible = ref(false)
 const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
 const portalWorkflowComment = ref('')
+const exportJobResult = ref<{ message: string; scopeLabel: string; recordCount: number; filterSummary: string } | null>(null)
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -309,6 +316,7 @@ async function loadRegisteredPortalStudents() {
     page_size: registeredStudentPager.pagination.pageSize,
   })
   registeredPortalStudents.value = response.data.items
+  selectedRegisteredPortalStudentIds.value = []
   registeredStudentPager.sync(response.data.total)
 }
 
@@ -556,6 +564,7 @@ async function handleReset() {
   Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
   Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '' })
   selectedCenterIds.value = []
+  selectedRegisteredPortalStudentIds.value = []
   studentPager.reset()
   centerPager.reset()
   registeredStudentPager.reset()
@@ -592,8 +601,78 @@ async function handleRegisteredStudentPageSizeChange(size: number) {
   await loadSectionData()
 }
 
+function buildRegisteredPortalExportFilters() {
+  return {
+    keyword: registeredPortalFilters.keyword || undefined,
+    application_form_status: registeredPortalFilters.application_form_status || undefined,
+  }
+}
+
+function buildRegisteredPortalExportFilterSummary() {
+  const items: string[] = []
+  if (registeredPortalFilters.keyword) {
+    items.push(`关键词：${registeredPortalFilters.keyword}`)
+  }
+  if (registeredPortalFilters.application_form_status) {
+    items.push(`报名状态：${registeredPortalFilters.application_form_status}`)
+  }
+  return items.join('；') || '当前未设置筛选条件'
+}
+
+async function handleExportRegisteredPortalStudents() {
+  if (!selectedRegisteredPortalStudentIds.value.length) {
+    ElMessage.warning('请先选择需要导出的注册学生')
+    return
+  }
+  exportSubmitting.value = true
+  try {
+    const response = await createRegisteredPortalStudentExportJob({ ids: selectedRegisteredPortalStudentIds.value })
+    await exportJobStore.fetchJobs()
+    exportJobResult.value = {
+      message: response.data.message,
+      scopeLabel: '导出所选',
+      recordCount: selectedRegisteredPortalStudentIds.value.length,
+      filterSummary: '按当前勾选学生创建导出任务',
+    }
+    exportJobResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '导出失败') : '导出失败'
+    ElMessage.error(message)
+  } finally {
+    exportSubmitting.value = false
+  }
+}
+
+async function handleExportAllRegisteredPortalStudents() {
+  if (!registeredStudentPager.pagination.total) {
+    ElMessage.warning('当前没有可导出的注册学生')
+    return
+  }
+  exportSubmitting.value = true
+  try {
+    const response = await createRegisteredPortalStudentExportJob(buildRegisteredPortalExportFilters())
+    await exportJobStore.fetchJobs()
+    exportJobResult.value = {
+      message: response.data.message,
+      scopeLabel: '全部导出',
+      recordCount: registeredStudentPager.pagination.total,
+      filterSummary: buildRegisteredPortalExportFilterSummary(),
+    }
+    exportJobResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '导出失败') : '导出失败'
+    ElMessage.error(message)
+  } finally {
+    exportSubmitting.value = false
+  }
+}
+
 function handleCenterSelectionChange(selection: CenterRecord[]) {
   selectedCenterIds.value = selection.map((item) => item.id)
+}
+
+function handleRegisteredPortalStudentSelectionChange(selection: RegisteredPortalStudentRecord[]) {
+  selectedRegisteredPortalStudentIds.value = selection.map((item) => item.id)
 }
 
 function handleStudentCenterChange(value: string) {
@@ -779,7 +858,7 @@ async function openRegisteredPortalApplicationDetail(row: RegisteredPortalStuden
     return
   }
   try {
-    const response = await getRecruitmentApplicationDetail(row.recruitment_application_id)
+    const response = await getRecruitmentPortalApplicationDetail(row.recruitment_application_id)
     portalViewingApplication.value = response.data
     portalApplicationDetailVisible.value = true
     await loadPortalViewingWorkflowTask(row.recruitment_application_business_key || response.data.business_key)
@@ -913,6 +992,11 @@ watch(() => portalEmailResultDialogVisible.value, (visible) => {
     resetPortalEmailResultDialog()
   }
 })
+watch(() => exportJobResultDialogVisible.value, (visible) => {
+  if (!visible) {
+    exportJobResult.value = null
+  }
+})
 watch(() => resetPasswordDialogVisible.value, (visible) => {
   if (!visible) {
     resetResetPasswordDialog()
@@ -927,9 +1011,11 @@ watch(() => activeSection.value, () => {
   dialogVisible.value = false
   portalEmailDialogVisible.value = false
   portalEmailResultDialogVisible.value = false
+  exportJobResultDialogVisible.value = false
   resetPasswordDialogVisible.value = false
   portalWorkflowCommentDialogVisible.value = false
   selectedCenterIds.value = []
+  selectedRegisteredPortalStudentIds.value = []
   void loadSectionData()
 })
 
@@ -962,6 +1048,26 @@ onMounted(() => {
             @click="handleBatchDeleteCenters"
           >
             批量删除研究中心
+          </el-button>
+          <el-button
+            v-if="activeSection === 'portal-registrations'"
+            plain
+            type="primary"
+            :loading="exportSubmitting"
+            :disabled="!registeredStudentPager.pagination.total"
+            @click="handleExportAllRegisteredPortalStudents"
+          >
+            全部导出
+          </el-button>
+          <el-button
+            v-if="activeSection === 'portal-registrations'"
+            plain
+            type="primary"
+            :loading="exportSubmitting"
+            :disabled="!selectedRegisteredPortalStudentIds.length"
+            @click="handleExportRegisteredPortalStudents"
+          >
+            导出所选
           </el-button>
           <span class="summary-text">共 {{ sectionConfig.total }} 条记录</span>
           <el-button v-if="canMutateSection" type="primary" round @click="openCreateDialog">{{ sectionConfig.createLabel }}</el-button>
@@ -1080,7 +1186,8 @@ onMounted(() => {
           </el-table-column>
         </el-table>
 
-        <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed">
+        <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleRegisteredPortalStudentSelectionChange">
+          <el-table-column type="selection" width="44" />
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
           <el-table-column prop="phone_number" label="手机号" width="128" show-overflow-tooltip />
           <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
@@ -1147,9 +1254,9 @@ onMounted(() => {
       </div>
     </article>
 
-    <RecruitmentApplicationReviewDrawer
+    <RecruitmentPortalApplicationDrawer
       v-model="portalApplicationDetailVisible"
-      :application="portalViewingApplication"
+      :detail="portalViewingApplication"
       :workflow-task="portalViewingWorkflowTask"
       :workflow-task-loading="portalWorkflowTaskLoading"
       :action-loading="portalWorkflowActionSubmitting"
@@ -1351,6 +1458,37 @@ onMounted(() => {
       </div>
       <template #footer>
         <el-button type="primary" @click="portalEmailResultDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="exportJobResultDialogVisible" title="导出任务已创建" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="exportJobResult">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">导出范围</span>
+              <strong>{{ exportJobResult.scopeLabel }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">记录数量</span>
+              <strong>{{ exportJobResult.recordCount }}</strong>
+            </div>
+            <div style="grid-column: span 3;">
+              <span class="reset-password-summary__label">筛选说明</span>
+              <strong>{{ exportJobResult.filterSummary }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ exportJobResult.message }}</p>
+            <div class="reset-password-result__password export-job-result__hint">
+              <span>后续查看</span>
+              <strong>完成后请在右上角用户名旁的导出图标中查看下载地址或失败结果。</strong>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="exportJobResultDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -1669,6 +1807,13 @@ onMounted(() => {
   color: #1d4ed8;
   font-size: 20px;
   letter-spacing: 0.04em;
+}
+
+.export-job-result__hint strong {
+  color: #0f766e;
+  font-size: 15px;
+  letter-spacing: normal;
+  line-height: 1.7;
 }
 
 @media (max-width: 1120px) {

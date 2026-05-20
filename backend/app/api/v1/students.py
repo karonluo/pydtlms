@@ -1,4 +1,8 @@
+from datetime import datetime
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
@@ -7,6 +11,9 @@ from app.schemas.student import (
     CenterRecord,
     CenterUpsert,
     RegisteredPortalStudentActionResponse,
+    RegisteredPortalStudentExportJobCreateResponse,
+    RegisteredPortalStudentExportJobListResponse,
+    RegisteredPortalStudentExportRequest,
     RegisteredPortalStudentEmailRequest,
     RegisteredPortalStudentListResponse,
     StudentLifecycleBoard,
@@ -19,14 +26,19 @@ from app.schemas.student import (
 from app.schemas.system import BulkActionResponse, BulkDeleteRequest
 from app.services.dashboard_service import (
     activate_registered_portal_student,
+    create_registered_portal_student_export_job,
     create_center,
     create_student,
     deactivate_registered_portal_student,
     delete_center,
     delete_centers,
     delete_student,
+    export_registered_portal_students,
+    get_registered_portal_student_export_job_download,
     get_student_lifecycle_board,
     get_center_list,
+    list_registered_portal_student_export_jobs,
+    mark_registered_portal_student_export_jobs_read,
     get_registered_portal_student_list,
     get_student_management_list,
     get_student_options,
@@ -72,6 +84,76 @@ def registered_portal_student_list(
         application_form_status=application_form_status,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post("/portal-registrations/export")
+def export_registered_portal_student_records(
+    payload: RegisteredPortalStudentExportRequest,
+    principal: Principal = Depends(require_permissions("students:read")),
+) -> StreamingResponse:
+    try:
+        content = export_registered_portal_students(
+            payload.ids,
+            keyword=payload.keyword,
+            application_form_status=payload.application_form_status,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    filename = f"注册学生导出_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+@router.post("/portal-registrations/export-jobs", response_model=RegisteredPortalStudentExportJobCreateResponse)
+def create_registered_portal_student_export_job_record(
+    payload: RegisteredPortalStudentExportRequest,
+    principal: Principal = Depends(require_permissions("students:read")),
+) -> RegisteredPortalStudentExportJobCreateResponse:
+    try:
+        return create_registered_portal_student_export_job(payload, principal=principal)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/portal-registrations/export-jobs", response_model=RegisteredPortalStudentExportJobListResponse)
+def registered_portal_student_export_job_list(
+    principal: Principal = Depends(require_permissions("students:read")),
+) -> RegisteredPortalStudentExportJobListResponse:
+    return list_registered_portal_student_export_jobs(principal=principal)
+
+
+@router.post("/portal-registrations/export-jobs/read", status_code=status.HTTP_204_NO_CONTENT)
+def mark_registered_portal_student_export_job_read(
+    principal: Principal = Depends(require_permissions("students:read")),
+) -> None:
+    mark_registered_portal_student_export_jobs_read(principal=principal)
+
+
+@router.get("/portal-registrations/export-jobs/{job_id}/download")
+def download_registered_portal_student_export_job_file(
+    job_id: str,
+    principal: Principal = Depends(require_permissions("students:read")),
+) -> StreamingResponse:
+    try:
+        filename, content = get_registered_portal_student_export_job_download(job_id, principal=principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 

@@ -95,6 +95,25 @@ def test_ensure_schema_raises_when_schema_missing(monkeypatch) -> None:
     assert cursor.executed == []
 
 
+def test_normalize_system_user_row_preserves_email() -> None:
+    row = PostgresStateStore._normalize_system_user_row(
+        {
+            "id": 12,
+            "username": "ops.user",
+            "full_name": "运维用户",
+            "role_code": "ops",
+            "role_name": "运维",
+            "department_name": "信息中心",
+            "email": "ops.user@example.com",
+            "phone_number": "13800001111",
+            "account_status": "启用",
+            "last_login_at": None,
+        }
+    )
+
+    assert row["email"] == "ops.user@example.com"
+
+
 def test_seed_portal_application_structures_uses_application_id_for_personal_statement_attachment() -> None:
     store = PostgresStateStore()
     cursor = FakeCursor()
@@ -405,6 +424,127 @@ def test_get_portal_student_detail_hides_submitted_at_for_rejected_application(m
     assert item["application_draft"]["submitted_at"] is None
 
 
+def test_get_portal_student_detail_prefers_saved_draft_over_existing_application(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "id": 7,
+                "full_name": "张三",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "id_number": "32000019990101123X",
+                "account_status": "启用",
+                "selected_plan_id": 3,
+                "selected_team_id": 11,
+                "selected_team_name": "旧研究中心",
+                "selected_advisor_user_id": 21,
+                "selected_advisor_name": "旧导师",
+                "submitted_at": None,
+                "signed_agreement": True,
+                "application_draft": {
+                    "selected_plan_id": 3,
+                    "source_channel": "其他",
+                    "source_channel_other": "老师线下宣讲",
+                    "preferences": [
+                        {
+                            "preference_order": 1,
+                            "team_id": 12,
+                            "research_center_name": "新研究中心",
+                            "advisor_user_id": 22,
+                            "advisor_name": "新导师",
+                            "is_optional": False,
+                        }
+                    ],
+                    "practice_experiences": [
+                        {
+                            "start_month": "2025-01",
+                            "end_month": "2025-03",
+                            "organization_name": "上海人工智能实验室",
+                            "position_name": "算法实习生",
+                            "responsibility_text": "参与多模态数据处理",
+                            "verifier_name": "王老师",
+                            "verifier_phone": "13800002222",
+                        }
+                    ],
+                    "personal_statement": {
+                        "growth_experience_text": "新的成长经历",
+                        "resume_attachment_url": "/api/v1/portal/attachments/resume-new.pdf",
+                        "resume_attachment_name": "resume-new.pdf",
+                    },
+                    "declaration": {
+                        "has_read_declaration": True,
+                    },
+                },
+            },
+            {
+                "id": 15,
+                "plan_id": 3,
+                "business_key": "RECRUIT-20260420-0015",
+                "candidate_no": "RECRUIT-20260420-0015",
+                "source_channel": "上海人工智能实验室官网",
+                "source_channel_other": None,
+                "intended_advisor_name": "旧导师",
+                "application_status": "draft",
+                "applied_at": None,
+                "first_choice_team_id": 11,
+                "second_choice_team_id": None,
+                "intended_advisor_user_id": 21,
+                "material_list_attachment": None,
+            },
+            {
+                "personal_statement_text": "旧个人陈述",
+                "growth_experience_text": "旧成长经历",
+                "program_application_reason_text": None,
+                "career_plan_text": None,
+                "resume_attachment_url": "/api/v1/portal/attachments/resume-old.pdf",
+                "supporting_material_attachment_url": None,
+                "ai_problem_statement": None,
+                "ai_industry_opinion": None,
+            },
+            {
+                "has_read_declaration": True,
+                "declaration_text": "旧声明",
+                "progress_snapshot": None,
+            },
+        ],
+        fetchall_results=[
+            [
+                {
+                    "preference_order": 1,
+                    "team_id": 11,
+                    "research_center_name": "旧研究中心",
+                    "advisor_user_id": 21,
+                    "advisor_name": "旧导师",
+                    "is_optional": False,
+                }
+            ],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    item = store.get_portal_student_detail(7)
+
+    assert item is not None
+    assert item["application_draft"]["source_channel"] == "其他"
+    assert item["application_draft"]["source_channel_other"] == "老师线下宣讲"
+    assert item["application_draft"]["preferences"][0]["research_center_name"] == "新研究中心"
+    assert item["application_draft"]["preferences"][0]["advisor_name"] == "新导师"
+    assert item["application_draft"]["practice_experiences"][0]["organization_name"] == "上海人工智能实验室"
+    assert item["application_draft"]["personal_statement"]["growth_experience_text"] == "新的成长经历"
+    assert item["application_draft"]["personal_statement"]["resume_attachment_url"] == "/api/v1/portal/attachments/resume-new.pdf"
+    assert item["application_draft"]["personal_statement"]["resume_attachment_name"] == "resume-new.pdf"
+
+
 def test_sync_recruitment_application_status_updates_relational_status(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor()
@@ -456,6 +596,159 @@ def test_sync_recruitment_application_status_clears_portal_submission_for_resubm
     assert update_params == ("rejected", 15)
     assert "UPDATE dtlms_portal_students" in portal_update_sql
     assert portal_update_params == (7,)
+
+
+def test_sync_portal_student_persists_application_draft_json(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor()
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+    monkeypatch.setattr(store, "_sync_runtime_counters_in_tx", lambda cur, counters: None)
+    monkeypatch.setattr(store, "_sync_operation_log_in_tx", lambda cur, operation_log: None)
+    monkeypatch.setattr(store, "_derive_portal_profile", lambda payload: None)
+
+    store.sync_portal_student(
+        {
+            "id": 7,
+            "full_name": "张三",
+            "phone_number": "13800001111",
+            "email": "zhangsan@example.com",
+            "id_number": "32000019990101123X",
+            "account_status": "启用",
+            "application_draft": {
+                "source_channel": "其他",
+                "source_channel_other": "老师宣讲",
+                "preferences": [
+                    {
+                        "preference_order": 1,
+                        "research_center_name": "具身智能中心",
+                        "advisor_name": "刘亚",
+                        "is_optional": False,
+                    }
+                ],
+            },
+        },
+        None,
+    )
+
+    insert_sql, insert_params = cursor.executed[0]
+    assert "application_draft" in insert_sql
+    assert '"source_channel": "其他"' in insert_params[31]
+    assert '"source_channel_other": "老师宣讲"' in insert_params[31]
+
+
+def test_get_recruitment_application_detail_returns_full_portal_v2_sections(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "id": 15,
+                "plan_id": 3,
+                "business_key": "SH20270001",
+                "portal_student_id": 7,
+                "candidate_no": "SH20270001",
+                "review_round": None,
+                "student_name": "张三",
+                "first_choice_team_id": 11,
+                "first_choice": "具身智能中心",
+                "second_choice_team_id": None,
+                "second_choice": None,
+                "gender": "男",
+                "birth_date": "1999-01-01",
+                "ethnic_group": "汉族",
+                "political_status": "共青团员",
+                "marital_status": "未婚",
+                "religious_belief": "无",
+                "native_place": "江苏无锡",
+                "phone_number": "13800001111",
+                "email": "zhangsan@example.com",
+                "mailing_address": "上海市徐汇区",
+                "full_name_pinyin": "ZHANG SAN",
+                "profile_photo_url": "/api/v1/portal/attachments/profile.jpg",
+                "id_card_collage_url": "/api/v1/portal/attachments/id-collage.jpg",
+                "emergency_contact_name": "李四",
+                "emergency_contact_phone": "13900002222",
+                "id_type": "居民身份证",
+                "id_number": "32000019990101123X",
+                "graduation_school": "江南大学",
+                "highest_degree": "本科毕业",
+                "intended_field": "具身智能中心",
+                "intended_advisor_user_id": 21,
+                "intended_advisor_name": "刘亚",
+                "discovery_channel": "老师宣讲",
+                "source_channel": "其他",
+                "source_channel_other": "老师宣讲",
+                "self_evaluation": None,
+                "applied_at": "2026-05-01 10:00:00",
+                "research_problem": None,
+                "research_status_analysis": "旧字段",
+                "research_impact": None,
+                "ai_society_impact": None,
+                "dissenting_view": None,
+                "family_info": None,
+                "education_experience": None,
+                "practice_experience": None,
+                "personal_statement_text": None,
+                "student_activity_experience": "旧活动",
+                "personal_statement_attachment": None,
+                "material_list_attachment": "/api/v1/portal/attachments/materials.zip",
+                "supplementary_profile": "旧补充简介",
+                "material_status": "submitted",
+                "application_status": "submitted",
+                "reviewer_name": None,
+                "final_score": None,
+            },
+            {
+                "personal_statement_text": "汇总陈述",
+                "growth_experience_text": "成长经历",
+                "program_application_reason_text": "申报理由",
+                "career_plan_text": "职业规划",
+                "resume_attachment_url": "/api/v1/portal/attachments/resume.pdf",
+                "supporting_material_attachment_url": "/api/v1/portal/attachments/materials.zip",
+                "ai_problem_statement": "关键科研问题",
+                "ai_industry_opinion": "不同观点",
+            },
+            {
+                "has_read_declaration": True,
+                "declaration_text": "本人承诺材料真实",
+                "progress_snapshot": {"preference_count": 1},
+            },
+        ],
+        fetchall_results=[
+            [],
+            [{"preference_order": 1, "research_center_name": "具身智能中心", "advisor_name": "刘亚", "is_optional": False}],
+            [],
+            [],
+            [{"id": 31, "exam_name": "IELTS", "score_text": "7.0", "certificate_attachment_url": "/api/v1/portal/attachments/ielts.pdf"}],
+            [],
+            [{"id": 41, "achievement_type": "获奖经历", "paper_title": None, "author_order": None, "journal_or_conference": None, "publish_or_index_month": None, "achievement_month": "2024-06", "award_name": "挑战杯", "award_rank": "一等奖", "award_certificate_attachment_url": "/api/v1/portal/attachments/award.pdf", "awarding_organization": None, "award_level": "一等奖", "award_year": "2024", "description_text": "获奖描述", "responsibility_text": "获奖描述"}],
+        ],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+    monkeypatch.setattr(store, "_resolve_attachment_name", lambda *args: {31: "ielts.pdf", 41: "award.pdf"}.get(int(args[2] or 0), ""))
+
+    item = store.get_recruitment_application_detail(15)
+
+    assert item is not None
+    assert item["source_channel"] == "其他"
+    assert item["source_channel_other"] == "老师宣讲"
+    assert item["profile"]["birth_date"] == "1999-01-01"
+    assert item["profile"]["ethnic_group"] == "汉族"
+    assert item["profile"]["emergency_contact_name"] == "李四"
+    assert len(item["english_proficiencies"]) == 1
+    assert item["english_proficiencies"][0]["exam_name"] == "IELTS"
+    assert item["english_proficiencies"][0]["certificate_attachment_name"] == "ielts.pdf"
+    assert len(item["achievement_records"]) == 1
+    assert item["achievement_records"][0]["award_name"] == "挑战杯"
+    assert item["achievement_records"][0]["award_certificate_attachment_name"] == "award.pdf"
+    assert item["personal_statement"]["growth_experience_text"] == "成长经历"
+    assert item["personal_statement"]["program_application_reason_text"] == "申报理由"
+    assert item["personal_statement"]["career_plan_text"] == "职业规划"
 
 
 def test_sync_portal_application_submission_syncs_workflow_task_when_provided(monkeypatch) -> None:

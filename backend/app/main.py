@@ -1,3 +1,4 @@
+import json
 from time import perf_counter
 
 import httpx
@@ -6,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import auth, dashboard, degree, portal, recruitment, students, system, training, workflow
 from app.core.config import settings
+from app.core.exceptions import DatabaseUnavailableError
 from app.core.logging import configure_logging
 from app.services.management_service import repair_startup_postgres_state, warm_up_runtime_management_store
 
@@ -51,6 +53,16 @@ api_router.include_router(degree.router)
 api_router.include_router(system.router)
 api_router.include_router(workflow.router)
 app.include_router(api_router)
+
+
+@app.exception_handler(DatabaseUnavailableError)
+async def handle_database_unavailable_error(request: Request, exc: DatabaseUnavailableError) -> Response:
+    del request
+    return Response(
+        content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
+        status_code=503,
+        media_type="application/json",
+    )
 
 
 def _should_proxy_frontend_path(path: str) -> bool:

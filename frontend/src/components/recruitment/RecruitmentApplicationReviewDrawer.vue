@@ -33,36 +33,32 @@ const applicationDetailSections: Array<{ title: string; fields: Array<{ label: s
     title: '基础信息',
     fields: [
       { label: '业务编号', key: 'business_key' },
+      { label: '报名号', key: 'candidate_no' },
       { label: '姓名', key: 'student_name' },
-      { label: '性别', key: 'gender' },
-      { label: '电话', key: 'phone_number' },
-      { label: '邮箱', key: 'email' },
-      { label: '第一志愿', key: 'first_choice' },
-      { label: '第二志愿', key: 'second_choice' },
-      { label: '意向导师', key: 'intended_advisor_name' },
+      { label: '提交时间', key: 'applied_at' },
       { label: '资料审核', key: 'material_status' },
       { label: '申请状态', key: 'application_status' },
       { label: '审核人', key: 'reviewer_name' },
-    ],
-  },
-  {
-    title: '身份与联系信息',
-    fields: [
-      { label: '政治面貌', key: 'political_status' },
-      { label: '婚姻状况', key: 'marital_status' },
-      { label: '宗教信仰', key: 'religious_belief' },
-      { label: '籍贯', key: 'native_place' },
-      { label: '证件类型', key: 'id_type' },
-      { label: '证件号码', key: 'id_number' },
-      { label: '通讯地址', key: 'mailing_address' },
-      { label: '毕业院校', key: 'graduation_school' },
-      { label: '最高学历', key: 'highest_degree' },
-      { label: '研究方向', key: 'intended_field' },
-      { label: '来源渠道', key: 'discovery_channel' },
       { label: '最终评分', key: 'final_score' },
     ],
   },
+  {
+    title: '报名概览',
+    fields: [
+      { label: '毕业院校', key: 'graduation_school' },
+      { label: '最高学历', key: 'highest_degree' },
+      { label: '研究方向', key: 'intended_field' },
+      { label: '意向导师', key: 'intended_advisor_name' },
+      { label: '是否接受调剂', key: 'accept_adjustment' },
+      { label: '来源渠道', key: 'source_channel' },
+      { label: '来源渠道补充', key: 'source_channel_other' },
+    ],
+  },
 ]
+
+function hasDisplayValue(value: unknown) {
+  return !(value === null || value === undefined || String(value).trim() === '')
+}
 
 function displayDetailValue(value: unknown) {
   if (value === null || value === undefined || String(value).trim() === '') {
@@ -141,6 +137,53 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
           <div v-for="field in section.fields" :key="field.key" class="detail-item">
             <span class="detail-item__label">{{ field.label }}</span>
             <span class="detail-item__value">{{ displayDetailValue(application[field.key]) }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="detail-section">
+        <h3 class="dialog-section__title">身份与联系信息</h3>
+        <div class="detail-grid">
+          <div class="detail-item"><span class="detail-item__label">姓名拼音</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.full_name_pinyin) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">性别</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.gender || application.gender) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">出生日期</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.birth_date) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">民族</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.ethnic_group) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">政治面貌</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.political_status || application.political_status) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">婚姻状况</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.marital_status || application.marital_status) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">宗教信仰</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.religious_belief || application.religious_belief) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">籍贯</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.native_place || application.native_place) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">联系电话</span><span class="detail-item__value">{{ displayDetailValue(application.phone_number) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">邮箱</span><span class="detail-item__value">{{ displayDetailValue(application.email) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">证件类型</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.id_type || application.id_type) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">证件号码</span><span class="detail-item__value">{{ displayDetailValue(application.id_number) }}</span></div>
+          <div class="detail-item detail-item--full"><span class="detail-item__label">通讯地址</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.mailing_address || application.mailing_address) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">紧急联系人</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.emergency_contact_name) }}</span></div>
+          <div class="detail-item"><span class="detail-item__label">紧急联系人电话</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.emergency_contact_phone) }}</span></div>
+          <div v-if="application.profile?.profile_photo_url" class="detail-item detail-item--full">
+            <span class="detail-item__label">证件照</span>
+            <div class="detail-attachment-actions">
+              <a class="detail-attachment-link" :href="application.profile.profile_photo_url" target="_blank" rel="noopener noreferrer">
+                <el-icon><Document /></el-icon>
+                <span>{{ resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照') }}</span>
+              </a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.profile_photo_url, resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照'))">
+                <el-icon><Download /></el-icon>
+                <span>下载</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="application.profile?.id_card_collage_url" class="detail-item detail-item--full">
+            <span class="detail-item__label">身份证拼图</span>
+            <div class="detail-attachment-actions">
+              <a class="detail-attachment-link" :href="application.profile.id_card_collage_url" target="_blank" rel="noopener noreferrer">
+                <el-icon><Document /></el-icon>
+                <span>{{ resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图') }}</span>
+              </a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.id_card_collage_url, resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图'))">
+                <el-icon><Download /></el-icon>
+                <span>下载</span>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -239,6 +282,35 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
       </section>
 
       <section class="detail-section">
+        <h3 class="dialog-section__title">英语能力</h3>
+        <div v-if="application.english_proficiencies?.length" class="detail-record-stack">
+          <article v-for="(item, index) in application.english_proficiencies" :key="`detail-english-${index}`" class="detail-record-card">
+            <div class="detail-record-card__header">
+              <strong>英语能力 {{ index + 1 }}</strong>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-item"><span class="detail-item__label">考试名称</span><span class="detail-item__value">{{ displayDetailValue(item.exam_name) }}</span></div>
+              <div class="detail-item"><span class="detail-item__label">成绩</span><span class="detail-item__value">{{ displayDetailValue(item.score_text) }}</span></div>
+              <div v-if="item.certificate_attachment_url" class="detail-item detail-item--full">
+                <span class="detail-item__label">英语证书附件</span>
+                <div class="detail-attachment-actions">
+                  <a class="detail-attachment-link" :href="item.certificate_attachment_url" target="_blank" rel="noopener noreferrer">
+                    <el-icon><Document /></el-icon>
+                    <span>{{ resolveAttachmentDisplayName(item.certificate_attachment_url, item.certificate_attachment_name, '英语证书附件') }}</span>
+                  </a>
+                  <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(item.certificate_attachment_url, resolveAttachmentDisplayName(item.certificate_attachment_url, item.certificate_attachment_name, '英语证书附件'))">
+                    <el-icon><Download /></el-icon>
+                    <span>下载</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="empty-inline">当前未填写英语能力。</div>
+      </section>
+
+      <section class="detail-section">
         <h3 class="dialog-section__title">家庭情况</h3>
         <div v-if="application.family_members?.length" class="detail-record-stack">
           <article v-for="(item, index) in application.family_members" :key="`detail-family-${index}`" class="detail-record-card">
@@ -258,6 +330,46 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
       </section>
 
       <section class="detail-section">
+        <h3 class="dialog-section__title">成果经历</h3>
+        <div v-if="application.achievement_records?.length" class="detail-record-stack">
+          <article v-for="(item, index) in application.achievement_records" :key="`detail-achievement-${index}`" class="detail-record-card">
+            <div class="detail-record-card__header">
+              <strong>成果经历 {{ index + 1 }}</strong>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-item"><span class="detail-item__label">成果类型</span><span class="detail-item__value">{{ displayDetailValue(item.achievement_type) }}</span></div>
+              <div v-if="hasDisplayValue(item.achievement_month)" class="detail-item"><span class="detail-item__label">成果时间</span><span class="detail-item__value">{{ displayDetailValue(item.achievement_month) }}</span></div>
+              <div v-if="hasDisplayValue(item.paper_title)" class="detail-item detail-item--full"><span class="detail-item__label">论文标题</span><span class="detail-item__value">{{ displayDetailValue(item.paper_title) }}</span></div>
+              <div v-if="hasDisplayValue(item.author_order)" class="detail-item"><span class="detail-item__label">作者排序</span><span class="detail-item__value">{{ displayDetailValue(item.author_order) }}</span></div>
+              <div v-if="hasDisplayValue(item.journal_or_conference)" class="detail-item"><span class="detail-item__label">期刊/会议</span><span class="detail-item__value">{{ displayDetailValue(item.journal_or_conference) }}</span></div>
+              <div v-if="hasDisplayValue(item.publish_or_index_month)" class="detail-item"><span class="detail-item__label">发表/收录时间</span><span class="detail-item__value">{{ displayDetailValue(item.publish_or_index_month) }}</span></div>
+              <div v-if="hasDisplayValue(item.award_name)" class="detail-item"><span class="detail-item__label">奖项名称</span><span class="detail-item__value">{{ displayDetailValue(item.award_name) }}</span></div>
+              <div v-if="hasDisplayValue(item.award_rank)" class="detail-item"><span class="detail-item__label">奖项等级/名次</span><span class="detail-item__value">{{ displayDetailValue(item.award_rank) }}</span></div>
+              <div v-if="hasDisplayValue(item.awarding_organization)" class="detail-item"><span class="detail-item__label">颁奖单位</span><span class="detail-item__value">{{ displayDetailValue(item.awarding_organization) }}</span></div>
+              <div v-if="hasDisplayValue(item.award_level)" class="detail-item"><span class="detail-item__label">奖项级别</span><span class="detail-item__value">{{ displayDetailValue(item.award_level) }}</span></div>
+              <div v-if="hasDisplayValue(item.award_year)" class="detail-item"><span class="detail-item__label">获奖年份</span><span class="detail-item__value">{{ displayDetailValue(item.award_year) }}</span></div>
+              <div v-if="hasDisplayValue(item.description_text)" class="detail-item detail-item--full"><span class="detail-item__label">成果说明</span><span class="detail-item__value">{{ displayDetailValue(item.description_text) }}</span></div>
+              <div v-if="hasDisplayValue(item.responsibility_text)" class="detail-item detail-item--full"><span class="detail-item__label">本人贡献</span><span class="detail-item__value">{{ displayDetailValue(item.responsibility_text) }}</span></div>
+              <div v-if="item.award_certificate_attachment_url" class="detail-item detail-item--full">
+                <span class="detail-item__label">成果证明附件</span>
+                <div class="detail-attachment-actions">
+                  <a class="detail-attachment-link" :href="item.award_certificate_attachment_url" target="_blank" rel="noopener noreferrer">
+                    <el-icon><Document /></el-icon>
+                    <span>{{ resolveAttachmentDisplayName(item.award_certificate_attachment_url, item.award_certificate_attachment_name, '成果证明附件') }}</span>
+                  </a>
+                  <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(item.award_certificate_attachment_url, resolveAttachmentDisplayName(item.award_certificate_attachment_url, item.award_certificate_attachment_name, '成果证明附件'))">
+                    <el-icon><Download /></el-icon>
+                    <span>下载</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="empty-inline">当前未填写成果经历。</div>
+      </section>
+
+      <section class="detail-section">
         <h3 class="dialog-section__title">附件材料</h3>
         <div class="detail-text-list">
           <article v-if="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment" class="detail-text-card">
@@ -268,6 +380,19 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
                 <span>{{ resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人陈述附件') }}</span>
               </a>
               <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人陈述附件'))">
+                <el-icon><Download /></el-icon>
+                <span>下载</span>
+              </button>
+            </div>
+          </article>
+          <article v-if="application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment" class="detail-text-card">
+            <h4>补充材料附件</h4>
+            <div class="detail-attachment-actions detail-attachment-actions--stacked">
+              <a class="detail-attachment-link" :href="application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment || '#'" target="_blank" rel="noopener noreferrer">
+                <el-icon><Document /></el-icon>
+                <span>{{ resolveAttachmentDisplayName(application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment, application.personal_statement?.supporting_material_attachment_name || application.material_list_attachment_name, '补充材料附件') }}</span>
+              </a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment, resolveAttachmentDisplayName(application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment, application.personal_statement?.supporting_material_attachment_name || application.material_list_attachment_name, '补充材料附件'))">
                 <el-icon><Download /></el-icon>
                 <span>下载</span>
               </button>
@@ -292,15 +417,12 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
       <section class="detail-section">
         <h3 class="dialog-section__title">个人陈述与补充说明</h3>
         <div class="detail-text-list">
-          <article class="detail-text-card"><h4>本人自我评价</h4><p>{{ displayDetailValue(application.self_evaluation) }}</p></article>
           <article class="detail-text-card"><h4>个人陈述</h4><p>{{ displayDetailValue(application.personal_statement?.personal_statement_text) }}</p></article>
+          <article class="detail-text-card"><h4>成长经历</h4><p>{{ displayDetailValue(application.personal_statement?.growth_experience_text) }}</p></article>
+          <article class="detail-text-card"><h4>项目申报理由</h4><p>{{ displayDetailValue(application.personal_statement?.program_application_reason_text) }}</p></article>
+          <article class="detail-text-card"><h4>职业规划</h4><p>{{ displayDetailValue(application.personal_statement?.career_plan_text) }}</p></article>
           <article class="detail-text-card"><h4>关键科研问题</h4><p>{{ displayDetailValue(application.personal_statement?.ai_problem_statement || application.research_problem) }}</p></article>
           <article class="detail-text-card"><h4>AI 行业不同观点</h4><p>{{ displayDetailValue(application.personal_statement?.ai_industry_opinion || application.dissenting_view) }}</p></article>
-          <article class="detail-text-card"><h4>研究现状与局限</h4><p>{{ displayDetailValue(application.research_status_analysis) }}</p></article>
-          <article class="detail-text-card"><h4>问题解决后的影响</h4><p>{{ displayDetailValue(application.research_impact) }}</p></article>
-          <article class="detail-text-card"><h4>AI 对社会影响判断</h4><p>{{ displayDetailValue(application.ai_society_impact) }}</p></article>
-          <article class="detail-text-card"><h4>学生活动经历</h4><p>{{ displayDetailValue(application.student_activity_experience) }}</p></article>
-          <article class="detail-text-card"><h4>补充简介</h4><p>{{ displayDetailValue(application.supplementary_profile) }}</p></article>
           <article class="detail-text-card"><h4>声明确认</h4><p>{{ application.declaration?.has_read_declaration ? '已阅读并确认声明' : '未确认声明' }}</p></article>
           <article v-if="application.declaration?.declaration_text" class="detail-text-card"><h4>声明内容</h4><p>{{ displayDetailValue(application.declaration?.declaration_text) }}</p></article>
         </div>

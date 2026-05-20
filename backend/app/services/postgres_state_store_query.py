@@ -66,6 +66,308 @@ class PostgresStateStoreQueryMixin:
             raise RuntimeError(f"Expected row for {context}")
         return row
 
+    def get_system_user_by_id(self, user_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        u.id,
+                        u.username,
+                        u.full_name,
+                        u.password_hash,
+                        COALESCE(r.role_code, '') AS role_code,
+                        COALESCE(r.role_name, '') AS role_name,
+                        COALESCE(up.department_name, u.department_name, '') AS department_name,
+                        up.introduction AS introduction,
+                        COALESCE(up.email, u.email) AS email,
+                        COALESCE(up.phone_number, u.phone_number) AS phone_number,
+                        CASE WHEN u.is_active THEN '启用' ELSE '停用' END AS account_status,
+                        u.last_login_at
+                    FROM dtlms_users u
+                    LEFT JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                    LEFT JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                    LEFT JOIN dtlms_user_profiles up ON up.username = u.username
+                    WHERE u.id = %s AND u.is_deleted = FALSE
+                    LIMIT 1
+                    """,
+                    (int(user_id),),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                normalized = self._normalize_system_user_row(dict(row))
+                normalized["password_hash"] = row.get("password_hash")
+                return normalized
+
+    def get_system_user_by_username(self, username: str) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        u.id,
+                        u.username,
+                        u.full_name,
+                        u.password_hash,
+                        COALESCE(r.role_code, '') AS role_code,
+                        COALESCE(r.role_name, '') AS role_name,
+                        COALESCE(up.department_name, u.department_name, '') AS department_name,
+                        up.introduction AS introduction,
+                        COALESCE(up.email, u.email) AS email,
+                        COALESCE(up.phone_number, u.phone_number) AS phone_number,
+                        CASE WHEN u.is_active THEN '启用' ELSE '停用' END AS account_status,
+                        u.last_login_at,
+                        COALESCE(array_agg(DISTINCT p.permission_code) FILTER (WHERE p.permission_code IS NOT NULL), ARRAY[]::varchar[]) AS permissions
+                    FROM dtlms_users u
+                    LEFT JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                    LEFT JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                    LEFT JOIN dtlms_role_permissions rp ON rp.role_id = r.id
+                    LEFT JOIN dtlms_permissions p ON p.id = rp.permission_id AND p.is_deleted = FALSE
+                    LEFT JOIN dtlms_user_profiles up ON up.username = u.username
+                    WHERE u.username = %s AND u.is_deleted = FALSE
+                    GROUP BY u.id, u.username, u.full_name, u.password_hash, r.role_code, r.role_name, up.department_name, u.department_name, up.introduction, up.email, u.email, up.phone_number, u.phone_number, u.is_active, u.last_login_at
+                    LIMIT 1
+                    """,
+                    (str(username),),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                normalized = self._normalize_system_user_row(dict(row))
+                normalized["password_hash"] = row.get("password_hash")
+                normalized["permissions"] = [str(item) for item in (row.get("permissions") or []) if str(item).strip()]
+                return normalized
+
+    def system_username_exists(self, username: str, *, exclude_user_id: int | None = None) -> bool:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                if exclude_user_id is None:
+                    cur.execute(
+                        "SELECT 1 FROM dtlms_users WHERE username = %s AND is_deleted = FALSE LIMIT 1",
+                        (str(username),),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT 1 FROM dtlms_users WHERE username = %s AND is_deleted = FALSE AND id <> %s LIMIT 1",
+                        (str(username), int(exclude_user_id)),
+                    )
+                return cur.fetchone() is not None
+
+    def load_role_state(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        r.id,
+                        r.role_code,
+                        r.role_name,
+                        COALESCE(r.scope_name, '系统管理') AS scope_name,
+                        COALESCE(array_agg(DISTINCT p.permission_code) FILTER (WHERE p.permission_code IS NOT NULL), ARRAY[]::varchar[]) AS permissions,
+                        COUNT(DISTINCT ur.user_id) FILTER (WHERE u.is_deleted = FALSE) AS user_count
+                    FROM dtlms_roles r
+                    LEFT JOIN dtlms_role_permissions rp ON rp.role_id = r.id
+                    LEFT JOIN dtlms_permissions p ON p.id = rp.permission_id AND p.is_deleted = FALSE
+                    LEFT JOIN dtlms_user_roles ur ON ur.role_id = r.id
+                    LEFT JOIN dtlms_users u ON u.id = ur.user_id
+                    WHERE r.is_deleted = FALSE
+                    GROUP BY r.id
+                    ORDER BY r.id ASC
+                    """
+                )
+                return [self._normalize_role_row(dict(row)) for row in cur.fetchall()]
+
+    def get_role_by_id(self, role_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        r.id,
+                        r.role_code,
+                        r.role_name,
+                        COALESCE(r.scope_name, '系统管理') AS scope_name,
+                        COALESCE(array_agg(DISTINCT p.permission_code) FILTER (WHERE p.permission_code IS NOT NULL), ARRAY[]::varchar[]) AS permissions,
+                        COUNT(DISTINCT ur.user_id) FILTER (WHERE u.is_deleted = FALSE) AS user_count
+                    FROM dtlms_roles r
+                    LEFT JOIN dtlms_role_permissions rp ON rp.role_id = r.id
+                    LEFT JOIN dtlms_permissions p ON p.id = rp.permission_id AND p.is_deleted = FALSE
+                    LEFT JOIN dtlms_user_roles ur ON ur.role_id = r.id
+                    LEFT JOIN dtlms_users u ON u.id = ur.user_id
+                    WHERE r.id = %s AND r.is_deleted = FALSE
+                    GROUP BY r.id
+                    LIMIT 1
+                    """,
+                    (int(role_id),),
+                )
+                row = cur.fetchone()
+                return self._normalize_role_row(dict(row)) if row is not None else None
+
+    def role_code_exists(self, role_code: str, *, exclude_role_id: int | None = None) -> bool:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                if exclude_role_id is None:
+                    cur.execute(
+                        "SELECT 1 FROM dtlms_roles WHERE role_code = %s AND is_deleted = FALSE LIMIT 1",
+                        (str(role_code),),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT 1 FROM dtlms_roles WHERE role_code = %s AND is_deleted = FALSE AND id <> %s LIMIT 1",
+                        (str(role_code), int(exclude_role_id)),
+                    )
+                return cur.fetchone() is not None
+
+    def load_system_user_state(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        u.id,
+                        u.username,
+                        u.full_name,
+                        u.password_hash,
+                        COALESCE(r.role_code, '') AS role_code,
+                        COALESCE(r.role_name, '') AS role_name,
+                        COALESCE(up.department_name, u.department_name, '') AS department_name,
+                        up.introduction AS introduction,
+                        COALESCE(up.email, u.email) AS email,
+                        COALESCE(up.phone_number, u.phone_number) AS phone_number,
+                        CASE WHEN u.is_active THEN '启用' ELSE '停用' END AS account_status,
+                        u.last_login_at
+                    FROM dtlms_users u
+                    LEFT JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                    LEFT JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                    LEFT JOIN dtlms_user_profiles up ON up.username = u.username
+                    WHERE u.is_deleted = FALSE
+                    ORDER BY u.id ASC
+                    """
+                )
+                rows: list[dict[str, Any]] = []
+                for row in cur.fetchall():
+                    normalized = self._normalize_system_user_row(dict(row))
+                    normalized["password_hash"] = row.get("password_hash")
+                    rows.append(normalized)
+                return rows
+
+    def load_user_profile_state(self) -> dict[str, dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT username, full_name, role_name, department_name, introduction, phone_number, email, theme_color
+                    FROM dtlms_user_profiles
+                    ORDER BY username ASC
+                    """
+                )
+                return {str(row["username"]): dict(row) for row in cur.fetchall()}
+
+    def load_audit_policy_state(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, item, policy, status
+                    FROM dtlms_audit_policies
+                    WHERE is_deleted = FALSE
+                    ORDER BY id ASC
+                    """
+                )
+                return [self._normalize_audit_policy_row(dict(row)) for row in cur.fetchall()]
+
+    def get_audit_policy_by_id(self, policy_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, item, policy, status
+                    FROM dtlms_audit_policies
+                    WHERE id = %s AND is_deleted = FALSE
+                    LIMIT 1
+                    """,
+                    (int(policy_id),),
+                )
+                row = cur.fetchone()
+                return self._normalize_audit_policy_row(dict(row)) if row is not None else None
+
+    def load_integration_state(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, name, direction, cadence, status, owner
+                    FROM dtlms_integrations
+                    WHERE is_deleted = FALSE
+                    ORDER BY id ASC
+                    """
+                )
+                return [self._normalize_integration_row(dict(row)) for row in cur.fetchall()]
+
+    def get_integration_by_id(self, integration_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, name, direction, cadence, status, owner
+                    FROM dtlms_integrations
+                    WHERE id = %s AND is_deleted = FALSE
+                    LIMIT 1
+                    """,
+                    (int(integration_id),),
+                )
+                row = cur.fetchone()
+                return self._normalize_integration_row(dict(row)) if row is not None else None
+
+    def get_system_stats_snapshot(self) -> dict[str, int]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(*) FROM dtlms_integrations WHERE is_deleted = FALSE) AS integration_total,
+                        (SELECT COUNT(*) FROM dtlms_integrations WHERE is_deleted = FALSE AND status = '正常') AS active_integration_total,
+                        (SELECT COUNT(*) FROM dtlms_operation_logs) AS operation_log_total,
+                        (SELECT COUNT(*) FROM dtlms_data_sync_logs WHERE sync_status <> 'success') AS sync_failure_total,
+                        (SELECT COUNT(*) FROM dtlms_users WHERE is_deleted = FALSE) AS user_total,
+                        (SELECT COUNT(*) FROM dtlms_roles WHERE is_deleted = FALSE) AS role_total
+                    """
+                )
+                row = cur.fetchone()
+                return {
+                    "integration_total": int(row["integration_total"] if row else 0),
+                    "active_integration_total": int(row["active_integration_total"] if row else 0),
+                    "operation_log_total": int(row["operation_log_total"] if row else 0),
+                    "sync_failure_total": int(row["sync_failure_total"] if row else 0),
+                    "user_total": int(row["user_total"] if row else 0),
+                    "role_total": int(row["role_total"] if row else 0),
+                }
+
     def get_recruitment_application_detail(self, application_id: int) -> dict[str, Any] | None:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -75,11 +377,27 @@ class PostgresStateStoreQueryMixin:
                     """
                     SELECT
                         ra.*,
+                        pp.full_name_pinyin,
+                        pp.profile_photo_url,
+                        pp.id_card_collage_url,
+                        pp.gender,
+                        pp.birth_date,
+                        pp.ethnic_group,
+                        pp.native_place,
+                        pp.political_status,
+                        pp.marital_status,
+                        pp.religious_belief,
+                        pp.id_type,
+                        pp.mailing_address,
+                        pp.emergency_contact_name,
+                        pp.emergency_contact_phone,
                         rf.field_name AS intended_field,
                         am.material_status,
                         qr.reviewer_username AS reviewer_name,
                         ad.final_score
                     FROM dtlms_recruitment_applications ra
+                    LEFT JOIN dtlms_portal_students ps ON ps.id = ra.portal_student_id
+                    LEFT JOIN dtlms_portal_student_profiles pp ON pp.portal_student_id = ps.id
                     LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
                     LEFT JOIN LATERAL (
                         SELECT material_status
@@ -176,6 +494,29 @@ class PostgresStateStoreQueryMixin:
 
                 cur.execute(
                     """
+                    SELECT id, exam_name, score_text, certificate_attachment_url
+                    FROM dtlms_portal_application_english_proficiencies
+                    WHERE application_id = %s
+                    ORDER BY id ASC
+                    """,
+                    (int(application_id),),
+                )
+                english_proficiencies: list[dict[str, Any]] = []
+                for item in cur.fetchall():
+                    english = dict(item)
+                    english_id = int(english.get("id") or 0)
+                    english["certificate_attachment_name"] = self._resolve_attachment_name(
+                        attachment_rows,
+                        "english_proficiency",
+                        english_id,
+                        "english_certificate",
+                        english.get("certificate_attachment_url"),
+                    )
+                    english.pop("id", None)
+                    english_proficiencies.append(english)
+
+                cur.execute(
+                    """
                     SELECT member_name, relation_type, employer_name, job_title, contact_phone
                     FROM dtlms_portal_application_family_members
                     WHERE application_id = %s
@@ -184,6 +525,32 @@ class PostgresStateStoreQueryMixin:
                     (int(application_id),),
                 )
                 family_members = [dict(item) for item in cur.fetchall()]
+
+                cur.execute(
+                    """
+                    SELECT id, achievement_type, paper_title, author_order, journal_or_conference,
+                           publish_or_index_month, achievement_month, award_name, award_rank,
+                           award_certificate_attachment_url, awarding_organization, award_level,
+                           award_year, description_text, responsibility_text
+                    FROM dtlms_portal_application_achievement_records
+                    WHERE application_id = %s
+                    ORDER BY id ASC
+                    """,
+                    (int(application_id),),
+                )
+                achievement_records: list[dict[str, Any]] = []
+                for item in cur.fetchall():
+                    achievement = dict(item)
+                    achievement_id = int(achievement.get("id") or 0)
+                    achievement["award_certificate_attachment_name"] = self._resolve_attachment_name(
+                        attachment_rows,
+                        "achievement_record",
+                        achievement_id,
+                        "achievement_award_certificate",
+                        achievement.get("award_certificate_attachment_url"),
+                    )
+                    achievement.pop("id", None)
+                    achievement_records.append(achievement)
 
                 cur.execute(
                     """
@@ -236,10 +603,15 @@ class PostgresStateStoreQueryMixin:
                 declaration_row = cur.fetchone()
 
                 application = self._normalize_recruitment_application_row(dict(application_row))
+                profile = self._derive_portal_profile(dict(application_row))
+                if profile is not None:
+                    application["profile"] = profile
                 application["preferences"] = preferences
                 application["education_experiences"] = education_experiences
                 application["practice_experiences"] = practice_experiences
+                application["english_proficiencies"] = english_proficiencies
                 application["family_members"] = family_members
+                application["achievement_records"] = achievement_records
                 application["personal_statement"] = personal_statement
                 application["declaration"] = dict(declaration_row) if declaration_row else {"has_read_declaration": False}
                 application["material_list_attachment_name"] = self._resolve_attachment_name(
@@ -513,6 +885,7 @@ class PostgresStateStoreQueryMixin:
                 if not row:
                     return None
                 student = dict(row)
+                saved_draft = dict(student.get("application_draft")) if isinstance(student.get("application_draft"), dict) else None
                 profile = self._derive_portal_profile(student)
                 if profile is not None:
                     student["profile"] = profile
@@ -670,6 +1043,7 @@ class PostgresStateStoreQueryMixin:
                     "declaration": dict(declaration_row) if declaration_row else {"has_read_declaration": bool(student.get("signed_agreement"))},
                     "submitted_at": None if self._portal_resubmittable_application_status(application.get("application_status")) else self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at"),
                 }
+                student["application_draft"] = self._merge_portal_application_draft(student.get("application_draft"), saved_draft) or student["application_draft"]
                 personal_statement = student["application_draft"]["personal_statement"]
                 personal_statement["resume_attachment_name"] = self._resolve_attachment_name(
                     attachment_rows,
@@ -1896,6 +2270,66 @@ class PostgresStateStoreQueryMixin:
                 )
                 return [self._normalize_sync_log_row(dict(row)) for row in cur.fetchall()], total
 
+    def list_notification_delivery_logs_page(
+        self,
+        keyword: str | None = None,
+        channel: str | None = None,
+        send_status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1 = 1"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append(
+                """
+                (
+                    recipient ILIKE %s
+                    OR subject ILIKE %s
+                    OR COALESCE(template_code, '') ILIKE %s
+                    OR COALESCE(failure_reason, '') ILIKE %s
+                    OR COALESCE(business_key, '') ILIKE %s
+                )
+                """
+            )
+            params.extend([keyword_like] * 5)
+        if channel:
+            where_clauses.append("channel = %s")
+            params.append(channel)
+        if send_status:
+            where_clauses.append("send_status = %s")
+            params.append(send_status)
+
+        where_sql = " AND ".join(where_clauses)
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                self._execute_dynamic(
+                    cur,
+                    f"SELECT COUNT(*) AS total FROM dtlms_notification_delivery_logs WHERE {where_sql}",
+                    params,
+                )
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                self._execute_dynamic(
+                    cur,
+                    f"""
+                    SELECT id, channel, template_code, recipient, subject, send_status, failure_reason, business_key, triggered_by, created_at
+                    FROM dtlms_notification_delivery_logs
+                    WHERE {where_sql}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    [*params, page_size, offset],
+                )
+                return [self._normalize_notification_delivery_log_row(dict(row)) for row in cur.fetchall()], total
+
     def list_roles_page(
         self,
         keyword: str | None = None,
@@ -2085,6 +2519,8 @@ class PostgresStateStoreQueryMixin:
                         COALESCE(r.role_code, '') AS role_code,
                         COALESCE(r.role_name, '') AS role_name,
                         COALESCE(up.department_name, u.department_name, '') AS department_name,
+                        up.introduction AS introduction,
+                        up.email AS email,
                         COALESCE(up.phone_number, u.phone_number) AS phone_number,
                         CASE WHEN u.is_active THEN '启用' ELSE '停用' END AS account_status,
                         u.last_login_at

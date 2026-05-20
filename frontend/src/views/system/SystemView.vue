@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import TableRowActions from '../../components/table/TableRowActions.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
-import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
+import { getEmailValidationMessage, getPhoneValidationMessage, normalizeEmail, normalizePhoneNumber } from '../../utils/contactValidation'
 import { useServerPagination } from '../../composables/useServerPagination'
 
 import {
@@ -26,6 +26,7 @@ import {
   getSystemStats,
   listAuditPolicies,
   listIntegrations,
+  listNotificationDeliveryLogs,
   listOperationLogs,
   listRoles,
   listSyncLogs,
@@ -38,6 +39,7 @@ import {
   type AuditPolicyUpsert,
   type IntegrationRecord,
   type IntegrationUpsert,
+  type NotificationDeliveryLogRecord,
   type OperationLogRecord,
   type PermissionOption,
   type RoleRecord,
@@ -54,10 +56,12 @@ const loading = ref(false)
 const bootstrapping = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
+const userSaveResultDialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedIds = ref<number[]>([])
 const systemTagColors = ref<DictColorMap>({})
+const userSaveResult = ref<{ title: string; actionLabel: string; username: string; message: string } | null>(null)
 
 const stats = ref<SystemStats>({
   integration_total: 0,
@@ -86,6 +90,7 @@ const roles = ref<RoleRecord[]>([])
 const policies = ref<AuditPolicyRecord[]>([])
 const integrations = ref<IntegrationRecord[]>([])
 const operationLogs = ref<OperationLogRecord[]>([])
+const notificationDeliveryLogs = ref<NotificationDeliveryLogRecord[]>([])
 const syncLogs = ref<SyncLogRecord[]>([])
 
 const userFilters = reactive({
@@ -113,6 +118,11 @@ const operationLogFilters = reactive({
   module_name: '',
   result: '',
 })
+const notificationLogFilters = reactive({
+  keyword: '',
+  channel: '',
+  send_status: '',
+})
 const syncLogFilters = reactive({
   keyword: '',
   sync_status: '',
@@ -124,6 +134,8 @@ const userForm = reactive<SystemUserUpsert>({
   full_name: '',
   role_code: '',
   department_name: '',
+  introduction: '',
+  email: '',
   phone_number: '',
   account_status: '启用',
   password: '',
@@ -153,6 +165,7 @@ const sectionMeta: Record<string, { title: string; tag: string; createLabel: str
   audit: { title: '审计策略管理', tag: '审计治理', createLabel: '新建审计策略', batchDeleteLabel: '批量删除策略' },
   integrations: { title: '集成链路管理', tag: '接口治理', createLabel: '新建集成链路', batchDeleteLabel: '批量删除链路' },
   'operation-logs': { title: '操作日志查询', tag: '审计追踪', createLabel: '', batchDeleteLabel: '' },
+  'notification-logs': { title: '通知发送日志', tag: '通知追踪', createLabel: '', batchDeleteLabel: '' },
   'sync-logs': { title: '同步日志查询', tag: '数据追踪', createLabel: '', batchDeleteLabel: '' },
 }
 
@@ -165,6 +178,7 @@ const currentTotal = computed(() => {
   if (activeSection.value === 'audit') return auditPager.pagination.total
   if (activeSection.value === 'integrations') return integrationPager.pagination.total
   if (activeSection.value === 'operation-logs') return operationLogPager.pagination.total
+  if (activeSection.value === 'notification-logs') return notificationLogPager.pagination.total
   return syncLogPager.pagination.total
 })
 const statCards = computed(() => [
@@ -195,11 +209,29 @@ const syncSourceOptions = computed(() => {
   const values = Array.from(new Set(syncLogs.value.map((item) => item.source_system).filter(Boolean)))
   return values.map((item) => ({ label: item, value: item }))
 })
+const notificationChannelOptions = computed(() => {
+  const values = Array.from(new Set(notificationDeliveryLogs.value.map((item) => item.channel).filter(Boolean)))
+  if (!values.includes('email')) values.unshift('email')
+  return values.map((item) => ({ label: item === 'email' ? '邮件' : item, value: item }))
+})
+const operationResultOptions = computed(() => {
+  const options = [...systemOptions.value.operation_result_options]
+  if (!options.some((item) => item.value === 'timeout')) {
+    options.push({ label: '超时', value: 'timeout' })
+  }
+  return options
+})
+const notificationStatusOptions = [
+  { label: '成功', value: 'success' },
+  { label: '失败', value: 'failed' },
+  { label: '已跳过', value: 'skipped' },
+]
 const userPager = useServerPagination()
 const rolePager = useServerPagination()
 const auditPager = useServerPagination()
 const integrationPager = useServerPagination()
 const operationLogPager = useServerPagination()
+const notificationLogPager = useServerPagination()
 const syncLogPager = useServerPagination()
 
 function getErrorMessage(error: unknown) {
@@ -207,6 +239,16 @@ function getErrorMessage(error: unknown) {
     return String(error.response?.data?.detail || error.message || '请求失败')
   }
   return '请求失败'
+}
+
+function openUserSaveResultDialog(title: string, actionLabel: string, username: string, message: string) {
+  userSaveResult.value = {
+    title,
+    actionLabel,
+    username,
+    message,
+  }
+  userSaveResultDialogVisible.value = true
 }
 
 function resetSelection() {
@@ -220,6 +262,8 @@ function resetForms() {
     full_name: '',
     role_code: '',
     department_name: '',
+    introduction: '',
+    email: '',
     phone_number: '',
     account_status: '启用',
     password: '',
@@ -351,6 +395,18 @@ async function loadSectionData() {
       operationLogPager.sync(response.data.total)
       return
     }
+    if (activeSection.value === 'notification-logs') {
+      const response = await listNotificationDeliveryLogs({
+        keyword: notificationLogFilters.keyword || undefined,
+        channel: notificationLogFilters.channel || undefined,
+        send_status: notificationLogFilters.send_status || undefined,
+        page: notificationLogPager.pagination.currentPage,
+        page_size: notificationLogPager.pagination.pageSize,
+      })
+      notificationDeliveryLogs.value = response.data.items
+      notificationLogPager.sync(response.data.total)
+      return
+    }
     const response = await listSyncLogs({
       keyword: syncLogFilters.keyword || undefined,
       sync_status: syncLogFilters.sync_status || undefined,
@@ -389,6 +445,8 @@ function openEditDialog(row: SystemUserRecord | RoleRecord | AuditPolicyRecord |
       full_name: user.full_name,
       role_code: user.role_code,
       department_name: user.department_name,
+      introduction: user.introduction || '',
+      email: user.email || '',
       phone_number: user.phone_number || '',
       account_status: user.account_status,
       password: '',
@@ -423,11 +481,20 @@ function openEditDialog(row: SystemUserRecord | RoleRecord | AuditPolicyRecord |
 
 function validateForm() {
   if (activeSection.value === 'users') {
-    if (!userForm.username || !userForm.full_name || !userForm.role_code || !userForm.department_name || !userForm.account_status) {
+    if (!userForm.username || !userForm.full_name || !userForm.role_code || !userForm.account_status) {
       ElMessage.warning('请完整填写系统账号信息')
       return false
     }
-    const phoneValidationMessage = getPhoneValidationMessage(userForm.phone_number || '')
+    if (userForm.role_code === 'advisor' && !String(userForm.introduction || '').trim()) {
+      ElMessage.warning('角色为导师时必须填写介绍')
+      return false
+    }
+    const emailValidationMessage = getEmailValidationMessage(userForm.email || '', dialogMode.value === 'edit')
+    if (emailValidationMessage) {
+      ElMessage.warning(emailValidationMessage)
+      return false
+    }
+    const phoneValidationMessage = getPhoneValidationMessage(userForm.phone_number || '', dialogMode.value === 'edit')
     if (phoneValidationMessage) {
       ElMessage.warning(phoneValidationMessage)
       return false
@@ -455,6 +522,16 @@ function validateForm() {
   return true
 }
 
+function isSystemUserFieldRequired(field: 'username' | 'full_name' | 'role_code' | 'account_status' | 'email' | 'phone_number' | 'introduction') {
+  if (field === 'introduction') {
+    return userForm.role_code === 'advisor'
+  }
+  if (field === 'email' || field === 'phone_number') {
+    return dialogMode.value === 'edit'
+  }
+  return true
+}
+
 async function submit() {
   if (!validateForm()) {
     return
@@ -465,18 +542,22 @@ async function submit() {
     if (activeSection.value === 'users') {
       const payload: SystemUserUpsert = {
         ...userForm,
+        introduction: userForm.introduction?.trim() || undefined,
+        email: normalizeEmail(userForm.email || ''),
         phone_number: normalizePhoneNumber(userForm.phone_number || ''),
         password: userForm.password?.trim() || undefined,
       }
       if (dialogMode.value === 'create') {
         await createSystemUser(payload)
-        ElMessage.success('系统账号已创建')
+        dialogVisible.value = false
+        await refreshAfterMutation(true)
+        openUserSaveResultDialog('保存成功', '新建账号', payload.username, '系统账号已创建。')
       } else if (currentId.value !== null) {
         await updateSystemUser(currentId.value, payload)
-        ElMessage.success('系统账号已更新')
+        dialogVisible.value = false
+        await refreshAfterMutation(true)
+        openUserSaveResultDialog('保存成功', '维护账号', payload.username, '系统账号已更新。')
       }
-      dialogVisible.value = false
-      await refreshAfterMutation(true)
       return
     }
 
@@ -520,11 +601,27 @@ async function submit() {
     dialogVisible.value = false
     await refreshAfterMutation()
   } catch (error) {
-    ElMessage.error(getErrorMessage(error))
+    const message = getErrorMessage(error)
+    if (activeSection.value === 'users') {
+      openUserSaveResultDialog(
+        '保存失败',
+        dialogMode.value === 'create' ? '新建账号' : '维护账号',
+        userForm.username || '未填写账号',
+        `系统账号保存失败：${message}`,
+      )
+      return
+    }
+    ElMessage.error(message)
   } finally {
     submitting.value = false
   }
 }
+
+watch(() => userSaveResultDialogVisible.value, (visible) => {
+  if (!visible) {
+    userSaveResult.value = null
+  }
+})
 
 async function handleDelete(row: SystemUserRecord | RoleRecord | AuditPolicyRecord | IntegrationRecord) {
   const targetName = activeSection.value === 'users'
@@ -610,6 +707,7 @@ async function handleSearch() {
     else if (activeSection.value === 'audit') auditPager.reset()
     else if (activeSection.value === 'integrations') integrationPager.reset()
     else if (activeSection.value === 'operation-logs') operationLogPager.reset()
+    else if (activeSection.value === 'notification-logs') notificationLogPager.reset()
     else syncLogPager.reset()
     await loadSectionData()
   } catch (error) {
@@ -624,6 +722,7 @@ async function handleReset() {
   auditPager.reset()
   integrationPager.reset()
   operationLogPager.reset()
+  notificationLogPager.reset()
   syncLogPager.reset()
   await handleSearch()
 }
@@ -678,6 +777,16 @@ async function handleOperationLogPageSizeChange(size: number) {
   await loadSectionData()
 }
 
+async function handleNotificationLogPageChange(page: number) {
+  notificationLogPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleNotificationLogPageSizeChange(size: number) {
+  notificationLogPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
 async function handleSyncLogPageChange(page: number) {
   syncLogPager.handleCurrentChange(page)
   await loadSectionData()
@@ -697,7 +806,7 @@ function getTagType(status: string) {
 }
 
 function resultLabel(value: string) {
-  return value === 'success' ? '成功' : value === 'failed' ? '失败' : value
+  return value === 'success' ? '成功' : value === 'failed' ? '失败' : value === 'timeout' ? '超时' : value === 'skipped' ? '已跳过' : value
 }
 
 watch(
@@ -838,6 +947,27 @@ onMounted(async () => {
         <el-form-item label="处理结果">
           <el-select v-model="operationLogFilters.result" placeholder="全部结果" clearable style="width: 160px">
             <el-option v-for="item in systemOptions.operation_result_options" :key="item.value" :label="item.label" :value="item.value" />
+                      <el-option v-for="item in operationResultOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-form v-else-if="activeSection === 'notification-logs'" class="filter-form" :inline="true">
+        <el-form-item label="关键字">
+          <el-input v-model="notificationLogFilters.keyword" placeholder="收件人 / 主题 / 模板编码 / 失败原因 / 业务编号" clearable />
+        </el-form-item>
+        <el-form-item label="发送渠道">
+          <el-select v-model="notificationLogFilters.channel" placeholder="全部渠道" clearable style="width: 160px">
+            <el-option v-for="item in notificationChannelOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="发送结果">
+          <el-select v-model="notificationLogFilters.send_status" placeholder="全部结果" clearable style="width: 160px">
+            <el-option v-for="item in notificationStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -872,6 +1002,7 @@ onMounted(async () => {
         <el-table-column prop="full_name" label="姓名" width="120" />
         <el-table-column prop="role_name" label="岗位角色" width="140" />
         <el-table-column prop="department_name" label="部门" width="140" />
+        <el-table-column prop="email" label="邮箱" min-width="220" show-overflow-tooltip />
         <el-table-column label="账号状态" width="110">
           <template #default="scope">
             <el-tag :type="getTagType(scope.row.account_status)">{{ scope.row.account_status }}</el-tag>
@@ -954,6 +1085,37 @@ onMounted(async () => {
         <el-table-column prop="summary" label="摘要" min-width="240" />
       </el-table>
 
+      <el-table v-else-if="activeSection === 'notification-logs'" :data="notificationDeliveryLogs" stripe border v-loading="loading">
+        <el-table-column prop="sent_at" label="发送时间" width="168" />
+        <el-table-column label="渠道" width="88">
+          <template #default="scope">
+            <el-tag effect="plain">{{ scope.row.channel === 'email' ? '邮件' : scope.row.channel }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="recipient" label="收件人" width="220" show-overflow-tooltip />
+        <el-table-column label="通知内容" min-width="300">
+          <template #default="scope">
+            <div class="notification-log__cell">
+              <div class="notification-log__primary" :title="scope.row.subject || '-'">{{ scope.row.subject || '-' }}</div>
+              <div class="notification-log__secondary" :title="`${scope.row.template_code || '-'}${scope.row.business_key ? ` / ${scope.row.business_key}` : ''}`">
+                {{ scope.row.template_code || '-' }}
+                <span v-if="scope.row.business_key"> / {{ scope.row.business_key }}</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="结果" width="96">
+          <template #default="scope">
+            <el-tag :type="getTagType(scope.row.send_status)">{{ resultLabel(scope.row.send_status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="失败原因" min-width="220">
+          <template #default="scope">
+            <div class="notification-log__failure" :title="scope.row.failure_reason || '-'">{{ scope.row.failure_reason || '-' }}</div>
+          </template>
+        </el-table-column>
+      </el-table>
+
       <el-table v-else :data="syncLogs" stripe border v-loading="loading">
         <el-table-column prop="source_system" label="源系统" width="160" />
         <el-table-column prop="target_system" label="目标系统" width="160" />
@@ -1023,6 +1185,16 @@ onMounted(async () => {
           @size-change="handleOperationLogPageSizeChange"
         />
         <el-pagination
+          v-else-if="activeSection === 'notification-logs'"
+          :current-page="notificationLogPager.pagination.currentPage"
+          :page-size="notificationLogPager.pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="notificationLogPager.pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleNotificationLogPageChange"
+          @size-change="handleNotificationLogPageSizeChange"
+        />
+        <el-pagination
           v-else
           :current-page="syncLogPager.pagination.currentPage"
           :page-size="syncLogPager.pagination.pageSize"
@@ -1037,20 +1209,58 @@ onMounted(async () => {
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? sectionConfig.createLabel : `维护${sectionConfig.title}`" width="820px">
       <el-form v-if="activeSection === 'users'" label-width="110px" class="dialog-grid">
-        <el-form-item label="登录账号"><el-input v-model="userForm.username" placeholder="请输入登录账号" /></el-form-item>
-        <el-form-item label="姓名"><el-input v-model="userForm.full_name" placeholder="请输入真实姓名" /></el-form-item>
-        <el-form-item label="角色分配">
+        <el-form-item>
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('username')" class="required-mark">*</span>登录账号</span>
+          </template>
+          <el-input v-model="userForm.username" placeholder="请输入登录账号" />
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('full_name')" class="required-mark">*</span>姓名</span>
+          </template>
+          <el-input v-model="userForm.full_name" placeholder="请输入真实姓名" />
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('role_code')" class="required-mark">*</span>角色分配</span>
+          </template>
           <el-select v-model="userForm.role_code" placeholder="请选择角色" style="width: 100%">
             <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="所属部门"><el-input v-model="userForm.department_name" placeholder="请输入所属部门" /></el-form-item>
-        <el-form-item label="账号状态">
+        <el-form-item label="所属部门"><el-input v-model="userForm.department_name" placeholder="请输入所属部门，可留空" /></el-form-item>
+        <el-form-item class="dialog-grid__full">
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('introduction')" class="required-mark">*</span>介绍</span>
+          </template>
+          <el-input
+            v-model="userForm.introduction"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入人员介绍；当角色为导师时必填"
+          />
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('email')" class="required-mark">*</span>邮箱</span>
+          </template>
+          <el-input v-model="userForm.email" placeholder="新建可留空，修改时必填" />
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('account_status')" class="required-mark">*</span>账号状态</span>
+          </template>
           <el-select v-model="userForm.account_status" placeholder="请选择账号状态" style="width: 100%">
             <el-option v-for="item in systemOptions.account_status_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="联系电话"><el-input v-model="userForm.phone_number" placeholder="请输入联系电话" /></el-form-item>
+        <el-form-item>
+          <template #label>
+            <span class="required-label"><span v-if="isSystemUserFieldRequired('phone_number')" class="required-mark">*</span>联系电话</span>
+          </template>
+          <el-input v-model="userForm.phone_number" placeholder="新建可留空，修改时必填" />
+        </el-form-item>
         <el-form-item label="登录密码" class="dialog-grid__full">
           <el-input v-model="userForm.password" show-password :placeholder="dialogMode === 'create' ? '留空则使用默认初始密码 ChangeMe@123' : '留空则保持原密码不变'" />
         </el-form-item>
@@ -1113,6 +1323,29 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="userSaveResultDialogVisible" :title="userSaveResult?.title || '保存结果'" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="userSaveResult">
+          <div class="reset-password-summary system-save-result-summary">
+            <div>
+              <span class="reset-password-summary__label">操作</span>
+              <strong>{{ userSaveResult.actionLabel }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">系统账号</span>
+              <strong>{{ userSaveResult.username }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ userSaveResult.message }}</p>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="userSaveResultDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </section>
@@ -1208,6 +1441,18 @@ onMounted(async () => {
   grid-column: 1 / -1;
 }
 
+.required-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.required-mark {
+  color: #d93025;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .permission-panel {
   width: 100%;
   display: grid;
@@ -1252,9 +1497,85 @@ onMounted(async () => {
   font-size: 13px;
 }
 
+.notification-log__cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.notification-log__primary,
+.notification-log__secondary,
+.notification-log__failure {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-log__primary {
+  color: #12284d;
+  font-weight: 600;
+}
+
+.notification-log__secondary {
+  color: #7183a0;
+  font-size: 12px;
+}
+
+.notification-log__failure {
+  color: #5f6f87;
+}
+
+.dialog-form {
+  padding-top: 8px;
+}
+
+.reset-password-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.reset-password-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reset-password-summary__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.reset-password-summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.reset-password-result {
+  display: grid;
+  gap: 14px;
+}
+
+.reset-password-result__message {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
 @media (max-width: 980px) {
   .state-grid,
   .dialog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reset-password-summary {
     grid-template-columns: 1fr;
   }
 

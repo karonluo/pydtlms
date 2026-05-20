@@ -56,6 +56,7 @@ const router = createRouter({
         { path: 'system/audit', component: SystemView, meta: { title: '审计策略管理', section: 'audit' } },
         { path: 'system/integrations', component: SystemView, meta: { title: '集成链路管理', section: 'integrations' } },
         { path: 'system/operation-logs', component: SystemView, meta: { title: '操作日志查询', section: 'operation-logs' } },
+        { path: 'system/notification-logs', component: SystemView, meta: { title: '通知发送日志', section: 'notification-logs' } },
         { path: 'system/sync-logs', component: SystemView, meta: { title: '同步日志查询', section: 'sync-logs' } },
         { path: 'profile', component: ProfileView, meta: { title: '个人空间' } },
       ],

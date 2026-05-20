@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -17,6 +17,14 @@ def _first_non_empty(*values: Any) -> str | None:
             if text:
                 return text
     return None
+
+
+def _normalize_optional_int(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+    return value
 
 
 def _rewrite_portal_attachment_urls(value: Any) -> Any:
@@ -452,6 +460,24 @@ def _validate_portal_declaration_rules(signed_agreement: bool) -> None:
         raise ValueError("请先确认提交声明")
 
 
+def _validate_portal_preference_rules(items: Sequence["PortalApplicationPreferenceItem"]) -> None:
+    ordered = sorted(items, key=lambda item: item.preference_order)
+    if not ordered:
+        raise ValueError("缺少第一志愿研究中心信息")
+
+    primary = ordered[0]
+    if not _first_non_empty(primary.research_center_name):
+        raise ValueError("缺少第一志愿研究中心信息")
+    if primary.advisor_user_id is None and not _first_non_empty(primary.advisor_name):
+        raise ValueError("请选择第一志愿导师")
+
+    for index, item in enumerate(ordered[1:], start=2):
+        if not _first_non_empty(item.research_center_name):
+            continue
+        if item.advisor_user_id is None and not _first_non_empty(item.advisor_name):
+            raise ValueError(f"第{index}志愿已选择研究中心后，必须选择导师")
+
+
 def _validate_portal_draft_rules_by_section(payload: "PortalApplicationDraftUpsert") -> None:
     section_id = _first_non_empty(payload.validation_section_id)
     if not section_id:
@@ -470,8 +496,7 @@ def _validate_portal_draft_rules_by_section(payload: "PortalApplicationDraftUpse
 
     if section_id == "application-section":
         _validate_portal_source_channel_rules(payload.source_channel, payload.source_channel_other)
-        if not _first_non_empty(payload.selected_team_name):
-            raise ValueError("缺少第一志愿研究中心信息")
+        _validate_portal_preference_rules(payload.preferences)
         return
 
     if section_id == "education-section":
@@ -528,6 +553,11 @@ class PortalApplicationPreferenceItem(BaseModel):
     advisor_name: str | None = None
     advisor_user_id: int | None = None
     is_optional: bool = False
+
+    @field_validator("team_id", "advisor_user_id", mode="before")
+    @classmethod
+    def normalize_optional_integer_fields(cls, value: Any) -> Any:
+        return _normalize_optional_int(value)
 
 
 class PortalEducationExperienceItem(BaseModel):
@@ -610,6 +640,22 @@ class PortalApplicationDeclarationData(BaseModel):
     has_read_declaration: bool = False
     declaration_text: str | None = None
     progress_snapshot: dict[str, Any] | None = None
+
+
+class PortalWorkflowStageItem(BaseModel):
+    key: str
+    label: str
+    status: Literal["pending", "current", "completed", "returned", "terminated"] = "pending"
+    description: str | None = None
+
+
+class PortalWorkflowProgressSummary(BaseModel):
+    current_stage_key: str
+    current_stage_label: str
+    application_form_status: str
+    recruitment_application_status: str | None = None
+    result_label: str | None = None
+    stages: list[PortalWorkflowStageItem] = Field(default_factory=list)
 
 
 class PortalApplicationDraftRecord(BaseModel):
@@ -765,6 +811,9 @@ class PortalStudentRecord(BaseModel):
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
     submitted_at: str | None = None
+    application_form_status: str | None = None
+    recruitment_application_status: str | None = None
+    workflow_progress: PortalWorkflowProgressSummary | None = None
     profile: PortalApplicantProfileData | None = None
     application_draft: PortalApplicationDraftRecord | None = None
 
@@ -928,6 +977,11 @@ class PortalApplicationUpsert(BaseModel):
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
 
+    @field_validator("selected_team_id", "selected_advisor_user_id", mode="before")
+    @classmethod
+    def normalize_optional_integer_fields(cls, value: Any) -> Any:
+        return _normalize_optional_int(value)
+
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "PortalApplicationUpsert":
         self.english_proficiencies = _normalize_english_items(self.english_proficiencies)
@@ -1007,6 +1061,7 @@ class PortalApplicationUpsert(BaseModel):
             mailing_address=self.mailing_address,
             require_complete=True,
         )
+        _validate_portal_preference_rules(self.preferences)
         _validate_portal_source_channel_rules(self.source_channel, self.source_channel_other)
         _validate_portal_declaration_rules(self.signed_agreement)
 
@@ -1014,8 +1069,6 @@ class PortalApplicationUpsert(BaseModel):
             raise ValueError("缺少毕业院校/就读学校信息")
         if not _first_non_empty(self.highest_degree):
             raise ValueError("缺少最高学历/教育阶段信息")
-        if not _first_non_empty(self.selected_team_name):
-            raise ValueError("缺少第一志愿研究中心信息")
         if not _first_non_empty(self.intended_field):
             self.intended_field = self.selected_team_name
         return self
@@ -1061,6 +1114,11 @@ class PortalApplicationDraftUpsert(BaseModel):
     selected_advisor_user_id: int | None = None
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
+
+    @field_validator("selected_team_id", "selected_advisor_user_id", mode="before")
+    @classmethod
+    def normalize_optional_integer_fields(cls, value: Any) -> Any:
+        return _normalize_optional_int(value)
 
     @model_validator(mode="after")
     def populate_legacy_fields(self) -> "PortalApplicationDraftUpsert":
@@ -1147,6 +1205,7 @@ class PortalApplicationDraftUpsert(BaseModel):
             mailing_address=self.mailing_address,
             require_complete=True,
         )
+        _validate_portal_preference_rules(self.preferences)
         _validate_portal_source_channel_rules(self.source_channel, self.source_channel_other)
         _validate_portal_declaration_rules(self.signed_agreement)
 
@@ -1154,8 +1213,6 @@ class PortalApplicationDraftUpsert(BaseModel):
             raise ValueError("缺少毕业院校/就读学校信息")
         if not _first_non_empty(self.highest_degree):
             raise ValueError("缺少最高学历/教育阶段信息")
-        if not _first_non_empty(self.selected_team_name):
-            raise ValueError("缺少第一志愿研究中心信息")
         if not _first_non_empty(self.intended_field):
             self.intended_field = self.selected_team_name
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     smtp_from_name: str = ""
     smtp_use_tls: bool = False
     smtp_use_ssl: bool = True
-    smtp_timeout_seconds: int = 120
+    smtp_timeout_seconds: int = 300
 
     postgres_host: str = "47.117.107.23"
     postgres_port: int = 15431
@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     frontend_dev_proxy_target: str = "http://127.0.0.1:5173"
     frontend_dev_proxy_timeout_seconds: float = 15.0
     portal_admissions_info_url: str = "https://www.shlab.org.cn"
+    site_root_url: str = "https://admissions.pjlab.org.cn/"
 
     model_config = SettingsConfigDict(
         env_file=(BACKEND_DIR / ".env.local", BACKEND_DIR / ".env"),
@@ -121,6 +122,26 @@ class Settings(BaseSettings):
         if not self.redis_uses_sentinel:
             return {}
         return {"master_name": self.redis_sentinel_name}
+
+    @property
+    def normalized_site_root_url(self) -> str:
+        value = self.site_root_url.strip()
+        if not value:
+            return ""
+        return value if value.endswith("/") else f"{value}/"
+
+    def build_absolute_site_url(self, path: str | None) -> str | None:
+        if path is None:
+            return None
+        normalized_path = path.strip()
+        if not normalized_path:
+            return None
+        if normalized_path.startswith(("http://", "https://")):
+            return normalized_path
+        site_root_url = self.normalized_site_root_url
+        if not site_root_url:
+            return normalized_path
+        return urljoin(site_root_url, normalized_path.lstrip("/"))
 
 
 @lru_cache

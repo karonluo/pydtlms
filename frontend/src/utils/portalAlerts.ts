@@ -325,17 +325,33 @@ export async function showPortalConfirm(
 }
 
 export function resolveRequestError(error: unknown, fallback: string) {
+  const normalizeMessage = (value: unknown) => {
+    const text = String(value || '').trim()
+    if (!text) {
+      return ''
+    }
+
+    return text
+      .replace(/^Value error,\s*/i, '')
+      .replace(/^Assertion failed,\s*/i, '')
+      .replace(/^Input should be .+?,\s*/i, '')
+      .trim()
+  }
+
   if (!axios.isAxiosError(error)) {
     return fallback
   }
 
   const detail = error.response?.data?.detail
   if (typeof detail === 'string' && detail.trim()) {
-    return detail
+    return normalizeMessage(detail) || fallback
   }
 
   if (Array.isArray(detail) && detail.length > 0) {
-    return detail.map((item) => (typeof item === 'string' ? item : String(item?.msg || item))).join('；')
+    return detail
+      .map((item) => normalizeMessage(typeof item === 'string' ? item : item?.msg || item))
+      .filter(Boolean)
+      .join('；') || fallback
   }
 
   return fallback

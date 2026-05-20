@@ -82,6 +82,35 @@ class RegisteredPortalStudentListResponse(PaginationResponseBase):
     items: list[RegisteredPortalStudentRecord]
 
 
+class RegisteredPortalStudentExportRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+    keyword: str | None = None
+    application_form_status: str | None = None
+
+
+class RegisteredPortalStudentExportJobRecord(BaseModel):
+    job_id: str
+    status: str
+    file_name: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    failed_at: str | None = None
+    error_message: str | None = None
+    download_url: str | None = None
+    is_read: bool = True
+
+
+class RegisteredPortalStudentExportJobListResponse(BaseModel):
+    items: list[RegisteredPortalStudentExportJobRecord] = Field(default_factory=list)
+    unread_count: int = 0
+
+
+class RegisteredPortalStudentExportJobCreateResponse(BaseModel):
+    message: str
+    job: RegisteredPortalStudentExportJobRecord
+
+
 class RegisteredPortalStudentEmailRequest(BaseModel):
     subject: str
     content: str

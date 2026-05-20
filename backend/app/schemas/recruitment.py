@@ -6,10 +6,12 @@ from app.schemas.common import PaginationResponseBase, SelectOption
 from app.schemas.contact import validate_optional_email, validate_optional_phone_number
 from app.schemas.identity import validate_china_resident_id_number
 from app.schemas.portal import (
+    PortalAchievementRecordItem,
     PortalApplicantProfileData,
     PortalApplicationDeclarationData,
     PortalApplicationPreferenceItem,
     PortalEducationExperienceItem,
+    PortalEnglishProficiencyItem,
     PortalFamilyMemberItem,
     PortalPersonalStatementData,
     PortalPracticeExperienceItem,
@@ -199,7 +201,9 @@ class RecruitApplicationRecord(BaseModel):
     preferences: list[PortalApplicationPreferenceItem] = Field(default_factory=list)
     education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
     practice_experiences: list[PortalPracticeExperienceItem] = Field(default_factory=list)
+    english_proficiencies: list[PortalEnglishProficiencyItem] = Field(default_factory=list)
     family_members: list[PortalFamilyMemberItem] = Field(default_factory=list)
+    achievement_records: list[PortalAchievementRecordItem] = Field(default_factory=list)
     personal_statement: PortalPersonalStatementData | None = None
     declaration: PortalApplicationDeclarationData | None = None
 
@@ -211,13 +215,20 @@ class RecruitApplicationRecord(BaseModel):
         data = dict(raw_value)
         if data.get("profile") is None:
             profile_payload = {
+                "full_name_pinyin": data.get("full_name_pinyin"),
+                "profile_photo_url": data.get("profile_photo_url"),
+                "id_card_collage_url": data.get("id_card_collage_url"),
                 "gender": data.get("gender"),
+                "birth_date": data.get("birth_date"),
+                "ethnic_group": data.get("ethnic_group"),
                 "native_place": data.get("native_place"),
                 "political_status": data.get("political_status"),
                 "marital_status": data.get("marital_status"),
                 "religious_belief": data.get("religious_belief"),
                 "id_type": data.get("id_type"),
                 "mailing_address": data.get("mailing_address"),
+                "emergency_contact_name": data.get("emergency_contact_name"),
+                "emergency_contact_phone": data.get("emergency_contact_phone"),
             }
             if any(value is not None for value in profile_payload.values()):
                 data["profile"] = profile_payload
@@ -251,18 +262,49 @@ class RecruitApplicationRecord(BaseModel):
             data["education_experiences"] = _fallback_education_experiences(data)
         if not data.get("practice_experiences"):
             data["practice_experiences"] = _parse_model_list(data.get("practice_experience"), PortalPracticeExperienceItem)
+        if not data.get("english_proficiencies"):
+            data["english_proficiencies"] = _parse_model_list(data.get("english_level"), PortalEnglishProficiencyItem)
         if not data.get("family_members"):
             data["family_members"] = _parse_model_list(data.get("family_info"), PortalFamilyMemberItem)
+        if not data.get("achievement_records"):
+            data["achievement_records"] = _parse_model_list(data.get("recommendation_notes"), PortalAchievementRecordItem)
         if data.get("personal_statement") is None:
             data["personal_statement"] = PortalPersonalStatementData(
                 personal_statement_text=data.get("personal_statement_text"),
                 ai_problem_statement=data.get("research_problem"),
                 ai_industry_opinion=data.get("dissenting_view"),
                 resume_attachment_url=data.get("personal_statement_attachment"),
+                supporting_material_attachment_url=data.get("material_list_attachment"),
             )
         if data.get("declaration") is None:
             data["declaration"] = PortalApplicationDeclarationData(has_read_declaration=False)
         return data
+
+
+class RecruitPortalApplicationDetail(BaseModel):
+    application_id: int
+    plan_id: int
+    business_key: str
+    candidate_no: str | None = None
+    student_name: str
+    phone_number: str | None = None
+    email: str | None = None
+    id_number: str | None = None
+    application_status: str
+    material_status: str
+    reviewer_name: str | None = None
+    submitted_at: str | None = None
+    profile: PortalApplicantProfileData | None = None
+    source_channel: str | None = None
+    source_channel_other: str | None = None
+    preferences: list[PortalApplicationPreferenceItem] = Field(default_factory=list)
+    education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
+    practice_experiences: list[PortalPracticeExperienceItem] = Field(default_factory=list)
+    english_proficiencies: list[PortalEnglishProficiencyItem] = Field(default_factory=list)
+    family_members: list[PortalFamilyMemberItem] = Field(default_factory=list)
+    achievement_records: list[PortalAchievementRecordItem] = Field(default_factory=list)
+    personal_statement: PortalPersonalStatementData = Field(default_factory=PortalPersonalStatementData)
+    declaration: PortalApplicationDeclarationData = Field(default_factory=PortalApplicationDeclarationData)
 
 
 class RecruitApplicationUpsert(BaseModel):

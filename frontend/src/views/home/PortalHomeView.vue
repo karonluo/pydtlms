@@ -15,6 +15,13 @@ type ProgressCard = {
   completed: boolean
 }
 
+type WorkflowStageCard = {
+  key: string
+  label: string
+  status: 'pending' | 'current' | 'completed' | 'returned' | 'terminated'
+  description: string
+}
+
 const router = useRouter()
 const defaultProfilePhotoUrl = '/images/default_head.png'
 const showPortalHomeNewsSections = false
@@ -81,6 +88,41 @@ const profilePhotoUrl = computed(() => {
 })
 const hasSubmittedApplication = computed(() => Boolean(portalStudent.value?.submitted_at))
 const completedProgressCount = computed(() => progressCards.value.filter((item) => item.completed).length)
+const workflowSummary = computed(() => portalStudent.value?.workflow_progress || null)
+const workflowStageCards = computed<WorkflowStageCard[]>(() => {
+  const stages = workflowSummary.value?.stages || []
+  return stages.map((item) => ({
+    key: item.key,
+    label: item.label,
+    status: item.status,
+    description: trimText(item.description) || resolveWorkflowStageDescription(item.status),
+  }))
+})
+const workflowCurrentStageLabel = computed(() => workflowSummary.value?.current_stage_label || '在线申请')
+const showApplicationSectionProgress = computed(() => {
+  const currentStageKey = workflowSummary.value?.current_stage_key
+  const stageStatus = workflowStageCards.value.find((item) => item.key === 'online_application')?.status
+  if (!currentStageKey) {
+    return true
+  }
+  return currentStageKey === 'online_application' || stageStatus === 'returned'
+})
+
+function resolveWorkflowStageDescription(status: WorkflowStageCard['status']): string {
+  if (status === 'completed') {
+    return '已完成'
+  }
+  if (status === 'current') {
+    return '进行中'
+  }
+  if (status === 'returned') {
+    return '已退回'
+  }
+  if (status === 'terminated') {
+    return '已终止'
+  }
+  return '待开始'
+}
 
 const progressCards = computed<ProgressCard[]>(() => {
   const student = portalStudent.value
@@ -358,10 +400,36 @@ onMounted(() => {
       <section id="portal-progress" class="portal-home-progress">
         <div class="portal-home-progress__header">
           <h3>我的申请进度</h3>
-          <p>已完成 {{ completedProgressCount }}/{{ progressCards.length }} 项，继续填写即可提交申请。</p>
+          <p v-if="showApplicationSectionProgress">已完成 {{ completedProgressCount }}/{{ progressCards.length }} 项，继续填写即可提交申请。</p>
         </div>
 
-        <div class="portal-home-progress__grid">
+        <div class="portal-home-progress__workflow">
+          <div class="portal-home-workflow__header">
+            <div>
+              <h4>申请环节状态</h4>
+              <p>当前所在环节：{{ workflowCurrentStageLabel }}</p>
+            </div>
+          </div>
+
+          <div class="portal-home-workflow__timeline" aria-label="申请流程阶段条">
+            <template v-for="(stage, index) in workflowStageCards" :key="stage.key">
+              <article
+                class="portal-home-workflow__stage"
+                :class="[
+                  `portal-home-workflow__stage--${stage.status}`,
+                  { 'portal-home-workflow__stage--arrow-hidden': index === workflowStageCards.length - 1 },
+                ]"
+              >
+                <span class="portal-home-workflow__stage-index">{{ String(index + 1).padStart(2, '0') }}</span>
+                <strong>{{ stage.label }}</strong>
+                <p>{{ stage.description }}</p>
+              </article>
+              <span v-if="index < workflowStageCards.length - 1" class="portal-home-workflow__arrow" aria-hidden="true">→</span>
+            </template>
+          </div>
+        </div>
+
+        <div v-if="showApplicationSectionProgress" class="portal-home-progress__grid">
           <article
             v-for="card in progressCards"
             :key="card.key"
@@ -376,7 +444,7 @@ onMounted(() => {
           </article>
         </div>
 
-        <button type="button" class="portal-home-progress__cta" @click="goToApplication">
+        <button v-if="showApplicationSectionProgress" type="button" class="portal-home-progress__cta" @click="goToApplication">
           继续填写报名信息
           <span>→</span>
         </button>
@@ -747,8 +815,147 @@ onMounted(() => {
 
 .portal-home-progress {
   margin-top: 28px;
-  padding: 30px 34px 0;
+  padding: 26px 28px 0;
   border-radius: 8px;
+}
+
+.portal-home-progress__workflow {
+  margin-top: 18px;
+  padding: 18px 18px 16px;
+  border: 1px solid #e8eff9;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfdff, #f7faff);
+}
+
+.portal-home-workflow__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.portal-home-workflow__header h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #0053bc;
+}
+
+.portal-home-workflow__header p {
+  margin: 0;
+  color: #8b9eb7;
+  font-size: 12px;
+}
+
+.portal-home-workflow__timeline {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.portal-home-workflow__stage {
+  position: relative;
+  flex: 1 0 132px;
+  min-width: 132px;
+  padding: 12px 12px 11px;
+  border-radius: 10px;
+  border: 1px solid #dfe9f8;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.portal-home-workflow__stage-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 22px;
+  margin-bottom: 10px;
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #1567d7;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.portal-home-workflow__stage strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #203c60;
+  font-size: 13px;
+}
+
+.portal-home-workflow__stage p {
+  margin: 0;
+  color: #7f92ad;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.portal-home-workflow__arrow {
+  flex: 0 0 auto;
+  align-self: center;
+  color: #6b9ce0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.portal-home-workflow__stage--completed {
+  border-color: #cfe8d7;
+  background: linear-gradient(180deg, #f2fbf4, #ffffff);
+}
+
+.portal-home-workflow__stage--completed .portal-home-workflow__stage-index {
+  background: #ddf4e3;
+  color: #207447;
+}
+
+.portal-home-workflow__stage--completed strong,
+.portal-home-workflow__stage--completed p {
+  color: #25573a;
+}
+
+.portal-home-workflow__stage--current {
+  border-color: #6daaf1;
+  background: linear-gradient(180deg, #edf5ff, #ffffff);
+  box-shadow: 0 10px 24px rgba(24, 103, 214, 0.12);
+}
+
+.portal-home-workflow__stage--current .portal-home-workflow__stage-index {
+  background: linear-gradient(90deg, #0e6ddd, #2a8ef4);
+  color: #fff;
+}
+
+.portal-home-workflow__stage--returned {
+  border-color: #f0c56c;
+  background: linear-gradient(180deg, #fff8e9, #ffffff);
+}
+
+.portal-home-workflow__stage--returned .portal-home-workflow__stage-index {
+  background: #ffe8b0;
+  color: #9a6400;
+}
+
+.portal-home-workflow__stage--returned strong,
+.portal-home-workflow__stage--returned p {
+  color: #8a5f10;
+}
+
+.portal-home-workflow__stage--terminated {
+  border-color: #f1c4c4;
+  background: linear-gradient(180deg, #fff5f5, #ffffff);
+}
+
+.portal-home-workflow__stage--terminated .portal-home-workflow__stage-index {
+  background: #ffd8d8;
+  color: #b42318;
+}
+
+.portal-home-workflow__stage--terminated strong,
+.portal-home-workflow__stage--terminated p {
+  color: #9a2f2f;
 }
 
 .portal-home-progress__header h3 {
@@ -766,12 +973,12 @@ onMounted(() => {
 .portal-home-progress__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
-  padding: 24px 0 30px;
+  gap: 14px;
+  padding: 18px 0 24px;
 }
 
 .portal-home-progress__item {
-  padding: 18px 18px 17px;
+  padding: 14px 14px 13px;
   border: 1px solid #edf2f7;
   border-radius: 6px;
   background: #fff;
@@ -786,13 +993,13 @@ onMounted(() => {
 }
 
 .portal-home-progress__item strong {
-  font-size: 15px;
+  font-size: 14px;
   color: #203c60;
 }
 
 .portal-home-progress__item span {
   color: #91a2b9;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .portal-home-progress__item--completed strong,
@@ -815,12 +1022,12 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  width: calc(100% + 64px);
-  min-height: 58px;
-  margin: 0 -32px;
+  width: calc(100% + 56px);
+  min-height: 52px;
+  margin: 0 -28px;
   border: none;
   color: #fff;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 700;
   background: linear-gradient(90deg, #0d67db, #1575e7);
   cursor: pointer;
@@ -1100,6 +1307,10 @@ onMounted(() => {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
+
+  .portal-home-workflow__header {
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1152,6 +1363,8 @@ onMounted(() => {
   }
 
   .portal-home-profile-card__content,
+  .portal-home-progress,
+  .portal-home-progress__workflow,
   .portal-home-progress {
     padding-left: 20px;
     padding-right: 20px;
@@ -1170,6 +1383,14 @@ onMounted(() => {
   .portal-home-profile-card__meta-grid,
   .portal-home-info-grid {
     grid-template-columns: 1fr;
+  }
+
+  .portal-home-workflow__timeline {
+    gap: 8px;
+  }
+
+  .portal-home-workflow__stage {
+    min-width: 126px;
   }
 
   .portal-home-banner__inner {

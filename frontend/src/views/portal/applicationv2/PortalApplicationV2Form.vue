@@ -761,9 +761,9 @@ async function validateApplicationForSubmit(title = '提交受阻') {
     await showPortalAlert(basicRuleMessage, title, 'warning')
     return false
   }
-  const primary = primaryPreference.value
-  if (!trimText(primary?.research_center_name)) {
-    await showPortalAlert('请至少选择第一志愿研究中心', title, 'warning')
+  const preferenceRuleMessage = validatePreferenceRules()
+  if (preferenceRuleMessage) {
+    await showPortalAlert(preferenceRuleMessage, title, 'warning')
     return false
   }
   const completedEducationItems = getCompletedEducationExperiences(form.education_experiences)
@@ -829,9 +829,9 @@ async function validateCurrentSectionForSave(title = '草稿保存受阻') {
         await showPortalAlert('当前暂无可提交的招生计划', title, 'warning')
         return false
       }
-      const primary = primaryPreference.value
-      if (!trimText(primary?.research_center_name)) {
-        await showPortalAlert('请至少选择第一志愿研究中心', title, 'warning')
+      const preferenceRuleMessage = validatePreferenceRules()
+      if (preferenceRuleMessage) {
+        await showPortalAlert(preferenceRuleMessage, title, 'warning')
         return false
       }
       const sourceChannelRuleMessage = validateSourceChannelRules(form.source_channel, form.source_channel_other)
@@ -1008,6 +1008,38 @@ function handlePreferenceCenterChange(item: PortalApplicationPreferenceItem) {
     item.advisor_user_id = null
     item.advisor_name = ''
   }
+}
+
+function handlePreferenceAdvisorChange(item: PortalApplicationPreferenceItem) {
+  const advisors = advisorOptionsForTeam(item.team_id)
+  const matchedAdvisor = advisors.find((advisor) => advisor.user_id === Number(item.advisor_user_id || 0))
+  item.advisor_name = matchedAdvisor?.full_name || ''
+  if (!matchedAdvisor) {
+    item.advisor_user_id = null
+  }
+}
+
+function validatePreferenceRules() {
+  const orderedPreferences = [...(form.preferences ?? [])].sort((left, right) => left.preference_order - right.preference_order)
+  const primary = orderedPreferences[0]
+  if (!trimText(primary?.research_center_name)) {
+    return '请至少选择第一志愿研究中心'
+  }
+  if (!(primary?.advisor_user_id ?? null) && !trimText(primary?.advisor_name)) {
+    return '请选择第一志愿导师'
+  }
+
+  for (let index = 1; index < orderedPreferences.length; index += 1) {
+    const item = orderedPreferences[index]
+    if (!trimText(item?.research_center_name)) {
+      continue
+    }
+    if (!(item?.advisor_user_id ?? null) && !trimText(item?.advisor_name)) {
+      return `第${index + 1}志愿已选择研究中心后，必须选择导师`
+    }
+  }
+
+  return ''
 }
 
 function buildAttachmentUploadKey(section: string, index: number | string, field: string) {
@@ -1842,6 +1874,7 @@ defineExpose({
           :source-channel-options="sourceChannelOptions"
           :advisor-options-for-team="advisorOptionsForTeam"
           :handle-preference-center-change="handlePreferenceCenterChange"
+          :handle-preference-advisor-change="handlePreferenceAdvisorChange"
         />
 
         <PortalEducationSection

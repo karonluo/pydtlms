@@ -25,7 +25,7 @@ class RuntimeManagementStore(
         return PostgresStateStore()
 
     def _create_email_service(self):
-        return NotificationEmailService()
+        return NotificationEmailService(log_delivery=self._record_notification_delivery_log)
 
     def _get_cache_client(self):
         return get_cache_client()

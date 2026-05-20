@@ -42,6 +42,7 @@ from app.schemas.system import (
     DictTypeUpsert,
     IntegrationListResponse,
     IntegrationUpsert,
+    NotificationDeliveryLogListResponse,
     OperationLogListResponse,
     PermissionCatalogResponse,
     RoleListResponse,
@@ -123,6 +124,35 @@ def get_registered_portal_student_list(
         page=page,
         page_size=page_size,
     )
+
+
+def export_registered_portal_students(
+    student_ids: list[int] | None = None,
+    *,
+    keyword: str | None = None,
+    application_form_status: str | None = None,
+) -> bytes:
+    return store.export_registered_portal_students(
+        student_ids or [],
+        keyword=keyword,
+        application_form_status=application_form_status,
+    )
+
+
+def create_registered_portal_student_export_job(payload, principal):
+    return store.create_registered_portal_student_export_job(payload, principal=principal)
+
+
+def list_registered_portal_student_export_jobs(principal):
+    return store.list_registered_portal_student_export_jobs(principal=principal)
+
+
+def mark_registered_portal_student_export_jobs_read(principal) -> None:
+    store.mark_registered_portal_student_export_jobs_read(principal=principal)
+
+
+def get_registered_portal_student_export_job_download(job_id: str, principal):
+    return store.get_registered_portal_student_export_job_download(job_id, principal=principal)
 
 
 def deactivate_registered_portal_student(student_id: int) -> RegisteredPortalStudentActionResponse:
@@ -228,6 +258,10 @@ def get_recruitment_application_detail(application_id: int):
     return store.get_recruitment_application_detail(application_id)
 
 
+def get_recruitment_portal_application_detail(application_id: int):
+    return store.get_recruitment_portal_application_detail(application_id)
+
+
 def create_recruitment_application(payload, principal: Principal | None = None):
     return store.create_recruitment_application(payload, principal=principal)
 
@@ -258,6 +292,26 @@ def send_portal_registration_email_code(email: str) -> PortalRegistrationEmailCo
 
 def send_portal_login_email_code(email: str) -> PortalRegistrationEmailCodeResponse:
     return store.send_portal_login_email_code(email)
+
+
+def record_portal_operation_event(
+    entity_name: str,
+    entity_id: str,
+    action: str,
+    summary: str,
+    operator_username: str,
+    *,
+    result: str = "success",
+) -> None:
+    store.record_operation_event(
+        "学生门户",
+        entity_name,
+        entity_id,
+        action,
+        summary,
+        operator_username=operator_username,
+        result=result,
+    )
 
 
 def validate_portal_registration_email_code(email: str, verification_code: str) -> None:
@@ -554,6 +608,16 @@ def get_operation_log_list(keyword: str | None = None, module_name: str | None =
 
 def get_sync_log_list(keyword: str | None = None, sync_status: str | None = None, source_system: str | None = None, page: int = 1, page_size: int = 10) -> SyncLogListResponse:
     return store.get_sync_logs(keyword=keyword, sync_status=sync_status, source_system=source_system, page=page, page_size=page_size)
+
+
+def get_notification_delivery_log_list(
+    keyword: str | None = None,
+    channel: str | None = None,
+    send_status: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> NotificationDeliveryLogListResponse:
+    return store.get_notification_delivery_logs(keyword=keyword, channel=channel, send_status=send_status, page=page, page_size=page_size)
 
 
 def get_system_permission_catalog() -> PermissionCatalogResponse:

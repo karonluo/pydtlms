@@ -4,7 +4,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import TableRowActions from '../../components/table/TableRowActions.vue'
-import RecruitmentApplicationReviewDrawer from '../../components/recruitment/RecruitmentApplicationReviewDrawer.vue'
+import RecruitmentPortalApplicationDrawer from '../../components/recruitment/RecruitmentPortalApplicationDrawer.vue'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 import { getEmailValidationMessage, getPhoneValidationMessage, normalizeEmail, normalizePhoneNumber } from '../../utils/contactValidation'
 import { getChinaResidentIdValidationMessage, normalizeChinaResidentIdNumber } from '../../utils/chinaResidentId'
@@ -18,6 +18,7 @@ import {
   downloadRecruitmentTemplate,
   exportRecruitmentApplications,
   getRecruitmentApplicationDetail,
+  getRecruitmentPortalApplicationDetail,
   getRecruitmentOptions,
   getRecruitmentStats,
   getRecruitmentWorkbench,
@@ -28,6 +29,7 @@ import {
   updateRecruitmentApplication,
   updateRecruitmentPlan,
   type RecruitApplicationRecord,
+  type RecruitPortalApplicationDetail,
   type RecruitApplicationUpsert,
   type RecruitmentOptions,
   type RecruitPlanRecord,
@@ -256,7 +258,7 @@ const editingPlanId = ref<number | null>(null)
 const editingApplicationId = ref<number | null>(null)
 const deletingApplication = ref<RecruitApplicationRecord | null>(null)
 const planReferenceList = ref<RecruitPlanRecord[]>([])
-const viewingApplication = ref<RecruitApplicationRecord | null>(null)
+const viewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
 const viewingApplicationWorkflowTask = ref<WorkflowTaskRecord | null>(null)
 const applicationStatusColors = ref<DictColorMap>({})
 const materialStatusColors = ref<DictColorMap>({})
@@ -560,7 +562,7 @@ function syncApplicationLegacyFields() {
 
 async function openViewApplicationDetail(row: RecruitApplicationRecord) {
   try {
-    const response = await getRecruitmentApplicationDetail(row.id)
+    const response = await getRecruitmentPortalApplicationDetail(row.id)
     viewingApplication.value = response.data
     applicationDetailVisible.value = true
     await loadViewingApplicationWorkflowTask(response.data.business_key)
@@ -1482,9 +1484,9 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <RecruitmentApplicationReviewDrawer
+    <RecruitmentPortalApplicationDrawer
       v-model="applicationDetailVisible"
-      :application="viewingApplication"
+      :detail="viewingApplication"
       :workflow-task="viewingApplicationWorkflowTask"
       :workflow-task-loading="applicationWorkflowTaskLoading"
       :action-loading="applicationWorkflowActionSubmitting"

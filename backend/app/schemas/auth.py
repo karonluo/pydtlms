@@ -21,6 +21,7 @@ class UserProfile(BaseModel):
     full_name: str
     role_name: str
     department_name: str
+    introduction: str | None = None
     phone_number: str | None = None
     email: str | None = None
     theme_color: str

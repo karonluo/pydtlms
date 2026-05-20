@@ -12,6 +12,7 @@ from app.schemas.recruitment import (
     RecruitApplicationListResponse,
     RecruitApplicationImportResult,
     RecruitApplicationRecord,
+    RecruitPortalApplicationDetail,
     RecruitApplicationUpsert,
     RecruitPlanListResponse,
     RecruitPlanRecord,
@@ -30,6 +31,7 @@ from app.services.dashboard_service import (
     get_recruitment_application_detail,
     get_recruitment_application_list,
     get_recruitment_options,
+    get_recruitment_portal_application_detail,
     get_recruitment_plan_list,
     get_recruitment_stats,
     get_recruitment_workbench,
@@ -130,6 +132,14 @@ def recruitment_applications(
 def recruitment_application_detail(application_id: int, principal: Principal = Depends(require_permissions("recruitment:read"))) -> RecruitApplicationRecord:
     try:
         return get_recruitment_application_detail(application_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment application not found") from exc
+
+
+@router.get("/applications/{application_id}/portal-detail", response_model=RecruitPortalApplicationDetail)
+def recruitment_portal_application_detail(application_id: int, principal: Principal = Depends(require_permissions("recruitment:read"))) -> RecruitPortalApplicationDetail:
+    try:
+        return get_recruitment_portal_application_detail(application_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment application not found") from exc
 

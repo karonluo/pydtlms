@@ -268,6 +268,8 @@ def build_runtime_seed_state() -> dict[str, Any]:
         {"id": 3, "source_system": "实验室OA", "target_system": "DTLMS", "sync_status": "success", "record_count": 58, "executed_at": _fmt_datetime(now - timedelta(hours=2)), "failure_reason": None},
     ]
 
+    notification_delivery_logs: list[dict[str, Any]] = []
+
     counters = {
         "students": len(students),
         "recruitment_plans": len(recruitment_plans),
@@ -283,6 +285,7 @@ def build_runtime_seed_state() -> dict[str, Any]:
         "integrations": len(integrations),
         "operation_logs": len(operation_logs),
         "sync_logs": len(sync_logs),
+        "notification_delivery_logs": len(notification_delivery_logs),
         "workflow_tasks": 0,
         "teams": len(teams),
         "portal_students": 0,
@@ -306,6 +309,7 @@ def build_runtime_seed_state() -> dict[str, Any]:
         "integrations": integrations,
         "operation_logs": operation_logs,
         "sync_logs": sync_logs,
+        "notification_delivery_logs": notification_delivery_logs,
         "workflow_tasks": [],
         "portal_students": [],
     }

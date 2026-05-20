@@ -131,6 +131,22 @@ export type PortalApplicationDraftRecord = {
   submitted_at?: string | null
 }
 
+export type PortalWorkflowStageItem = {
+  key: string
+  label: string
+  status: 'pending' | 'current' | 'completed' | 'returned' | 'terminated'
+  description?: string | null
+}
+
+export type PortalWorkflowProgressSummary = {
+  current_stage_key: string
+  current_stage_label: string
+  application_form_status: string
+  recruitment_application_status?: string | null
+  result_label?: string | null
+  stages: PortalWorkflowStageItem[]
+}
+
 export type PortalStudentRecord = {
   id: number
   full_name: string
@@ -169,6 +185,9 @@ export type PortalStudentRecord = {
   selected_advisor_name?: string | null
   self_evaluation?: string | null
   submitted_at?: string | null
+  application_form_status?: string | null
+  recruitment_application_status?: string | null
+  workflow_progress?: PortalWorkflowProgressSummary | null
   profile?: PortalApplicantProfileData | null
   application_draft?: PortalApplicationDraftRecord | null
 }

@@ -17,6 +17,7 @@ from app.schemas.system import (
     IntegrationListResponse,
     IntegrationRecord,
     IntegrationUpsert,
+    NotificationDeliveryLogListResponse,
     OperationLogListResponse,
     PermissionCatalogResponse,
     RoleListResponse,
@@ -49,6 +50,7 @@ from app.services.dashboard_service import (
     get_dict_data_list,
     get_dict_type_list,
     get_integration_list,
+    get_notification_delivery_log_list,
     get_operation_log_list,
     get_role_list,
     get_sync_log_list,
@@ -378,6 +380,18 @@ def sync_logs(
     principal: Principal = Depends(require_permissions("audit:read")),
 ) -> SyncLogListResponse:
     return get_sync_log_list(keyword=keyword, sync_status=sync_status, source_system=source_system, page=page, page_size=page_size)
+
+
+@router.get("/notification-delivery-logs", response_model=NotificationDeliveryLogListResponse)
+def notification_delivery_logs(
+    keyword: str | None = None,
+    channel: str | None = None,
+    send_status: str | None = None,
+    page: int = 1,
+    page_size: int = Query(default=10, ge=1, le=1000),
+    principal: Principal = Depends(require_permissions("audit:read")),
+) -> NotificationDeliveryLogListResponse:
+    return get_notification_delivery_log_list(keyword=keyword, channel=channel, send_status=send_status, page=page, page_size=page_size)
 
 
 @router.get("/architecture", response_model=SystemArchitecture)
