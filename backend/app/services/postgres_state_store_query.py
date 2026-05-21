@@ -2180,16 +2180,18 @@ class PostgresStateStoreQueryMixin:
                                                 u.id,
                                                 u.full_name,
                                                 advisor_match.advisor_no,
-                                                COALESCE(advisor_match.organization_name, NULLIF(u.department_name, ''), '未分配单位') AS organization_name
+                                                COALESCE(advisor_match.organization_name, NULLIF(u.department_name, ''), '未分配单位') AS organization_name,
+                                                NULLIF(up.introduction, '') AS introduction
                                         FROM dtlms_users u
                                         JOIN dtlms_user_roles ur ON ur.user_id = u.id
                                         JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                                        LEFT JOIN dtlms_user_profiles up ON up.username = u.username
                                         LEFT JOIN LATERAL (
                                                 SELECT a.advisor_no, a.organization_name
                                                 FROM dtlms_advisors a
                                                 WHERE a.is_deleted = FALSE
-                                                    AND (a.user_id = u.id OR (a.user_id IS NULL AND a.full_name = u.full_name))
-                                                ORDER BY CASE WHEN a.user_id = u.id THEN 0 ELSE 1 END, a.id
+                                                    AND a.user_id = u.id
+                                                ORDER BY a.id
                                                 LIMIT 1
                                         ) advisor_match ON TRUE
                                         WHERE u.is_deleted = FALSE
@@ -2202,7 +2204,7 @@ class PostgresStateStoreQueryMixin:
                 if not rows:
                     cur.execute(
                         """
-                                                SELECT id, full_name, NULL::varchar AS advisor_no, department_name AS organization_name
+                                                SELECT id, full_name, NULL::varchar AS advisor_no, department_name AS organization_name, NULL::text AS introduction
                                                 FROM dtlms_users
                                                 WHERE is_deleted = FALSE
                                                     AND is_active = TRUE

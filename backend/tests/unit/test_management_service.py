@@ -155,6 +155,24 @@ class FakePostgresStateStore:
         del student_id
         return None
 
+    def list_active_advisors(self):
+        return [
+            {
+                "id": 11,
+                "full_name": "刘亚",
+                "advisor_no": "A011",
+                "organization_name": "智能感知中心",
+                "introduction": "长期从事具身智能与多模态学习研究。",
+            },
+            {
+                "id": 12,
+                "full_name": "王青",
+                "advisor_no": "A012",
+                "organization_name": "通用智能中心",
+                "introduction": "关注基础模型、智能体与系统优化。",
+            },
+        ]
+
     def get_recruitment_application_detail(self, application_id):
         del application_id
         return None
@@ -729,6 +747,17 @@ def test_get_portal_profile_options_places_masses_after_league_member(monkeypatc
     values = [item.value for item in store.get_portal_profile_options().political_status_options]
 
     assert values.index("群众") == values.index("共青团员") + 1
+
+
+def test_get_portal_profile_options_includes_advisor_introduction(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    options = store.get_portal_profile_options()
+
+    assert options.advisor_options[0].full_name == "刘亚"
+    assert options.advisor_options[0].introduction == "长期从事具身智能与多模态学习研究。"
 
 
 def test_create_recruitment_plan_keeps_internal_defaults_while_returning_trimmed_record(monkeypatch) -> None:
@@ -2269,6 +2298,39 @@ def test_submit_portal_application_uses_incremental_portal_sync(monkeypatch) -> 
     assert len(fake_postgres.saved_states) == save_count_before_submit
 
 
+def test_submit_portal_application_allows_advisor_only_preference_without_team(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.portal import PortalApplicationUpsert, PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009991",
+            email="advisor-only-submit@example.com",
+            full_name="导师直选学生",
+            id_number="320000199909099934",
+            password="Secret123!",
+        )
+    )
+
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "advisor-only-submit@example.com")
+    payload_data = _build_portal_application_payload(available_plan.id, "智能制造联合团队", "刘亚").model_dump(mode="python")
+    payload_data["preferences"][0]["team_id"] = None
+    payload_data["preferences"][0]["research_center_name"] = None
+    payload_data["selected_team_id"] = None
+    payload_data["selected_team_name"] = None
+
+    response = store.submit_portal_application(student_id, PortalApplicationUpsert.model_validate(payload_data))
+
+    assert response.application_status == "报名已提交"
+    assert fake_postgres.portal_application_submissions[-1]["portal_student_payload"]["selected_team_name"] is None
+    assert fake_postgres.portal_application_submissions[-1]["application_payload"]["first_choice"] == "刘亚"
+
+
 def test_migrate_workflow_runtime_normalizes_legacy_recruitment_business_key(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -3528,9 +3590,7 @@ def test_portal_application_draft_upsert_rejects_legacy_source_channel_value_for
         PortalApplicationDraftUpsert.model_validate(payload)
 
 
-def test_portal_application_draft_upsert_requires_second_preference_advisor_once_team_selected() -> None:
-    from pydantic import ValidationError
-
+def test_portal_application_draft_upsert_allows_blank_second_preference_without_team() -> None:
     from app.schemas.portal import PortalApplicationDraftUpsert
 
     payload = _build_portal_application_payload(1, "智能制造联合团队", "刘亚").model_dump(mode="python")
@@ -3546,16 +3606,15 @@ def test_portal_application_draft_upsert_requires_second_preference_advisor_once
         },
         {
             "preference_order": 2,
-            "research_center_name": "智能感知联合团队",
-            "team_id": 2,
             "advisor_name": "",
             "advisor_user_id": None,
             "is_optional": True,
         },
     ]
 
-    with pytest.raises(ValidationError, match="第2志愿已选择研究中心后，必须选择导师"):
-        PortalApplicationDraftUpsert.model_validate(payload)
+    validated = PortalApplicationDraftUpsert.model_validate(payload)
+
+    assert validated.preferences[1].advisor_name in {"", None}
 
 
 def test_portal_application_draft_upsert_allows_current_bachelor_section_without_degree_and_graduation_attachments() -> None:

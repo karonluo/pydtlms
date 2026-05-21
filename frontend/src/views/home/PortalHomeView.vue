@@ -159,11 +159,10 @@ const progressCards = computed<ProgressCard[]>(() => {
   const applicationStarted = Boolean(
     trimText(draft?.source_channel)
     || trimText(draft?.source_channel_other)
-    || trimText(firstPreference?.research_center_name)
     || trimText(firstPreference?.advisor_name)
     || student?.selected_plan_id,
   )
-  const applicationCompleted = Boolean(trimText(firstPreference?.research_center_name) || student?.selected_team_name)
+  const applicationCompleted = Boolean(trimText(firstPreference?.advisor_name) || student?.selected_advisor_name)
 
   const practiceCount = resolveProgressCount(snapshot?.practice_count)
   const practiceStarted = practiceCount > 0 || Boolean((draft?.practice_experiences || []).some((item) => trimText(item.organization_name)))

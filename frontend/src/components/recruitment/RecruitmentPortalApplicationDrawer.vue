@@ -181,7 +181,6 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
               </div>
             </div>
             <div class="detail-grid">
-              <div class="detail-item"><span class="detail-item__label">研究领域</span><span class="detail-item__value">{{ displayDetailValue(item.research_center_name) }}</span></div>
               <div class="detail-item"><span class="detail-item__label">意向导师</span><span class="detail-item__value">{{ displayDetailValue(item.advisor_name) }}</span></div>
             </div>
           </article>

@@ -621,8 +621,8 @@ class RuntimeManagementStoreCoreMixin:
         try:
             return self._postgres_store.list_active_advisors()
         except Exception as exc:
-            logger.warning("Load active advisors from PostgreSQL failed, fallback to advisor names only: %s", exc)
-            return [{"id": None, "full_name": name, "advisor_no": None, "organization_name": None} for name in self._advisor_name_values()]
+            logger.exception("Load active advisors from PostgreSQL failed")
+            raise DatabaseUnavailableError("数据库暂不可用，请稍后重试") from exc
 
     @staticmethod
     def _build_advisor_option_label(item: dict[str, Any]) -> str:
@@ -639,6 +639,48 @@ class RuntimeManagementStoreCoreMixin:
             advisor_id = item.get("id")
             options.append(SelectOption(label=self._build_advisor_option_label(item), value=str(advisor_id) if advisor_id is not None else full_name))
         return options
+
+    def _resolve_portal_advisor_selection(
+        self,
+        selected_advisor_user_id: int | None,
+        selected_advisor_name: str | None,
+        *,
+        require_advisor: bool = True,
+    ) -> dict[str, Any]:
+        directory = self._active_advisor_directory()
+        option_by_user_id = {
+            int(item.get("id") or 0): item
+            for item in directory
+            if int(item.get("id") or 0) > 0
+        }
+        option_by_name: dict[str, list[dict[str, Any]]] = {}
+        for item in directory:
+            full_name = str(item.get("full_name") or "").strip()
+            if not full_name:
+                continue
+            option_by_name.setdefault(full_name, []).append(item)
+
+        advisor: dict[str, Any] | None = None
+        if selected_advisor_user_id is not None:
+            advisor = option_by_user_id.get(int(selected_advisor_user_id))
+            if advisor is None:
+                raise ValueError("所选导师不存在或已停用")
+        elif str(selected_advisor_name or "").strip():
+            matched = option_by_name.get(str(selected_advisor_name).strip(), [])
+            if not matched:
+                raise ValueError("所选导师不存在或已停用")
+            if len(matched) > 1:
+                raise ValueError("存在同名导师，请重新选择")
+            advisor = matched[0]
+
+        if require_advisor and advisor is None:
+            raise ValueError("请选择导师")
+
+        return {
+            "advisor_user_id": int(advisor.get("id") or 0) or None if advisor else None,
+            "advisor_name": str(advisor.get("full_name") or "").strip() or None if advisor else None,
+            "advisor_introduction": str(advisor.get("introduction") or "").strip() or None if advisor else None,
+        }
 
     def _resolve_advisor_name(self, advisor_id: int | None = None, advisor_name: str | None = None) -> str:
         if advisor_id is not None:
@@ -1037,9 +1079,21 @@ class RuntimeManagementStoreCoreMixin:
         political_status_options = self._reorder_portal_political_status_options(political_status_options)
         if not ethnic_group_options:
             ethnic_group_options = self._select_options_from_values(DEFAULT_PORTAL_ETHNIC_GROUP_VALUES)
+        advisor_options = [
+            PortalAdvisorRecord(
+                user_id=int(item.get("id") or 0) or None,
+                full_name=str(item.get("full_name") or "").strip(),
+                advisor_no=str(item.get("advisor_no") or "").strip() or None,
+                organization_name=str(item.get("organization_name") or "").strip() or None,
+                introduction=str(item.get("introduction") or "").strip() or None,
+            )
+            for item in self._active_advisor_directory()
+            if str(item.get("full_name") or "").strip()
+        ]
         return PortalProfileOptionsResponse(
             political_status_options=political_status_options,
             ethnic_group_options=ethnic_group_options,
+            advisor_options=advisor_options,
         )
 
     def get_system_options(self) -> SystemOptionsResponse:

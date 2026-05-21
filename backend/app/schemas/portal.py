@@ -463,19 +463,15 @@ def _validate_portal_declaration_rules(signed_agreement: bool) -> None:
 def _validate_portal_preference_rules(items: Sequence["PortalApplicationPreferenceItem"]) -> None:
     ordered = sorted(items, key=lambda item: item.preference_order)
     if not ordered:
-        raise ValueError("缺少第一志愿研究中心信息")
+        raise ValueError("请选择第一志愿导师")
 
     primary = ordered[0]
-    if not _first_non_empty(primary.research_center_name):
-        raise ValueError("缺少第一志愿研究中心信息")
     if primary.advisor_user_id is None and not _first_non_empty(primary.advisor_name):
         raise ValueError("请选择第一志愿导师")
 
-    for index, item in enumerate(ordered[1:], start=2):
-        if not _first_non_empty(item.research_center_name):
-            continue
+    for item in ordered[1:]:
         if item.advisor_user_id is None and not _first_non_empty(item.advisor_name):
-            raise ValueError(f"第{index}志愿已选择研究中心后，必须选择导师")
+            continue
 
 
 def _validate_portal_draft_rules_by_section(payload: "PortalApplicationDraftUpsert") -> None:
@@ -843,7 +839,7 @@ class PortalStudentRecord(BaseModel):
 
         if data.get("application_draft") is None:
             preferences: list[dict[str, Any]] = []
-            if _first_non_empty(data.get("selected_team_name")):
+            if data.get("selected_advisor_user_id") is not None or _first_non_empty(data.get("selected_advisor_name")):
                 preferences.append(
                     {
                         "preference_order": 1,
@@ -910,6 +906,14 @@ class PortalPlanListResponse(BaseModel):
     items: list[PortalPlanRecord] = Field(default_factory=list)
 
 
+class PortalAdvisorRecord(BaseModel):
+    user_id: int | None = None
+    full_name: str
+    advisor_no: str | None = None
+    organization_name: str | None = None
+    introduction: str | None = None
+
+
 class PortalTeamRecord(BaseModel):
     id: int
     team_name: str
@@ -931,6 +935,7 @@ class PortalTeamListResponse(BaseModel):
 class PortalProfileOptionsResponse(BaseModel):
     political_status_options: list[SelectOption] = Field(default_factory=list)
     ethnic_group_options: list[SelectOption] = Field(default_factory=list)
+    advisor_options: list[PortalAdvisorRecord] = Field(default_factory=list)
 
 
 class PortalPublicConfigResponse(BaseModel):
@@ -1007,7 +1012,6 @@ class PortalApplicationUpsert(BaseModel):
             self.selected_team_name = self.selected_team_name or primary_preference.research_center_name
             self.selected_advisor_user_id = self.selected_advisor_user_id or primary_preference.advisor_user_id
             self.selected_advisor_name = self.selected_advisor_name or primary_preference.advisor_name
-            self.intended_field = self.intended_field or primary_preference.research_center_name
 
         ordered_education = sorted(self.education_experiences, key=lambda item: item.sort_order)
         if ordered_education:
@@ -1069,8 +1073,6 @@ class PortalApplicationUpsert(BaseModel):
             raise ValueError("缺少毕业院校/就读学校信息")
         if not _first_non_empty(self.highest_degree):
             raise ValueError("缺少最高学历/教育阶段信息")
-        if not _first_non_empty(self.intended_field):
-            self.intended_field = self.selected_team_name
         return self
 
 
@@ -1145,7 +1147,6 @@ class PortalApplicationDraftUpsert(BaseModel):
             self.selected_team_name = self.selected_team_name or primary_preference.research_center_name
             self.selected_advisor_user_id = self.selected_advisor_user_id or primary_preference.advisor_user_id
             self.selected_advisor_name = self.selected_advisor_name or primary_preference.advisor_name
-            self.intended_field = self.intended_field or primary_preference.research_center_name
 
         ordered_education = sorted(self.education_experiences, key=lambda item: item.sort_order)
         if ordered_education:
@@ -1184,8 +1185,6 @@ class PortalApplicationDraftUpsert(BaseModel):
 
         if _first_non_empty(self.validation_section_id):
             _validate_portal_draft_rules_by_section(self)
-            if not _first_non_empty(self.intended_field):
-                self.intended_field = self.selected_team_name
             return self
 
         _validate_portal_education_rules(
@@ -1213,8 +1212,6 @@ class PortalApplicationDraftUpsert(BaseModel):
             raise ValueError("缺少毕业院校/就读学校信息")
         if not _first_non_empty(self.highest_degree):
             raise ValueError("缺少最高学历/教育阶段信息")
-        if not _first_non_empty(self.intended_field):
-            self.intended_field = self.selected_team_name
 
         return self
 

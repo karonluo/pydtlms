@@ -18,6 +18,7 @@ from app.core.exceptions import DatabaseUnavailableError
 from app.schemas.contact import validate_email, validate_optional_email, validate_optional_phone_number, validate_phone_number
 from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.portal import (
+    PortalAdvisorRecord,
     PortalApplicationSubmissionResponse,
     PortalApplicationDraftUpsert,
     PortalApplicationUpsert,

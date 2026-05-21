@@ -9,10 +9,10 @@ import {
   getPortalProfileOptions,
   getPortalToken,
   listPortalPlans,
-  listPortalTeams,
   savePortalApplicationDraft,
   submitPortalApplication,
   uploadPortalAttachment,
+  type PortalAdvisorRecord,
   type PortalAchievementRecordItem,
   type PortalAttachmentCategory,
   type PortalApplicantProfileData,
@@ -26,7 +26,6 @@ import {
   type PortalPlanRecord,
   type PortalPracticeExperienceItem,
   type PortalStudentRecord,
-  type PortalTeamRecord,
 } from '../../../api/portal'
 import type { SelectOption } from '../../../api/common'
 import { getPhoneValidationMessage } from '../../../utils/contactValidation'
@@ -50,9 +49,9 @@ const savingDraft = ref(false)
 const submitting = ref(false)
 const student = ref<PortalStudentRecord | null>(null)
 const plans = ref<PortalPlanRecord[]>([])
-const teams = ref<PortalTeamRecord[]>([])
 const politicalStatusOptions = ref<SelectOption[]>([])
 const ethnicGroupOptions = ref<SelectOption[]>([])
+const advisorOptions = ref<PortalAdvisorRecord[]>([])
 const selectedPlanId = ref<number | null>(null)
 const attachmentUploading = reactive<Record<string, boolean>>({})
 const isSubmitted = computed(() => Boolean(student.value?.submitted_at))
@@ -985,58 +984,37 @@ function normalizeSourceChannelValue(value: string | null | undefined) {
   return sourceChannelOptionSet.has(normalized) ? normalized : ''
 }
 
-function findTeamById(teamId: number | null | undefined) {
-  return teams.value.find((item) => item.id === Number(teamId || 0)) || null
-}
-
-function advisorOptionsForTeam(teamId: number | null | undefined) {
-  const team = findTeamById(teamId)
-  if (!team) {
-    return [] as Array<{ user_id: number | null; full_name: string }>
-  }
-  return team.advisor_names.map((fullName, index) => ({
-    user_id: team.advisor_ids[index] ?? null,
-    full_name: fullName,
-  }))
-}
-
-function handlePreferenceCenterChange(item: PortalApplicationPreferenceItem) {
-  const team = findTeamById(item.team_id)
-  item.research_center_name = team?.team_name || ''
-  const advisors = advisorOptionsForTeam(item.team_id)
-  if (!advisors.some((advisor) => advisor.user_id === Number(item.advisor_user_id || 0))) {
-    item.advisor_user_id = null
-    item.advisor_name = ''
-  }
+function findAdvisorByUserId(advisorUserId: number | null | undefined) {
+  return advisorOptions.value.find((item) => Number(item.user_id || 0) === Number(advisorUserId || 0)) || null
 }
 
 function handlePreferenceAdvisorChange(item: PortalApplicationPreferenceItem) {
-  const advisors = advisorOptionsForTeam(item.team_id)
-  const matchedAdvisor = advisors.find((advisor) => advisor.user_id === Number(item.advisor_user_id || 0))
+  const matchedAdvisor = findAdvisorByUserId(item.advisor_user_id)
+  item.team_id = null
+  item.research_center_name = ''
   item.advisor_name = matchedAdvisor?.full_name || ''
-  if (!matchedAdvisor) {
+  if (!matchedAdvisor && item.advisor_user_id !== null) {
     item.advisor_user_id = null
   }
+}
+
+function resolveAdvisorIntroduction(item: PortalApplicationPreferenceItem) {
+  const matchedAdvisor = findAdvisorByUserId(item.advisor_user_id)
+  if (matchedAdvisor) {
+    return trimText(matchedAdvisor.introduction)
+  }
+  const advisorName = trimText(item.advisor_name)
+  if (!advisorName) {
+    return ''
+  }
+  return trimText(advisorOptions.value.find((option) => trimText(option.full_name) === advisorName)?.introduction)
 }
 
 function validatePreferenceRules() {
   const orderedPreferences = [...(form.preferences ?? [])].sort((left, right) => left.preference_order - right.preference_order)
   const primary = orderedPreferences[0]
-  if (!trimText(primary?.research_center_name)) {
-    return '请至少选择第一志愿研究中心'
-  }
   if (!(primary?.advisor_user_id ?? null) && !trimText(primary?.advisor_name)) {
     return '请选择第一志愿导师'
-  }
-
-  for (let index = 1; index < orderedPreferences.length; index += 1) {
-    const item = orderedPreferences[index]
-    if (!trimText(item?.research_center_name)) {
-      continue
-    }
-    if (!(item?.advisor_user_id ?? null) && !trimText(item?.advisor_name)) {
-      return `第${index + 1}志愿已选择研究中心后，必须选择导师`
-    }
   }
 
   return ''
@@ -1331,6 +1309,14 @@ function applyProfile(profile: PortalStudentRecord) {
   })
 
   normalizePreferenceOrders()
+  ;(form.preferences || []).forEach((item) => {
+    if (!item.advisor_user_id && trimText(item.advisor_name)) {
+      const matchedAdvisor = advisorOptions.value.find((option) => trimText(option.full_name) === trimText(item.advisor_name))
+      if (matchedAdvisor?.user_id) {
+        item.advisor_user_id = matchedAdvisor.user_id
+      }
+    }
+  })
 }
 
 function choosePlan(planId: number) {
@@ -1454,7 +1440,7 @@ function removeAchievement(index: number) {
 
 function buildProgressSnapshot() {
   return {
-    preference_count: (form.preferences || []).filter((item) => trimText(item.research_center_name)).length,
+    preference_count: (form.preferences || []).filter((item) => trimText(item.advisor_name) || item.advisor_user_id).length,
     education_count: (form.education_experiences || []).filter((item) => trimText(item.school_name)).length,
     practice_count: (form.practice_experiences || []).length,
     english_count: (form.english_proficiencies || []).filter((item) => englishItemHasContent(item)).length,
@@ -1484,11 +1470,10 @@ function buildSectionStatuses(): PortalSectionStatus[] {
   const applicationStarted = Boolean(
     trimText(form.source_channel)
     || trimText(form.source_channel_other)
-    || trimText(firstPreference?.research_center_name)
     || trimText(firstPreference?.advisor_name),
   )
   const applicationCompleted = Boolean(
-    trimText(firstPreference?.research_center_name)
+    trimText(firstPreference?.advisor_name)
     && !validateSourceChannelRules(form.source_channel, form.source_channel_other),
   )
 
@@ -1549,13 +1534,13 @@ function buildSubmitPayload(): PortalApplicationUpsert {
   const orderedPreferences = (form.preferences || [])
     .map((item, index) => ({
       preference_order: index + 1,
-      team_id: item.team_id ?? null,
-      research_center_name: trimText(item.research_center_name),
+      team_id: null,
+      research_center_name: null,
       advisor_user_id: item.advisor_user_id ?? null,
       advisor_name: trimText(item.advisor_name) || null,
       is_optional: index > 0,
     }))
-    .filter((item) => item.team_id || item.research_center_name)
+    .filter((item) => item.advisor_user_id || item.advisor_name)
 
   const orderedEducation = (form.education_experiences || [])
     .map((item, index) => ({
@@ -1693,14 +1678,14 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     mailing_address: trimText(profileData.mailing_address) || null,
     graduation_school: primaryEducationItem?.school_name || '',
     highest_degree: primaryEducationItem?.education_stage || '',
-    intended_field: primaryPreferenceItem?.research_center_name || '',
+    intended_field: null,
     political_status: trimText(profileData.political_status) || null,
     english_level: englishProficiencies[0]?.exam_name || null,
     material_list_attachment: trimText(form.personal_statement?.supporting_material_attachment_url) || null,
     personal_statement_text: buildPersonalStatementSummary(form.personal_statement) || null,
     signed_agreement: declaration.has_read_declaration,
-    selected_team_id: primaryPreferenceItem?.team_id ?? null,
-    selected_team_name: primaryPreferenceItem?.research_center_name || '',
+    selected_team_id: null,
+    selected_team_name: null,
     selected_advisor_user_id: primaryPreferenceItem?.advisor_user_id ?? null,
     selected_advisor_name: primaryPreferenceItem?.advisor_name || null,
     self_evaluation: trimText(form.personal_statement?.ai_industry_opinion) || null,
@@ -1794,10 +1779,9 @@ onMounted(async () => {
   }
 
   try {
-    const [profileResponse, planResponse, teamResponse, optionsResult] = await Promise.allSettled([
+    const [profileResponse, planResponse, optionsResult] = await Promise.allSettled([
       getPortalProfile(),
       listPortalPlans(),
-      listPortalTeams(),
       getPortalProfileOptions(),
     ])
     if (profileResponse.status !== 'fulfilled') {
@@ -1806,19 +1790,16 @@ onMounted(async () => {
     if (planResponse.status !== 'fulfilled') {
       throw planResponse.reason
     }
-    if (teamResponse.status !== 'fulfilled') {
-      throw teamResponse.reason
-    }
-
     student.value = profileResponse.value.data
     plans.value = planResponse.value.data.items
-    teams.value = teamResponse.value.data.items
     if (optionsResult.status === 'fulfilled') {
       politicalStatusOptions.value = optionsResult.value.data.political_status_options
       ethnicGroupOptions.value = optionsResult.value.data.ethnic_group_options
+      advisorOptions.value = optionsResult.value.data.advisor_options || []
     } else {
       politicalStatusOptions.value = defaultPoliticalStatusOptions
       ethnicGroupOptions.value = defaultEthnicGroupOptions
+      advisorOptions.value = []
     }
     applyProfile(profileResponse.value.data)
     if (!selectedPlanId.value && plans.value[0]) {
@@ -1870,10 +1851,9 @@ defineExpose({
         <PortalApplicationSection
           v-else-if="activeSectionId === 'application-section'"
           :form="form"
-          :teams="teams"
+          :advisor-options="advisorOptions"
           :source-channel-options="sourceChannelOptions"
-          :advisor-options-for-team="advisorOptionsForTeam"
-          :handle-preference-center-change="handlePreferenceCenterChange"
+          :resolve-advisor-introduction="resolveAdvisorIntroduction"
           :handle-preference-advisor-change="handlePreferenceAdvisorChange"
         />
 

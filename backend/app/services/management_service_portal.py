@@ -322,24 +322,24 @@ class RuntimeManagementStorePortalMixin:
     ) -> dict[str, Any]:
         preferences: list[dict[str, Any]] = []
         for item in sorted(payload.preferences, key=lambda preference: preference.preference_order):
-            resolved_preference = self._resolve_portal_team_and_advisor(
-                item.team_id,
-                item.research_center_name,
+            resolved_advisor = self._resolve_portal_advisor_selection(
                 item.advisor_user_id,
                 item.advisor_name,
                 require_advisor=not bool(item.is_optional),
             )
+            if resolved_advisor["advisor_user_id"] is None and not resolved_advisor["advisor_name"]:
+                continue
             preferences.append(
                 {
                     "preference_order": item.preference_order,
-                    "team_id": resolved_preference["team_id"],
-                    "research_center_name": resolved_preference["team_name"],
-                    "advisor_user_id": resolved_preference["advisor_user_id"],
-                    "advisor_name": resolved_preference["advisor_name"],
+                    "team_id": item.team_id,
+                    "research_center_name": str(item.research_center_name or "").strip() or None,
+                    "advisor_user_id": resolved_advisor["advisor_user_id"],
+                    "advisor_name": resolved_advisor["advisor_name"],
                     "is_optional": item.is_optional,
                 }
             )
-        if not preferences and selected_team_name:
+        if not preferences and (selected_advisor_user_id is not None or advisor_name):
             preferences = [
                 {
                     "preference_order": 1,
@@ -774,17 +774,13 @@ class RuntimeManagementStorePortalMixin:
             selected_team_name = payload.selected_team_name
             selected_advisor_user_id = payload.selected_advisor_user_id
             advisor_name = payload.selected_advisor_name
-            if selected_team_id is not None or selected_team_name:
-                resolved_selection = self._resolve_portal_team_and_advisor(
-                    selected_team_id,
-                    selected_team_name,
-                    selected_advisor_user_id,
-                    advisor_name,
-                )
-                selected_team_id = resolved_selection["team_id"]
-                selected_team_name = resolved_selection["team_name"]
-                selected_advisor_user_id = resolved_selection["advisor_user_id"]
-                advisor_name = resolved_selection["advisor_name"]
+            resolved_selection = self._resolve_portal_advisor_selection(
+                selected_advisor_user_id,
+                advisor_name,
+                require_advisor=False,
+            )
+            selected_advisor_user_id = resolved_selection["advisor_user_id"]
+            advisor_name = resolved_selection["advisor_name"]
 
             now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             profile_payload = self._build_portal_profile_payload(payload)
@@ -852,25 +848,19 @@ class RuntimeManagementStorePortalMixin:
             _, plan = self._find_required("recruitment_plans", payload.plan_id)
             selected_team_id = payload.selected_team_id
             selected_team_name = payload.selected_team_name
-            if selected_team_id is None and not selected_team_name:
-                raise ValueError("缺少第一志愿研究中心信息")
             graduation_school = payload.graduation_school
             if not graduation_school:
                 raise ValueError("缺少毕业院校/就读学校信息")
             highest_degree = payload.highest_degree
             if not highest_degree:
                 raise ValueError("缺少最高学历/教育阶段信息")
-            resolved_selection = self._resolve_portal_team_and_advisor(
-                selected_team_id,
-                selected_team_name,
+            resolved_selection = self._resolve_portal_advisor_selection(
                 payload.selected_advisor_user_id,
                 payload.selected_advisor_name,
             )
-            selected_team_id = resolved_selection["team_id"]
-            selected_team_name = resolved_selection["team_name"]
             selected_advisor_user_id = resolved_selection["advisor_user_id"]
             advisor_name = resolved_selection["advisor_name"]
-            intended_field = payload.intended_field or selected_team_name
+            intended_field = payload.intended_field or advisor_name
             submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             profile_payload = self._build_portal_profile_payload(payload)
             application_draft = self._build_portal_application_draft_payload(
@@ -881,10 +871,9 @@ class RuntimeManagementStorePortalMixin:
                 advisor_name,
                 submitted_at,
             )
-            preference_names = [item.get("research_center_name") for item in application_draft.get("preferences", []) if item.get("research_center_name")]
-            preference_team_ids = [int(item.get("team_id") or 0) or None for item in application_draft.get("preferences", [])]
-            second_choice = preference_names[1] if len(preference_names) > 1 else None
-            second_choice_team_id = preference_team_ids[1] if len(preference_team_ids) > 1 else None
+            preference_advisors = [item.get("advisor_name") for item in application_draft.get("preferences", []) if item.get("advisor_name")]
+            second_choice = preference_advisors[1] if len(preference_advisors) > 1 else None
+            second_choice_team_id = None
 
             student.update(
                 {
@@ -898,7 +887,7 @@ class RuntimeManagementStorePortalMixin:
                     "mailing_address": payload.mailing_address,
                     "graduation_school": graduation_school,
                     "highest_degree": highest_degree,
-                    "intended_field": intended_field,
+                    "intended_field": payload.intended_field,
                     "political_status": payload.political_status,
                     "english_level": payload.english_level,
                     "family_info": payload.family_info,
@@ -935,7 +924,7 @@ class RuntimeManagementStorePortalMixin:
                         "highest_degree": highest_degree,
                         "intended_field": intended_field,
                         "first_choice_team_id": selected_team_id,
-                        "first_choice": intended_field,
+                        "first_choice": advisor_name,
                         "second_choice_team_id": second_choice_team_id,
                         "second_choice": second_choice,
                         "political_status": payload.political_status,
@@ -1003,7 +992,7 @@ class RuntimeManagementStorePortalMixin:
                         highest_degree=highest_degree,
                         intended_field=intended_field,
                         first_choice_team_id=selected_team_id,
-                        first_choice=intended_field,
+                        first_choice=advisor_name,
                         second_choice_team_id=second_choice_team_id,
                         second_choice=second_choice,
                         political_status=payload.political_status,

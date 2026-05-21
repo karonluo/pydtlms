@@ -32,6 +32,14 @@ export type PortalApplicationPreferenceItem = {
   is_optional: boolean
 }
 
+export type PortalAdvisorRecord = {
+  user_id?: number | null
+  full_name: string
+  advisor_no?: string | null
+  organization_name?: string | null
+  introduction?: string | null
+}
+
 export type PortalEducationExperienceItem = {
   sort_order: number
   education_stage: string
@@ -214,6 +222,7 @@ export type PortalPlanRecord = {
 export type PortalProfileOptionsResponse = {
   political_status_options: SelectOption[]
   ethnic_group_options: SelectOption[]
+  advisor_options: PortalAdvisorRecord[]
 }
 
 export type PortalPublicConfigResponse = {

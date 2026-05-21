@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import type { PortalApplicationPreferenceItem, PortalApplicationUpsert, PortalTeamRecord } from '../../../../api/portal'
+import type { PortalAdvisorRecord, PortalApplicationPreferenceItem, PortalApplicationUpsert } from '../../../../api/portal'
 
 defineProps<{
   form: PortalApplicationUpsert
-  teams: PortalTeamRecord[]
+  advisorOptions: PortalAdvisorRecord[]
   sourceChannelOptions: string[]
-  advisorOptionsForTeam: (teamId: number | null | undefined) => Array<{ user_id: number | null; full_name: string }>
-  handlePreferenceCenterChange: (item: PortalApplicationPreferenceItem) => void
+  resolveAdvisorIntroduction: (item: PortalApplicationPreferenceItem) => string
   handlePreferenceAdvisorChange: (item: PortalApplicationPreferenceItem) => void
 }>()
 </script>
@@ -15,8 +14,8 @@ defineProps<{
   <section class="section-page">
     <div class="toolbar-card">
       <div>
-        <strong>研究领域选择</strong>
-        <span>因2027级指标分配尚未最终确定，导师名单将持续迭代，如有疑问可发送邮件至 admissions@pjlab.org.cn 咨询。</span>
+        <strong>导师志愿选择</strong>
+        <span>报名时仅需选择导师。第二志愿不选导师时，表示仅保留第一志愿。</span>
       </div>
     </div>
 
@@ -29,21 +28,31 @@ defineProps<{
           </div>
         </div>
 
-        <div class="section-grid">
+        <div class="preference-grid">
           <label>
-            <span><span v-if="index === 0" class="required-mark">*</span>研究领域</span>
-            <select v-model="item.team_id" @change="handlePreferenceCenterChange(item)">
-              <option :value="null">请选择研究中心</option>
-              <option v-for="team in teams" :key="team.id" :value="team.id">{{ team.team_name }}</option>
-            </select>
+            <span><span v-if="index === 0" class="required-mark">*</span>意向导师</span>
+            <el-select
+              v-model="item.advisor_user_id"
+              filterable
+              clearable
+              placeholder="请选择导师"
+              @change="handlePreferenceAdvisorChange(item)"
+            >
+              <el-option
+                v-for="advisor in advisorOptions"
+                :key="`${advisor.user_id ?? advisor.full_name}-${advisor.full_name}`"
+                :label="advisor.full_name"
+                :value="advisor.user_id ?? null"
+              />
+            </el-select>
           </label>
-          <label>
-            <span><span v-if="index === 0 || item.team_id" class="required-mark">*</span>意向导师</span>
-            <select v-model="item.advisor_user_id" @change="handlePreferenceAdvisorChange(item)">
-              <option :value="null">请选择导师</option>
-              <option v-for="advisor in advisorOptionsForTeam(item.team_id)" :key="`${advisor.user_id}-${advisor.full_name}`" :value="advisor.user_id ?? null">{{ advisor.full_name }}</option>
-            </select>
-          </label>
+
+          <div class="advisor-panel">
+            <span class="advisor-panel__label">导师介绍</span>
+            <div class="advisor-panel__content">
+              {{ resolveAdvisorIntroduction(item) || '' }}
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -110,6 +119,13 @@ defineProps<{
   gap: 16px;
 }
 
+.preference-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
 .section-grid label {
   display: grid;
   gap: 8px;
@@ -128,6 +144,51 @@ defineProps<{
   border: 1px solid #d6e0ee;
   border-radius: 14px;
   background: #fff;
+}
+
+.preference-grid label {
+  display: grid;
+  gap: 8px;
+  color: #4b607d;
+}
+
+.preference-grid select {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid #d6e0ee;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.preference-grid :deep(.el-select) {
+  width: 100%;
+}
+
+.preference-grid :deep(.el-select__wrapper) {
+  min-height: 46px;
+  border-radius: 14px;
+}
+
+.advisor-panel {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.advisor-panel__label {
+  color: #4b607d;
+}
+
+.advisor-panel__content {
+  min-height: 120px;
+  padding: 16px 18px;
+  border: 1px solid #d6e0ee;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(244, 248, 253, 0.96), rgba(255, 255, 255, 0.96));
+  color: #314865;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .toolbar-card,
@@ -152,6 +213,7 @@ defineProps<{
 
 @media (max-width: 720px) {
   .section-grid,
+  .preference-grid,
   .toolbar-card,
   .record-card__header {
     grid-template-columns: 1fr;
