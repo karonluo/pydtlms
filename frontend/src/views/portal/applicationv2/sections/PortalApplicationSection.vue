@@ -152,6 +152,12 @@ defineProps<{
   color: #4b607d;
 }
 
+.preference-grid label > span,
+.advisor-panel__label,
+.advisor-panel__content {
+  font-size: 12px;
+}
+
 .preference-grid select {
   width: 100%;
   min-height: 46px;

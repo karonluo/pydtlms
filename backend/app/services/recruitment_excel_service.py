@@ -248,7 +248,18 @@ def _normalize_cell(value: Any) -> str | None:
 def _sanitize_excel_cell_value(value: Any) -> Any:
     if not isinstance(value, str):
         return value
-    return ILLEGAL_CHARACTERS_RE.sub("", value)
+    sanitized = ILLEGAL_CHARACTERS_RE.sub("", value)
+    return "".join(char for char in sanitized if _is_valid_excel_xml_char(char))
+
+
+def _is_valid_excel_xml_char(char: str) -> bool:
+    code_point = ord(char)
+    return (
+        code_point in {0x9, 0xA, 0xD}
+        or 0x20 <= code_point <= 0xD7FF
+        or 0xE000 <= code_point <= 0xFFFD
+        or 0x10000 <= code_point <= 0x10FFFF
+    )
 
 
 def _resolve_registered_portal_repeated_group_max_count(records: list[dict[str, Any]], prefix: str) -> int:

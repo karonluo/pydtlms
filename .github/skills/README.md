@@ -9,3 +9,4 @@
 - student-master-data-and-teams
 - training-degree-lifecycle
 - system-governance-admin
+- sql-powerdesigner-pdm-generation

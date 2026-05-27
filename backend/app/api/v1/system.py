@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
@@ -27,6 +31,11 @@ from app.schemas.system import (
     SystemArchitecture,
     SystemOptionsResponse,
     SystemStats,
+    SystemUserExportRequest,
+    SystemUserImportBatchRequest,
+    SystemUserImportParseResult,
+    SystemUserImportResult,
+    SystemUserImportRow,
     SystemUserListResponse,
     SystemUserRecord,
     SystemUserUpsert,
@@ -46,6 +55,8 @@ from app.services.dashboard_service import (
     delete_roles,
     delete_system_user,
     delete_system_users,
+    export_system_users,
+    export_system_user_blank_template,
     get_audit_policy_list,
     get_dict_data_list,
     get_dict_type_list,
@@ -59,6 +70,7 @@ from app.services.dashboard_service import (
     get_system_permission_catalog,
     get_system_stats,
     get_system_user_list,
+    import_system_users,
     update_audit_policy,
     update_dict_data,
     update_dict_type,
@@ -66,6 +78,7 @@ from app.services.dashboard_service import (
     update_role,
     update_system_user,
 )
+from app.services.system_user_excel_service import parse_system_user_import_template
 
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -236,6 +249,86 @@ def system_users(
         department_name=department_name,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post("/users/export")
+def export_system_user_records(
+    payload: SystemUserExportRequest,
+    principal: Principal = Depends(require_permissions("system:read")),
+) -> StreamingResponse:
+    try:
+        content = export_system_users(
+            payload.ids,
+            keyword=payload.keyword,
+            role_code=payload.role_code,
+            account_status=payload.account_status,
+            department_name=payload.department_name,
+            operator_username=principal.username,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    filename = f"系统用户导出_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+@router.post("/users/import", response_model=SystemUserImportResult)
+async def import_system_user_records(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("system:write")),
+) -> SystemUserImportResult:
+    try:
+        rows = parse_system_user_import_template(await file.read())
+        return import_system_users(rows, operator_username=principal.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/users/import/parse", response_model=SystemUserImportParseResult)
+async def parse_system_user_import_file(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("system:write")),
+) -> SystemUserImportParseResult:
+    try:
+        rows = parse_system_user_import_template(await file.read())
+        return SystemUserImportParseResult(
+            total_count=len(rows),
+            rows=[SystemUserImportRow(**row) for row in rows],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/users/import/batch", response_model=SystemUserImportResult)
+def import_system_user_rows(
+    payload: SystemUserImportBatchRequest,
+    principal: Principal = Depends(require_permissions("system:write")),
+) -> SystemUserImportResult:
+    try:
+        return import_system_users([row.model_dump() for row in payload.rows], operator_username=principal.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/users/template")
+def download_system_user_template(
+    principal: Principal = Depends(require_permissions("system:read")),
+) -> StreamingResponse:
+    content = export_system_user_blank_template()
+    filename = "系统用户导入模板.xlsx"
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 

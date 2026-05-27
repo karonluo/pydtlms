@@ -95,6 +95,7 @@ const options = ref<StudentOptions>({
   status_options: [],
   degree_options: [],
   advisor_options: [],
+  registered_portal_advisor_filter_options: [],
   center_options: [],
   political_status_options: [],
   center_advisor_map: [],
@@ -117,6 +118,7 @@ const centerFilters = reactive({
 const registeredPortalFilters = reactive({
   keyword: '',
   application_form_status: '',
+  advisor_names: [] as string[],
 })
 const portalEmailForm = reactive<RegisteredPortalStudentEmailRequest>({
   subject: '',
@@ -312,6 +314,7 @@ async function loadRegisteredPortalStudents() {
   const response = await listRegisteredPortalStudents({
     keyword: registeredPortalFilters.keyword || undefined,
     application_form_status: registeredPortalFilters.application_form_status || undefined,
+    advisor_names: registeredPortalFilters.advisor_names.length ? registeredPortalFilters.advisor_names.join(',') : undefined,
     page: registeredStudentPager.pagination.currentPage,
     page_size: registeredStudentPager.pagination.pageSize,
   })
@@ -562,7 +565,7 @@ async function handleSearch() {
 async function handleReset() {
   Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
   Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
-  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '' })
+  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '', advisor_names: [] })
   selectedCenterIds.value = []
   selectedRegisteredPortalStudentIds.value = []
   studentPager.reset()
@@ -605,6 +608,7 @@ function buildRegisteredPortalExportFilters() {
   return {
     keyword: registeredPortalFilters.keyword || undefined,
     application_form_status: registeredPortalFilters.application_form_status || undefined,
+    advisor_names: registeredPortalFilters.advisor_names.length ? [...registeredPortalFilters.advisor_names] : undefined,
   }
 }
 
@@ -615,6 +619,9 @@ function buildRegisteredPortalExportFilterSummary() {
   }
   if (registeredPortalFilters.application_form_status) {
     items.push(`报名状态：${registeredPortalFilters.application_form_status}`)
+  }
+  if (registeredPortalFilters.advisor_names.length) {
+    items.push(`导师：${registeredPortalFilters.advisor_names.join('、')}`)
   }
   return items.join('；') || '当前未设置筛选条件'
 }
@@ -1121,11 +1128,30 @@ onMounted(() => {
 
       <el-form v-else class="filter-form" :inline="true">
         <el-form-item label="关键字">
-          <el-input v-model="registeredPortalFilters.keyword" placeholder="姓名 / 手机号 / 邮箱 / 招生计划" clearable />
+          <el-input v-model="registeredPortalFilters.keyword" placeholder="报名号 / 姓名 / 手机号 / 邮箱 / 招生计划 / 导师" clearable />
         </el-form-item>
         <el-form-item label="报名状态">
           <el-select v-model="registeredPortalFilters.application_form_status" placeholder="全部状态" clearable style="width: 180px">
             <el-option v-for="item in portalApplicationFormStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="导师姓名">
+          <el-select
+            v-model="registeredPortalFilters.advisor_names"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            clearable
+            placeholder="全部导师"
+            style="width: 260px"
+          >
+            <el-option
+              v-for="item in options.registered_portal_advisor_filter_options"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -1188,6 +1214,7 @@ onMounted(() => {
 
         <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleRegisteredPortalStudentSelectionChange">
           <el-table-column type="selection" width="44" />
+          <el-table-column prop="recruitment_application_candidate_no" label="报名号" width="126" show-overflow-tooltip />
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
           <el-table-column prop="phone_number" label="手机号" width="128" show-overflow-tooltip />
           <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />

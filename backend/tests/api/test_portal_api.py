@@ -612,78 +612,113 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
             'application_status': '报名已提交',
         }
 
-    with TestClient(app) as client:
-        monkeypatch.setattr('app.api.v1.portal.resolve_portal_student_id', lambda credentials: 7)
-        monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+            education_experiences = _build_valid_education_experiences()
+            education_experiences[1]['degree_certificate_attachment_url'] = '/portal-attachments/uploads/student-7/education_degree_certificate/degree-a.pdf'
 
-        response = client.post(
-            '/api/v1/portal/applications',
-            headers={'Authorization': 'Bearer portal-token'},
-            json={
-                'plan_id': 3,
-                'profile': {
-                    'id_card_collage_url': '/portal-attachments/uploads/student-7/id_card_collage/id-card.jpg',
-                    'gender': '男',
-                    'birth_date': '1999-01-01',
-                    'native_place': '江苏无锡',
-                    'political_status': '中共党员',
-                },
-                'source_channel': '上海人工智能实验室官网',
-                'preferences': [
-                    {
-                        'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
-                        'advisor_name': '刘亚',
-                        'is_optional': False,
-                    }
-                ],
-                'education_experiences': [
-                    {
-                        'sort_order': 1,
-                        'education_stage': '高中毕业',
-                        'school_name': '无锡市第一中学',
+            response = client.post(
+                '/api/v1/portal/applications',
+                headers={'Authorization': 'Bearer portal-token'},
+                json={
+                    'plan_id': 3,
+                    'profile': _build_valid_profile_payload(),
+                    'source_channel': '上海人工智能实验室官网',
+                    'preferences': [
+                        {
+                            'preference_order': 1,
+                            'research_center_name': '智能制造联合团队',
+                            'advisor_name': '刘亚',
+                            'is_optional': False,
+                        }
+                    ],
+                    'education_experiences': education_experiences,
+                    'english_proficiencies': [
+                        {
+                            'exam_name': 'CET-6',
+                            'score_text': '520',
+                            'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
+                        }
+                    ],
+                    'family_members': [
+                        {'member_name': '张父', 'relation_type': '父亲'},
+                        {'member_name': '张母', 'relation_type': '母亲'},
+                    ],
+                    'personal_statement': {
+                        **_build_personal_statement_payload(include_resume=True, include_supporting_material=True),
                     },
-                    {
-                        'sort_order': 2,
-                        'education_stage': '本科在读',
-                        'school_name': '江南大学',
-                        'transcript_attachment_url': '/portal-attachments/uploads/student-7/education_transcript/transcript-a.pdf',
-                        'degree_certificate_attachment_url': '/portal-attachments/uploads/student-7/education_degree_certificate/degree-a.pdf',
-                    }
-                ],
-                'english_proficiencies': [
-                    {
-                        'exam_name': 'CET-6',
-                        'score_text': '520',
-                        'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/cet6-a.pdf',
-                    }
-                ],
-                'family_members': [
-                    {'member_name': '张父', 'relation_type': '父亲'},
-                    {'member_name': '张母', 'relation_type': '母亲'},
-                ],
-                'personal_statement': {
-                    **_build_personal_statement_payload(include_resume=True, include_supporting_material=True),
+                    'declaration': {
+                        'has_read_declaration': True,
+                        'declaration_text': '本人承诺以上填写内容真实、准确。',
+                    },
                 },
-                'declaration': {
-                    'has_read_declaration': True,
-                    'declaration_text': '本人承诺以上填写内容真实、准确。',
-                },
-            },
-        )
+            )
 
-        assert response.status_code == 200
-        assert response.json()['application_business_key'] == 'RECRUIT-20260421-0007'
-        assert captured['student_id'] == 7
-        payload = captured['payload']
-        assert payload['profile']['id_card_collage_url'].endswith('id-card.jpg')
-        assert payload['education_experiences'][1]['transcript_attachment_url'].endswith('transcript-a.pdf')
-        assert payload['education_experiences'][1]['degree_certificate_attachment_url'].endswith('degree-a.pdf')
-        assert payload['english_proficiencies'][0]['certificate_attachment_url'].endswith('cet6-a.pdf')
-        assert payload['personal_statement']['personal_statement_text'].startswith('个人成长经历')
-        assert payload['personal_statement']['resume_attachment_url'].endswith('resume-a.pdf')
-        assert payload['personal_statement']['supporting_material_attachment_url'].endswith('supporting-material.zip')
-        assert payload['material_list_attachment'].endswith('supporting-material.zip')
+            assert response.status_code == 200
+            assert response.json()['application_business_key'] == 'RECRUIT-20260421-0007'
+            assert captured['student_id'] == 7
+            payload = captured['payload']
+            assert payload['profile']['id_card_collage_url'].endswith('id-card.jpg')
+            assert payload['education_experiences'][1]['transcript_attachment_url'].endswith('transcript-a.pdf')
+            assert payload['education_experiences'][1]['degree_certificate_attachment_url'].endswith('degree-a.pdf')
+            assert payload['english_proficiencies'][0]['certificate_attachment_url'].endswith('cet6-a.pdf')
+            assert payload['personal_statement']['personal_statement_text'].startswith('个人成长经历')
+            assert payload['personal_statement']['resume_attachment_url'].endswith('resume-a.pdf')
+            assert payload['personal_statement']['supporting_material_attachment_url'].endswith('supporting-material.zip')
+            assert payload['material_list_attachment'].endswith('supporting-material.zip')
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
+
+
+def test_portal_application_submission_returns_unexpected_error_detail(monkeypatch) -> None:
+    def fake_submit(student_id, payload):
+        del student_id, payload
+        raise RuntimeError('门户报名提交持久化失败')
+
+    app.dependency_overrides[portal_api.get_current_active_portal_student_id] = lambda: 7
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setattr('app.api.v1.portal.submit_portal_application', fake_submit)
+
+            response = client.post(
+                '/api/v1/portal/applications',
+                headers={'Authorization': 'Bearer portal-token'},
+                json={
+                    'plan_id': 3,
+                    'preferences': [
+                        {
+                            'preference_order': 1,
+                            'advisor_name': '刘亚',
+                            'is_optional': False,
+                        }
+                    ],
+                    'education_experiences': _build_valid_education_experiences(),
+                    'english_proficiencies': [
+                        {
+                            'exam_name': 'IELTS',
+                            'score_text': '7.0',
+                            'certificate_attachment_url': '/portal-attachments/uploads/student-7/english_certificate/ielts-a.pdf',
+                        }
+                    ],
+                    'family_members': [
+                        {'member_name': '张母', 'relation_type': '母亲'},
+                    ],
+                    'personal_statement': _build_personal_statement_payload(include_resume=True),
+                    'profile': _build_valid_profile_payload(),
+                    'source_channel': '上海人工智能实验室官网',
+                    'declaration': {
+                        'has_read_declaration': True,
+                        'declaration_text': '本人承诺以上填写内容真实、准确。',
+                    },
+                },
+            )
+
+            assert response.status_code == 500
+            assert response.json()['detail'] == '门户报名提交持久化失败'
+    finally:
+        app.dependency_overrides.pop(portal_api.get_current_active_portal_student_id, None)
 
 
 def test_portal_application_submission_rejects_short_personal_statement(monkeypatch) -> None:

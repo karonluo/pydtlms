@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1220" viewBox="0 0 1900 1220" role="img" aria-labelledby="title desc">
+  <title id="title">Portal Recruitment ER Diagram</title>
+  <desc id="desc">Entity relationship diagram for portal students, recruitment plans, recruitment applications, and major structured application tables.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f5f7fb; }
+      .title { font: 700 30px 'Segoe UI', Arial, sans-serif; fill: #172033; }
+      .subtitle { font: 400 15px 'Segoe UI', Arial, sans-serif; fill: #536076; }
+      .table-title { font: 700 18px 'Segoe UI', Arial, sans-serif; fill: #ffffff; }
+      .table-meta { font: 400 12px 'Consolas', 'Courier New', monospace; fill: #d8e2f2; }
+      .field { font: 13px 'Consolas', 'Courier New', monospace; fill: #1c2433; }
+      .note { font: 13px 'Segoe UI', Arial, sans-serif; fill: #445065; }
+      .small { font: 12px 'Segoe UI', Arial, sans-serif; fill: #5d6b82; }
+      .box { fill: #ffffff; stroke: #244061; stroke-width: 1.4; rx: 10; ry: 10; }
+      .box-head { fill: #244061; rx: 10; ry: 10; }
+      .box-accent { fill: #2f5b8f; }
+      .line { stroke: #335c85; stroke-width: 2.2; fill: none; }
+      .line-soft { stroke: #6a89ac; stroke-width: 1.8; fill: none; }
+      .crow { stroke: #335c85; stroke-width: 2.2; fill: none; }
+      .label { font: 600 12px 'Segoe UI', Arial, sans-serif; fill: #27496d; }
+      .legend-box { fill: #ffffff; stroke: #9cb0c7; stroke-width: 1.2; rx: 8; ry: 8; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1900" height="1220" />
+  <text class="title" x="60" y="60">Portal Registration / Recruitment ER Diagram</text>
+  <text class="subtitle" x="60" y="90">Scope: dtlms_recruitment_plans, dtlms_portal_students, dtlms_recruitment_applications, and core structured application tables</text>
+
+  <g transform="translate(60,140)">
+    <rect class="box" x="0" y="0" width="360" height="210" />
+    <rect class="box-head" x="0" y="0" width="360" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_recruitment_plans</text>
+    <text class="table-meta" x="18" y="47">recruitment plan master</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">UQ  plan_code</text>
+    <text class="field" x="18" y="126">    plan_name</text>
+    <text class="field" x="18" y="148">    academic_year</text>
+    <text class="field" x="18" y="170">    semester</text>
+    <text class="field" x="18" y="192">    plan_status</text>
+  </g>
+
+  <g transform="translate(500,140)">
+    <rect class="box" x="0" y="0" width="420" height="320" />
+    <rect class="box-head" x="0" y="0" width="420" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_students</text>
+    <text class="table-meta" x="18" y="47">registered portal students</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">UQ  phone_number</text>
+    <text class="field" x="18" y="126">UQ  email</text>
+    <text class="field" x="18" y="148">UQ  id_number</text>
+    <text class="field" x="18" y="170">FK  selected_plan_id -&gt; dtlms_recruitment_plans.id</text>
+    <text class="field" x="18" y="192">    selected_team_name</text>
+    <text class="field" x="18" y="214">    selected_advisor_name</text>
+    <text class="field" x="18" y="236">    application_draft (JSONB)</text>
+    <text class="field" x="18" y="258">    submitted_at</text>
+    <text class="field" x="18" y="280">    account_status</text>
+    <text class="field" x="18" y="302">    profile / legacy summary fields</text>
+  </g>
+
+  <g transform="translate(1000,140)">
+    <rect class="box" x="0" y="0" width="420" height="298" />
+    <rect class="box-head" x="0" y="0" width="420" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_recruitment_applications</text>
+    <text class="table-meta" x="18" y="47">submitted application header</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">FK  plan_id -&gt; dtlms_recruitment_plans.id</text>
+    <text class="field" x="18" y="126">FK  portal_student_id -&gt; dtlms_portal_students.id</text>
+    <text class="field" x="18" y="148">FK  intended_field_id -&gt; dtlms_research_fields.id</text>
+    <text class="field" x="18" y="170">UQ  business_key</text>
+    <text class="field" x="18" y="192">UQ  candidate_no</text>
+    <text class="field" x="18" y="214">    application_status</text>
+    <text class="field" x="18" y="236">    first_choice / second_choice</text>
+    <text class="field" x="18" y="258">    source_channel / source_channel_other</text>
+    <text class="field" x="18" y="280">    applied_at + denormalized applicant snapshot</text>
+  </g>
+
+  <g transform="translate(1490,140)">
+    <rect class="box" x="0" y="0" width="300" height="178" />
+    <rect class="box-head" x="0" y="0" width="300" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_research_fields</text>
+    <text class="table-meta" x="18" y="47">dictionary / reference</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">UQ  field_code</text>
+    <text class="field" x="18" y="126">    field_name</text>
+    <text class="field" x="18" y="148">    description</text>
+  </g>
+
+  <g transform="translate(500,560)">
+    <rect class="box" x="0" y="0" width="420" height="212" />
+    <rect class="box-head box-accent" x="0" y="0" width="420" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_student_profiles</text>
+    <text class="table-meta" x="18" y="47">1:1 profile extension</text>
+    <text class="field" x="18" y="82">PK/FK  portal_student_id -&gt; dtlms_portal_students.id</text>
+    <text class="field" x="18" y="104">      full_name_pinyin</text>
+    <text class="field" x="18" y="126">      profile_photo_url</text>
+    <text class="field" x="18" y="148">      id_card_collage_url</text>
+    <text class="field" x="18" y="170">      emergency_contact_name</text>
+    <text class="field" x="18" y="192">      emergency_contact_phone</text>
+  </g>
+
+  <g transform="translate(1000,540)">
+    <rect class="box" x="0" y="0" width="360" height="210" />
+    <rect class="box-head box-accent" x="0" y="0" width="360" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_application_preferences</text>
+    <text class="table-meta" x="18" y="47">ordered advisor preferences</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">FK  application_id -&gt; dtlms_recruitment_applications.id</text>
+    <text class="field" x="18" y="126">UQ  (application_id, preference_order)</text>
+    <text class="field" x="18" y="148">    research_center_name</text>
+    <text class="field" x="18" y="170">    advisor_name</text>
+    <text class="field" x="18" y="192">    is_optional</text>
+  </g>
+
+  <g transform="translate(1400,500)">
+    <rect class="box" x="0" y="0" width="390" height="230" />
+    <rect class="box-head box-accent" x="0" y="0" width="390" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_application_education_experiences</text>
+    <text class="table-meta" x="18" y="47">1:N education rows</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">FK  application_id -&gt; dtlms_recruitment_applications.id</text>
+    <text class="field" x="18" y="126">    sort_order</text>
+    <text class="field" x="18" y="148">    education_stage</text>
+    <text class="field" x="18" y="170">    school_name</text>
+    <text class="field" x="18" y="192">    major_name / gpa / ranking</text>
+    <text class="field" x="18" y="214">    transcript / degree / graduation attachments</text>
+  </g>
+
+  <g transform="translate(60,840)">
+    <rect class="box" x="0" y="0" width="360" height="186" />
+    <rect class="box-head box-accent" x="0" y="0" width="360" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_application_family_members</text>
+    <text class="table-meta" x="18" y="47">1:N family rows</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">FK  application_id -&gt; dtlms_recruitment_applications.id</text>
+    <text class="field" x="18" y="126">    member_name</text>
+    <text class="field" x="18" y="148">    relation_type</text>
+    <text class="field" x="18" y="170">    employer_name / contact_phone</text>
+  </g>
+
+  <g transform="translate(500,840)">
+    <rect class="box" x="0" y="0" width="420" height="208" />
+    <rect class="box-head box-accent" x="0" y="0" width="420" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_application_personal_statements</text>
+    <text class="table-meta" x="18" y="47">1:1 statement block</text>
+    <text class="field" x="18" y="82">PK/FK  application_id -&gt; dtlms_recruitment_applications.id</text>
+    <text class="field" x="18" y="104">      growth_experience_text</text>
+    <text class="field" x="18" y="126">      program_application_reason_text</text>
+    <text class="field" x="18" y="148">      career_plan_text</text>
+    <text class="field" x="18" y="170">      resume_attachment_url</text>
+    <text class="field" x="18" y="192">      supporting_material_attachment_url</text>
+  </g>
+
+  <g transform="translate(1000,840)">
+    <rect class="box" x="0" y="0" width="360" height="186" />
+    <rect class="box-head box-accent" x="0" y="0" width="360" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_application_attachments</text>
+    <text class="table-meta" x="18" y="47">attachments by owner_type</text>
+    <text class="field" x="18" y="82">PK  id</text>
+    <text class="field" x="18" y="104">FK  portal_student_id -&gt; dtlms_portal_students.id</text>
+    <text class="field" x="18" y="126">FK  application_id -&gt; dtlms_recruitment_applications.id</text>
+    <text class="field" x="18" y="148">    owner_type / owner_id</text>
+    <text class="field" x="18" y="170">    attachment_category / file_url</text>
+  </g>
+
+  <g transform="translate(1400,840)">
+    <rect class="box" x="0" y="0" width="390" height="186" />
+    <rect class="box-head box-accent" x="0" y="0" width="390" height="56" />
+    <text class="table-title" x="18" y="30">dtlms_portal_application_declarations</text>
+    <text class="table-meta" x="18" y="47">1:1 declaration block</text>
+    <text class="field" x="18" y="82">PK/FK  application_id -&gt; dtlms_recruitment_applications.id</text>
+    <text class="field" x="18" y="104">      has_read_declaration</text>
+    <text class="field" x="18" y="126">      declaration_text</text>
+    <text class="field" x="18" y="148">      progress_snapshot (JSONB)</text>
+    <text class="field" x="18" y="170">      created_at / updated_at</text>
+  </g>
+
+  <path class="line" d="M 420 245 L 500 245" />
+  <text class="label" x="438" y="234">1</text>
+  <text class="label" x="472" y="234">N</text>
+  <path class="crow" d="M 500 245 l -16 -10 M 500 245 l -16 0 M 500 245 l -16 10" />
+
+  <path class="line" d="M 420 290 C 610 290, 790 290, 1000 290" />
+  <text class="label" x="625" y="278">1</text>
+  <text class="label" x="965" y="278">N</text>
+  <path class="crow" d="M 1000 290 l -16 -10 M 1000 290 l -16 0 M 1000 290 l -16 10" />
+
+  <path class="line-soft" d="M 920 300 C 960 300, 970 250, 1000 250" />
+  <text class="label" x="932" y="286">portal_student_id</text>
+  <text class="label" x="940" y="318">1</text>
+  <text class="label" x="982" y="246">N</text>
+
+  <path class="line-soft" d="M 1420 250 L 1490 250" />
+  <text class="label" x="1440" y="238">N</text>
+  <text class="label" x="1472" y="238">1</text>
+
+  <path class="line" d="M 710 460 L 710 560" />
+  <text class="label" x="686" y="515">1:1</text>
+
+  <path class="line" d="M 1180 438 L 1180 540" />
+  <text class="label" x="1154" y="495">1:N</text>
+  <path class="crow" d="M 1180 540 l -10 -16 M 1180 540 l 0 -16 M 1180 540 l 10 -16" />
+
+  <path class="line" d="M 1310 438 C 1425 438, 1535 438, 1535 500" />
+  <text class="label" x="1415" y="426">1:N</text>
+  <path class="crow" d="M 1535 500 l -10 -16 M 1535 500 l 0 -16 M 1535 500 l 10 -16" />
+
+  <path class="line" d="M 1040 438 C 1040 700, 240 700, 240 840" />
+  <text class="label" x="580" y="688">1:N</text>
+  <path class="crow" d="M 240 840 l -10 -16 M 240 840 l 0 -16 M 240 840 l 10 -16" />
+
+  <path class="line" d="M 1110 438 C 1110 700, 710 700, 710 840" />
+  <text class="label" x="920" y="688">1:1</text>
+
+  <path class="line" d="M 1250 438 C 1250 700, 1180 700, 1180 840" />
+  <text class="label" x="1200" y="688">1:N</text>
+  <path class="crow" d="M 1180 840 l -10 -16 M 1180 840 l 0 -16 M 1180 840 l 10 -16" />
+
+  <path class="line" d="M 1340 438 C 1500 438, 1595 438, 1595 840" />
+  <text class="label" x="1504" y="688">1:1</text>
+
+  <path class="line-soft" d="M 920 690 C 980 690, 980 910, 1000 910" />
+  <text class="label" x="928" y="676">student attachments</text>
+  <path class="crow" d="M 1000 910 l -10 -16 M 1000 910 l 0 -16 M 1000 910 l 10 -16" />
+  <text class="label" x="944" y="926">1:N</text>
+
+  <g transform="translate(60,1065)">
+    <rect class="legend-box" x="0" y="0" width="1730" height="115" />
+    <text class="note" x="20" y="28">Key design notes</text>
+    <text class="small" x="20" y="52">1. Portal students bind to a plan early via dtlms_portal_students.selected_plan_id; registration sets a default latest plan, draft save can change it, and submit confirms it.</text>
+    <text class="small" x="20" y="74">2. Recruitment applications are the formal submission header: they bind both the plan (plan_id) and the registered student (portal_student_id).</text>
+    <text class="small" x="20" y="96">3. Structured child tables hang off dtlms_recruitment_applications via application_id; profile data is a 1:1 extension of dtlms_portal_students.</text>
+  </g>
+</svg>

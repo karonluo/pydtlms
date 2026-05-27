@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_preferences (
     id BIGSERIAL PRIMARY KEY,
     application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
     preference_order INTEGER NOT NULL,
-    research_center_name VARCHAR(128) NOT NULL,
+    research_center_name VARCHAR(128),
     advisor_name VARCHAR(128),
     is_optional BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

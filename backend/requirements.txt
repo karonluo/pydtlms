@@ -16,3 +16,4 @@ svglib
 reportlab
 svgwrite
 openpyxl
+pypinyin

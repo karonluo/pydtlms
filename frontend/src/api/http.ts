@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 const REDIRECT_STORAGE_KEY = 'dtlms-post-login-redirect'
+export const DEFAULT_HTTP_TIMEOUT_MS = 30 * 60 * 1000
 
 
 function redirectToLogin() {
@@ -13,7 +14,7 @@ function redirectToLogin() {
 
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
-  timeout: 10000,
+  timeout: DEFAULT_HTTP_TIMEOUT_MS,
 })
 
 http.interceptors.request.use((config) => {

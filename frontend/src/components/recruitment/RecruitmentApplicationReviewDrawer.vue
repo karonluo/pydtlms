@@ -67,6 +67,10 @@ function displayDetailValue(value: unknown) {
   return String(value)
 }
 
+function backgroundAssessmentTagType(result: string | null | undefined) {
+  return String(result || '').trim() === '通过' ? 'success' : 'danger'
+}
+
 function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
   const preferred = String(fileName || '').trim()
   if (preferred) {
@@ -142,8 +146,85 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
       </section>
 
       <section class="detail-section">
+        <h3 class="dialog-section__title">背景评估</h3>
+        <div v-if="application.background_assessments?.length" class="detail-record-stack">
+          <article v-for="(item, index) in application.background_assessments" :key="`detail-background-assessment-${index}`" class="detail-record-card">
+            <div class="detail-record-card__header">
+              <strong>{{ item.evaluator_name || item.evaluator_username || `评估记录 ${index + 1}` }}</strong>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-item__label">评估人账号</span>
+                <span class="detail-item__value">{{ displayDetailValue(item.evaluator_username) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-item__label">角色</span>
+                <span class="detail-item__value">{{ displayDetailValue(item.evaluator_role_code) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-item__label">评估结果</span>
+                <span class="detail-item__value"><el-tag :type="backgroundAssessmentTagType(item.assessment_result)" round>{{ displayDetailValue(item.assessment_result) }}</el-tag></span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-item__label">评估时间</span>
+                <span class="detail-item__value">{{ displayDetailValue(item.assessed_at) }}</span>
+              </div>
+              <div class="detail-item detail-item--full">
+                <span class="detail-item__label">评估意见</span>
+                <span class="detail-item__value">{{ displayDetailValue(item.assessment_comment) }}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="empty-inline">当前还没有背景评估记录。</div>
+      </section>
+
+      <section class="detail-section">
         <h3 class="dialog-section__title">身份与联系信息</h3>
-        <div class="detail-grid">
+        <div v-if="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment" class="detail-text-list section-spacing-top">
+          <article class="detail-text-card">
+            <h4>个人简历附件</h4>
+            <div class="detail-attachment-actions detail-attachment-actions--stacked">
+              <a class="detail-attachment-link" :href="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment || '#'" target="_blank" rel="noopener noreferrer">
+                <el-icon><Document /></el-icon>
+                <span>{{ resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人简历附件') }}</span>
+              </a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人简历附件'))">
+                <el-icon><Download /></el-icon>
+                <span>下载</span>
+              </button>
+            </div>
+          </article>
+        </div>
+        <div class="detail-text-list section-spacing-top">
+          <article v-if="application.profile?.profile_photo_url" class="detail-text-card">
+            <h4>证件照</h4>
+            <div class="detail-attachment-actions detail-attachment-actions--stacked">
+              <a class="detail-attachment-link" :href="application.profile.profile_photo_url" target="_blank" rel="noopener noreferrer">
+                <el-icon><Document /></el-icon>
+                <span>{{ resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照') }}</span>
+              </a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.profile_photo_url, resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照'))">
+                <el-icon><Download /></el-icon>
+                <span>下载</span>
+              </button>
+            </div>
+          </article>
+          <article v-if="application.profile?.id_card_collage_url" class="detail-text-card">
+            <h4>身份证拼图</h4>
+            <div class="detail-attachment-actions detail-attachment-actions--stacked">
+              <a class="detail-attachment-link" :href="application.profile.id_card_collage_url" target="_blank" rel="noopener noreferrer">
+                <el-icon><Document /></el-icon>
+                <span>{{ resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图') }}</span>
+              </a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.id_card_collage_url, resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图'))">
+                <el-icon><Download /></el-icon>
+                <span>下载</span>
+              </button>
+            </div>
+          </article>
+        </div>
+        <div class="detail-grid section-spacing-top">
           <div class="detail-item"><span class="detail-item__label">姓名拼音</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.full_name_pinyin) }}</span></div>
           <div class="detail-item"><span class="detail-item__label">性别</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.gender || application.gender) }}</span></div>
           <div class="detail-item"><span class="detail-item__label">出生日期</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.birth_date) }}</span></div>
@@ -159,32 +240,6 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
           <div class="detail-item detail-item--full"><span class="detail-item__label">通讯地址</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.mailing_address || application.mailing_address) }}</span></div>
           <div class="detail-item"><span class="detail-item__label">紧急联系人</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.emergency_contact_name) }}</span></div>
           <div class="detail-item"><span class="detail-item__label">紧急联系人电话</span><span class="detail-item__value">{{ displayDetailValue(application.profile?.emergency_contact_phone) }}</span></div>
-          <div v-if="application.profile?.profile_photo_url" class="detail-item detail-item--full">
-            <span class="detail-item__label">证件照</span>
-            <div class="detail-attachment-actions">
-              <a class="detail-attachment-link" :href="application.profile.profile_photo_url" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.profile_photo_url, resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
-          </div>
-          <div v-if="application.profile?.id_card_collage_url" class="detail-item detail-item--full">
-            <span class="detail-item__label">身份证拼图</span>
-            <div class="detail-attachment-actions">
-              <a class="detail-attachment-link" :href="application.profile.id_card_collage_url" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.id_card_collage_url, resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -368,19 +423,6 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
       <section class="detail-section">
         <h3 class="dialog-section__title">附件材料</h3>
         <div class="detail-text-list">
-          <article v-if="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment" class="detail-text-card">
-            <h4>个人陈述附件</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment || '#'" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人陈述附件') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人陈述附件'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
-          </article>
           <article v-if="application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment" class="detail-text-card">
             <h4>补充材料附件</h4>
             <div class="detail-attachment-actions detail-attachment-actions--stacked">

@@ -842,6 +842,62 @@ class PostgresStateStoreSyncMixin:
                 self._sync_operation_log_in_tx(cur, operation_log)
             conn.commit()
 
+    def sync_recruitment_background_assessment(
+        self,
+        application_id: int,
+        assessment_payload: dict[str, Any],
+        application_payload: dict[str, Any],
+        workflow_task_payload: dict[str, Any],
+        operation_log: dict[str, Any] | None = None,
+        *,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_background_assessments (
+                        application_id, evaluator_user_id, evaluator_username, evaluator_name,
+                        evaluator_role_code, assessment_result, assessment_comment, assessed_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (application_id, evaluator_username) DO UPDATE
+                    SET evaluator_user_id = EXCLUDED.evaluator_user_id,
+                        evaluator_name = EXCLUDED.evaluator_name,
+                        evaluator_role_code = EXCLUDED.evaluator_role_code,
+                        assessment_result = EXCLUDED.assessment_result,
+                        assessment_comment = EXCLUDED.assessment_comment,
+                        assessed_at = EXCLUDED.assessed_at,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        int(application_id),
+                        assessment_payload.get("evaluator_user_id"),
+                        assessment_payload.get("evaluator_username"),
+                        assessment_payload.get("evaluator_name"),
+                        assessment_payload.get("evaluator_role_code"),
+                        assessment_payload.get("assessment_result"),
+                        assessment_payload.get("assessment_comment"),
+                        assessment_payload.get("assessed_at"),
+                    ),
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_recruitment_applications
+                    SET application_status = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    """,
+                    (
+                        self._map_application_status(str(application_payload.get("application_status") or "")),
+                        int(application_id),
+                    ),
+                )
+                self._sync_workflow_task_in_tx(cur, workflow_task_payload)
+                self._sync_operation_log_in_tx(cur, operation_log)
+            conn.commit()
+
     def delete_workflow_task(self, task_id: int, process_instance_id: str | None = None) -> None:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -1377,6 +1433,8 @@ class PostgresStateStoreSyncMixin:
                     )
 
                 for preference in draft.get("preferences", []):
+                    # Compatibility fallback: some environments may still keep research_center_name as NOT NULL.
+                    research_center_name = str(preference.get("research_center_name") or "").strip()
                     cur.execute(
                         """
                         INSERT INTO dtlms_portal_application_preferences (
@@ -1387,7 +1445,7 @@ class PostgresStateStoreSyncMixin:
                             application_id,
                             int(preference.get("preference_order") or 1),
                             int(preference.get("team_id") or 0) or None,
-                            preference.get("research_center_name"),
+                            research_center_name,
                             int(preference.get("advisor_user_id") or 0) or None,
                             preference.get("advisor_name"),
                             bool(preference.get("is_optional")),

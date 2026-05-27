@@ -19,9 +19,19 @@ import {
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { use, init, type ComposeOption, type ECharts } from 'echarts/core'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { getDashboardOverview, type DashboardMetricCard } from '../../api/dashboard'
+import {
+  getDashboardOverview,
+  getDashboardUndergraduateSchoolRankings,
+  getDashboardUndergraduateSchoolStudents,
+  type DashboardOverview,
+  type DashboardUndergraduateSchoolRankingItem,
+  type DashboardUndergraduateSchoolStudentItem,
+} from '../../api/dashboard'
+import RecruitmentPortalApplicationDrawer from '../../components/recruitment/RecruitmentPortalApplicationDrawer.vue'
+import { getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail } from '../../api/recruitment'
+import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
 import KpiCard from '../../components/dashboard/KpiCard.vue'
 
 use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
@@ -39,18 +49,26 @@ type StageNode = {
 }
 
 const chartRef = ref<HTMLDivElement>()
+const schoolRankingChartRef = ref<HTMLDivElement>()
 const loading = ref(false)
 const flowchartLaneRef = ref<HTMLDivElement>()
 const flowScrollState = ref({ left: 0, width: 0, scrollWidth: 0 })
-const overview = ref<{
-  lifecycle_coverage: DashboardMetricCard[]
-  recruitment_metrics: DashboardMetricCard[]
-  training_metrics: DashboardMetricCard[]
-  degree_metrics: DashboardMetricCard[]
-  workflow_metrics: DashboardMetricCard[]
-  alerts: Array<{ level: string; title: string; owner: string; due_text: string }>
-} | null>(null)
+const overview = ref<DashboardOverview | null>(null)
+const schoolRankings = ref<DashboardUndergraduateSchoolRankingItem[]>([])
+const schoolStudentDialogVisible = ref(false)
+const schoolStudentListLoading = ref(false)
+const selectedSchoolName = ref('')
+const selectedSchoolStudents = ref<DashboardUndergraduateSchoolStudentItem[]>([])
+const portalApplicationDetailVisible = ref(false)
+const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
+const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
+const portalWorkflowTaskLoading = ref(false)
+const portalWorkflowActionSubmitting = ref(false)
+const portalWorkflowCommentDialogVisible = ref(false)
+const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
+const portalWorkflowComment = ref('')
 let chart: ECharts | undefined
+let schoolRankingChart: ECharts | undefined
 
 const lifecycleStages: StageNode[] = [
   { step: '01', title: '招生准备', subtitle: '招生管理', bullets: ['维护招生计划', '核验报名材料', '组织资格初筛'], tone: 'ocean' },
@@ -144,9 +162,15 @@ function scrollFlowchart(direction: number) {
 async function loadOverview() {
   loading.value = true
   try {
-    const { data } = await getDashboardOverview()
-    overview.value = data
+    const [{ data: overviewData }, { data: rankingData }] = await Promise.all([
+      getDashboardOverview(),
+      getDashboardUndergraduateSchoolRankings(20),
+    ])
+    overview.value = overviewData
+    schoolRankings.value = rankingData.items
+    await nextTick()
     renderChart()
+    renderSchoolRankingChart()
     updateFlowScrollState()
   } catch {
     ElMessage.error('驾驶舱数据加载失败')
@@ -205,8 +229,171 @@ function renderChart() {
   chart.setOption(option)
 }
 
+function renderSchoolRankingChart() {
+  if (!schoolRankingChartRef.value) {
+    return
+  }
+
+  schoolRankingChart?.dispose()
+  schoolRankingChart = undefined
+  if (!schoolRankings.value.length) {
+    return
+  }
+
+  schoolRankingChart = init(schoolRankingChartRef.value)
+  const option: DashboardChartOption = {
+    color: ['#36b59a'],
+    tooltip: {
+      trigger: 'item',
+      formatter: (params: any) => `${params?.name || ''}<br/>报名学生 ${params?.value || 0} 名`,
+    },
+    grid: { left: 24, right: 24, top: 16, bottom: 18, containLabel: true },
+    xAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: '#eaf1fb' } },
+    },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: schoolRankings.value.map((item) => item.school_name),
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: {
+        color: '#36506c',
+        width: 160,
+        overflow: 'truncate',
+      },
+    },
+    series: [
+      {
+        type: 'bar',
+        barWidth: 16,
+        data: schoolRankings.value.map((item) => item.student_count),
+        itemStyle: { borderRadius: [0, 10, 10, 0] },
+        label: {
+          show: true,
+          position: 'right',
+          color: '#24415f',
+        },
+      },
+    ],
+  }
+  schoolRankingChart.setOption(option)
+  schoolRankingChart.on('click', (params: { name?: string }) => {
+    const schoolName = String(params.name || '').trim()
+    if (schoolName) {
+      void openSchoolStudentDialog(schoolName)
+    }
+  })
+}
+
+async function openSchoolStudentDialog(schoolName: string) {
+  selectedSchoolName.value = schoolName
+  schoolStudentDialogVisible.value = true
+  schoolStudentListLoading.value = true
+  try {
+    const { data } = await getDashboardUndergraduateSchoolStudents(schoolName)
+    selectedSchoolStudents.value = data.items
+  } catch {
+    selectedSchoolStudents.value = []
+    ElMessage.error('加载院校报名学生清单失败')
+  } finally {
+    schoolStudentListLoading.value = false
+  }
+}
+
+async function openPortalApplicationDetail(row: DashboardUndergraduateSchoolStudentItem) {
+  if (!row.recruitment_application_id) {
+    ElMessage.warning('当前学生缺少报名申请记录')
+    return
+  }
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.recruitment_application_id)
+    portalViewingApplication.value = response.data
+    portalApplicationDetailVisible.value = true
+    await loadPortalViewingWorkflowTask(response.data.business_key)
+  } catch {
+    portalViewingWorkflowTask.value = null
+    ElMessage.error('加载学生报名详情失败')
+  }
+}
+
+async function loadPortalViewingWorkflowTask(businessKey?: string | null) {
+  const normalizedKey = String(businessKey || '').trim()
+  portalViewingWorkflowTask.value = null
+  if (!normalizedKey) {
+    return
+  }
+  portalWorkflowTaskLoading.value = true
+  try {
+    const response = await listWorkflowTasks({ page: 1, page_size: 20, module: '招生管理', keyword: normalizedKey })
+    portalViewingWorkflowTask.value = response.data.items.find((item) => item.business_key === normalizedKey) || null
+  } catch {
+    ElMessage.error('加载审批任务失败')
+    portalViewingWorkflowTask.value = null
+  } finally {
+    portalWorkflowTaskLoading.value = false
+  }
+}
+
+function handlePortalWorkflowAction(action: WorkflowActionOption) {
+  if (!portalViewingWorkflowTask.value) {
+    ElMessage.warning('当前未找到可执行的审批任务')
+    return
+  }
+  pendingPortalWorkflowAction.value = action
+  portalWorkflowComment.value = ''
+  portalWorkflowCommentDialogVisible.value = true
+}
+
+async function submitPortalWorkflowCommentDialog() {
+  if (!portalViewingWorkflowTask.value || !pendingPortalWorkflowAction.value) {
+    return
+  }
+  const currentAction = pendingPortalWorkflowAction.value
+  portalWorkflowActionSubmitting.value = true
+  try {
+    await executeWorkflowTaskAction(portalViewingWorkflowTask.value.id, {
+      action: currentAction.action,
+      comment: portalWorkflowComment.value.trim() || undefined,
+    })
+    portalWorkflowCommentDialogVisible.value = false
+    portalApplicationDetailVisible.value = false
+    portalViewingApplication.value = null
+    portalViewingWorkflowTask.value = null
+    ElMessage.success(`${currentAction.label}已完成`)
+    await loadOverview()
+    if (selectedSchoolName.value) {
+      await openSchoolStudentDialog(selectedSchoolName.value)
+    }
+  } catch {
+    ElMessage.error(`${currentAction.label}失败`)
+  } finally {
+    portalWorkflowActionSubmitting.value = false
+  }
+}
+
+function resetPortalWorkflowCommentDialog() {
+  pendingPortalWorkflowAction.value = null
+  portalWorkflowComment.value = ''
+}
+
+watch(() => portalWorkflowCommentDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalWorkflowCommentDialog()
+  }
+})
+
+watch(() => portalApplicationDetailVisible.value, (visible) => {
+  if (!visible) {
+    portalViewingApplication.value = null
+    portalViewingWorkflowTask.value = null
+  }
+})
+
 function handleResize() {
   chart?.resize()
+  schoolRankingChart?.resize()
   updateFlowScrollState()
 }
 
@@ -218,6 +405,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   chart?.dispose()
+  schoolRankingChart?.dispose()
 })
 </script>
 
@@ -290,6 +478,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <section class="page-card dashboard-panel full-span">
+      <div class="page-heading">
+        <div>
+          <h2>本科院校报名人数前二十</h2>
+          <p>按最新报名申请统计本科院校来源分布。点击柱状图可查看该院校学生清单，并继续打开完整报名信息。</p>
+        </div>
+      </div>
+
+      <div class="school-ranking-shell">
+        <div class="school-ranking-summary">
+          <strong>统计口径：门户注册学生的最新报名申请</strong>
+          <!-- <span>展示前二十名本科学校。若同一学生存在多次申请，仅按最新一条报名申请计入排名。</span> -->
+        </div>
+        <div v-if="schoolRankings.length" ref="schoolRankingChartRef" class="chart-panel school-ranking-chart"></div>
+        <div v-else class="dashboard-empty">当前暂无可展示的本科院校报名数据。</div>
+      </div>
+    </section>
+
     <section class="page-card dashboard-panel chart-span">
       <div class="page-heading">
         <div>
@@ -317,6 +523,65 @@ onBeforeUnmount(() => {
         </li>
       </ul>
     </section>
+
+    <el-dialog v-model="schoolStudentDialogVisible" :title="`${selectedSchoolName || '本科院校'}报名学生清单`" width="960px" destroy-on-close>
+      <div class="school-student-summary">共 {{ selectedSchoolStudents.length }} 名学生</div>
+      <el-table :data="selectedSchoolStudents" v-loading="schoolStudentListLoading" border stripe>
+        <el-table-column label="学生名称" min-width="160">
+          <template #default="scope">
+            <el-button link type="primary" @click="openPortalApplicationDetail(scope.row)">
+              {{ scope.row.student_name || '未命名学生' }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="candidate_no" label="报名号" min-width="140">
+          <template #default="scope">{{ scope.row.candidate_no || '未生成' }}</template>
+        </el-table-column>
+        <el-table-column prop="registered_at" label="注册日期" min-width="180">
+          <template #default="scope">{{ scope.row.registered_at || '未记录' }}</template>
+        </el-table-column>
+        <el-table-column prop="phone_number" label="手机" min-width="140">
+          <template #default="scope">{{ scope.row.phone_number || '未填写' }}</template>
+        </el-table-column>
+        <el-table-column prop="email" label="邮件" min-width="220">
+          <template #default="scope">{{ scope.row.email || '未填写' }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <RecruitmentPortalApplicationDrawer
+      v-model="portalApplicationDetailVisible"
+      :detail="portalViewingApplication"
+      :workflow-task="portalViewingWorkflowTask"
+      :workflow-task-loading="portalWorkflowTaskLoading"
+      :action-loading="portalWorkflowActionSubmitting"
+      @execute-action="handlePortalWorkflowAction"
+    />
+
+    <el-dialog
+      v-model="portalWorkflowCommentDialogVisible"
+      :title="pendingPortalWorkflowAction ? pendingPortalWorkflowAction.label : '审批处理'"
+      width="640px"
+      destroy-on-close
+    >
+      <div class="workflow-comment-dialog">
+        <p class="workflow-comment-dialog__hint">请输入审批意见，可留空后直接提交。</p>
+        <el-input
+          v-model="portalWorkflowComment"
+          type="textarea"
+          :rows="5"
+          maxlength="500"
+          show-word-limit
+          placeholder="审批意见（可选）"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="portalWorkflowCommentDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalWorkflowActionSubmitting" @click="submitPortalWorkflowCommentDialog">
+          {{ pendingPortalWorkflowAction?.label || '确认' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -601,6 +866,62 @@ onBeforeUnmount(() => {
   height: 350px;
 }
 
+.school-ranking-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.school-ranking-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(54, 181, 154, 0.12), rgba(46, 155, 234, 0.1));
+}
+
+.school-ranking-summary strong {
+  color: var(--text-main);
+}
+
+.school-ranking-summary span {
+  max-width: 540px;
+  color: var(--text-subtle);
+  line-height: 1.7;
+}
+
+.school-ranking-chart {
+  height: 460px;
+}
+
+.dashboard-empty {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
+  padding: 24px;
+  border: 1px dashed rgba(53, 108, 184, 0.22);
+  border-radius: 24px;
+  color: var(--text-subtle);
+  background: linear-gradient(135deg, rgba(247, 251, 255, 0.96), rgba(241, 248, 255, 0.92));
+}
+
+.school-student-summary {
+  margin-bottom: 12px;
+  color: var(--text-subtle);
+}
+
+.workflow-comment-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workflow-comment-dialog__hint {
+  margin: 0;
+  color: var(--text-subtle);
+}
+
 .alert-list {
   display: grid;
   gap: 12px;
@@ -650,6 +971,10 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .flowchart-header {
+    flex-direction: column;
+  }
+
+  .school-ranking-summary {
     flex-direction: column;
   }
 }

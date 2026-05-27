@@ -77,6 +77,26 @@ def test_build_registered_portal_students_template_strips_illegal_excel_characte
     assert exported_row["科研成果1论文标题"] == "FED-DUET: DUAL EXPERT-ORCHESTRATED FRAMEWORK FOR CONTINUAL FEDERATED VISION LANGUAGE LEARNING"
 
 
+def test_build_registered_portal_students_template_strips_xml_invalid_noncharacters() -> None:
+    content = build_registered_portal_students_template(
+        [
+            {
+                "full_name": "测试学生",
+                "personal_profile": "含有非法字符\uffff的简介",
+            }
+        ]
+    )
+
+    workbook = load_workbook(BytesIO(content), data_only=True)
+    worksheet = workbook.active
+    headers = [cell.value for cell in worksheet[1]]
+    values = [cell.value for cell in worksheet[2]]
+    exported_row = dict(zip(headers, values, strict=False))
+
+    assert exported_row["姓名"] == "测试学生"
+    assert exported_row["个人简介"] == "含有非法字符的简介"
+
+
 def test_build_registered_portal_students_template_uses_max_repeated_group_count() -> None:
     content = build_registered_portal_students_template(
         [

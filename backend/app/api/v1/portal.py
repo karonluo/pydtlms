@@ -1,3 +1,4 @@
+import logging
 from mimetypes import guess_type
 from pathlib import Path
 from time import perf_counter
@@ -52,6 +53,7 @@ from app.services.dashboard_service import (
 
 
 router = APIRouter(prefix="/portal", tags=["portal"])
+logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 PORTAL_AUTH_TIMEOUT_SECONDS = 10.0
 PORTAL_FORM_TIMEOUT_SECONDS = 60.0
@@ -579,6 +581,19 @@ def portal_submit_application(
             failure_detail=str(exc),
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Portal application submission failed unexpectedly for student %s", student_id)
+        _record_portal_api_operation(
+            entity_name="报名提交",
+            entity_id=str(student_id),
+            action="提交报名",
+            operator_username=operator_username,
+            summary_prefix=summary_prefix,
+            started_at=started_at,
+            timeout_seconds=PORTAL_FORM_TIMEOUT_SECONDS,
+            failure_detail=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc) or "提交失败") from exc
 
 
 @router.post("/applications/draft", response_model=PortalApplicationDraftSaveResponse)
@@ -626,3 +641,16 @@ def portal_save_application_draft(
             failure_detail=str(exc),
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Portal application draft save failed unexpectedly for student %s", student_id)
+        _record_portal_api_operation(
+            entity_name="申请草稿",
+            entity_id=str(student_id),
+            action="保存草稿",
+            operator_username=operator_username,
+            summary_prefix=summary_prefix,
+            started_at=started_at,
+            timeout_seconds=PORTAL_FORM_TIMEOUT_SECONDS,
+            failure_detail=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc) or "草稿保存失败") from exc

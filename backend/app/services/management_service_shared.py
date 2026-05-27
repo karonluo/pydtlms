@@ -37,7 +37,14 @@ from app.schemas.portal import (
     PortalTeamListResponse,
     PortalTeamRecord,
 )
-from app.schemas.dashboard import DashboardAlert, DashboardOverview, MetricCard
+from app.schemas.dashboard import (
+    DashboardAlert,
+    DashboardOverview,
+    DashboardUndergraduateSchoolRankingItem,
+    DashboardUndergraduateSchoolStudentItem,
+    DashboardUndergraduateSchoolStudentListResponse,
+    MetricCard,
+)
 from app.schemas.recruitment import (
     RecruitApplicationImportIssue,
     RecruitApplicationImportResult,
@@ -103,6 +110,8 @@ from app.schemas.system import (
     SystemArchitecture,
     SystemOptionsResponse,
     SystemStats,
+    SystemUserImportIssue,
+    SystemUserImportResult,
     SystemUserListResponse,
     SystemUserRecord,
     SystemUserUpsert,
@@ -143,7 +152,7 @@ ListItemT = TypeVar("ListItemT")
 logger = logging.getLogger(__name__)
 FINAL_WORKFLOW_STATUSES = {"已通过", "已驳回"}
 PORTAL_RESUBMITTABLE_APPLICATION_STATUSES = {"驳回重填", "不录取"}
-ADMITTED_RECRUITMENT_APPLICATION_STATUSES = {"资格审核通过", "材料评分中", "面试待安排", "面试完成", "预录取", "同意录取"}
+ADMITTED_RECRUITMENT_APPLICATION_STATUSES = {"材料评分中", "面试待安排", "面试完成", "预录取", "同意录取"}
 PORTAL_REGISTRATION_EMAIL_CODE_LENGTH = 6
 PORTAL_REGISTRATION_EMAIL_CODE_EXPIRES_SECONDS = 10 * 60
 PORTAL_REGISTRATION_EMAIL_CODE_COOLDOWN_SECONDS = 60
@@ -235,7 +244,8 @@ USER_PROFILE_CACHE_TTL_SECONDS = 300
 CACHE_REBUILD_LOCKS: dict[str, Lock] = {}
 CACHE_REBUILD_LOCKS_GUARD = Lock()
 ROLE_DISPLAY_NAMES = {
-    "platform_admin": "学合管理员",
+    "platform_admin": "平台管理员",
+    "AILABMGT": "书院管理员",
     "advisor": "导师",
     "secretary": "学位秘书",
 }
@@ -258,14 +268,14 @@ MANAGED_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "nodes": {
             "qualification_review": {
                 "label": "资格审核",
-                "handler_roles": ["platform_admin"],
+                "handler_roles": ["AILABMGT"],
                 "due_days": 1,
                 "actions": {
                     "approve": {
-                        "label": "资格通过",
-                        "next_node": "qualification_passed",
+                        "label": "审核通过",
+                        "next_node": "background_assessment",
                         "task_status": "处理中",
-                        "field_updates": {"application_status": "资格审核通过"},
+                        "field_updates": {"application_status": "待背景评估"},
                     },
                     "reject": {
                         "label": "审核不通过",
@@ -274,6 +284,43 @@ MANAGED_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
                         "field_updates": {"application_status": "驳回重填"},
                     },
                 },
+            },
+            "background_assessment": {
+                "label": "背景评估",
+                "handler_roles": ["AILABMGT"],
+                "due_days": 2,
+                "actions": {
+                    "approve": {
+                        "label": "评估通过",
+                        "next_node": "center_assessment",
+                        "task_status": "处理中",
+                        "field_updates": {"application_status": "待中心考核"},
+                    },
+                    "reject": {
+                        "label": "评估不通过",
+                        "next_node": None,
+                        "task_status": "已驳回",
+                        "field_updates": {"application_status": "报名终止"},
+                    },
+                },
+            },
+            "center_assessment": {
+                "label": "中心考核",
+                "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {},
+            },
+            "result_publish": {
+                "label": "结果公布",
+                "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {},
+            },
+            "pre_admission": {
+                "label": "预录取",
+                "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {},
             },
             "qualification_passed": {
                 "label": "评分准备",

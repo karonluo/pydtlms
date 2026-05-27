@@ -85,6 +85,54 @@ class SystemUserListResponse(PaginationResponseBase):
     items: list[SystemUserRecord]
 
 
+class SystemUserExportRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+    keyword: str | None = None
+    role_code: str | None = None
+    account_status: str | None = None
+    department_name: str | None = None
+
+
+class SystemUserImportIssue(BaseModel):
+    row_number: int
+    full_name: str | None = None
+    username: str | None = None
+    reason: str
+
+
+class SystemUserImportRow(BaseModel):
+    row_number: int
+    username: str | None = None
+    full_name: str | None = None
+    role_name: str | None = None
+    role_code: str | None = None
+    department_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    account_status: str | None = None
+    introduction: str | None = None
+    password: str | None = None
+
+
+class SystemUserImportParseResult(BaseModel):
+    total_count: int
+    rows: list[SystemUserImportRow] = Field(default_factory=list)
+
+
+class SystemUserImportBatchRequest(BaseModel):
+    rows: list[SystemUserImportRow] = Field(default_factory=list)
+
+
+class SystemUserImportResult(BaseModel):
+    total_count: int
+    success_count: int
+    created_count: int
+    updated_count: int
+    failed_count: int
+    issues: list[SystemUserImportIssue] = Field(default_factory=list)
+    message: str
+
+
 class AuditPolicyRecord(BaseModel):
     id: int
     item: str

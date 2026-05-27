@@ -9,6 +9,7 @@
 - student-master-data-and-teams：学生主档、团队与导师归属维护
 - training-degree-lifecycle：培养、科研报告、外出研修、论文与学位阶段维护
 - system-governance-admin：系统用户、角色、字典、审计与日志治理维护
+- sql-powerdesigner-pdm-generation：从 PostgreSQL schema 生成并验证 PowerDesigner 16.5 可打开的 PDM 文档
 
 说明：
 

@@ -28,6 +28,17 @@ export type RecruitPlanRecord = {
 export type RecruitPlanUpsert = Omit<RecruitPlanRecord, 'id' | 'academic_term' | 'application_count'>
 
 
+export type BackgroundAssessmentRecord = {
+  evaluator_user_id?: number | null
+  evaluator_username: string
+  evaluator_name?: string | null
+  evaluator_role_code: string
+  assessment_result: string
+  assessment_comment?: string | null
+  assessed_at?: string | null
+}
+
+
 export type RecruitApplicationRecord = {
   id: number
   plan_id: number
@@ -88,6 +99,7 @@ export type RecruitApplicationRecord = {
   application_status: string
   reviewer_name?: string | null
   final_score?: number | null
+  background_assessments?: BackgroundAssessmentRecord[]
   profile?: PortalApplicantProfileData | null
   preferences?: PortalApplicationPreferenceItem[]
   education_experiences?: PortalEducationExperienceItem[]
@@ -118,6 +130,7 @@ export type RecruitPortalApplicationDetail = {
   material_status: string
   reviewer_name?: string | null
   submitted_at?: string | null
+  background_assessments?: BackgroundAssessmentRecord[]
   profile?: PortalApplicantProfileData | null
   source_channel?: string | null
   source_channel_other?: string | null

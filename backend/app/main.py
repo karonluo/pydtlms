@@ -9,7 +9,7 @@ from app.api.v1 import auth, dashboard, degree, portal, recruitment, students, s
 from app.core.config import settings
 from app.core.exceptions import DatabaseUnavailableError
 from app.core.logging import configure_logging
-from app.services.management_service import repair_startup_postgres_state, warm_up_runtime_management_store
+from app.services.management_service import warm_up_runtime_management_store
 
 
 logger = configure_logging()
@@ -140,11 +140,6 @@ def on_startup() -> None:
     startup_begin = perf_counter()
     if settings.frontend_dev_proxy_enabled:
         logger.info("Frontend dev proxy enabled: %s", settings.frontend_dev_proxy_target)
-    repair_result = repair_startup_postgres_state()
-    logger.info(
-        "Startup PostgreSQL repairs complete, renamed recruitment application keys: %s",
-        repair_result["renamed_recruitment_application_keys"],
-    )
     warmup_elapsed = warm_up_runtime_management_store()
     logger.info("Runtime management store warmed up in %.3fs", warmup_elapsed)
     logger.info("DTLMS backend startup complete in %.3fs", perf_counter() - startup_begin)

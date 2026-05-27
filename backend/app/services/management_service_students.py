@@ -53,6 +53,7 @@ class RuntimeManagementStoreStudentsMixin:
                 list(job.get("student_ids") or []),
                 keyword=job.get("keyword"),
                 application_form_status=job.get("application_form_status"),
+                advisor_names=list(job.get("advisor_names") or []),
             )
             temp_dir = Path(tempfile.gettempdir()) / "pydtlms-export-jobs"
             temp_dir.mkdir(parents=True, exist_ok=True)
@@ -103,6 +104,7 @@ class RuntimeManagementStoreStudentsMixin:
             "student_ids": list(payload.ids),
             "keyword": payload.keyword,
             "application_form_status": payload.application_form_status,
+            "advisor_names": list(payload.advisor_names),
         }
         with self._registered_portal_export_jobs_lock:
             self._registered_portal_export_jobs[job_id] = job
@@ -227,6 +229,7 @@ class RuntimeManagementStoreStudentsMixin:
         *,
         keyword: str | None,
         application_form_status: str | None,
+        advisor_names: list[str] | None,
     ) -> list[int]:
         normalized_ids: list[int] = []
         seen_ids: set[int] = set()
@@ -243,6 +246,7 @@ class RuntimeManagementStoreStudentsMixin:
         response = self.get_registered_portal_students(
             keyword=keyword,
             application_form_status=application_form_status,
+            advisor_names=advisor_names,
             page=1,
             page_size=total_hint,
         )
@@ -643,6 +647,7 @@ class RuntimeManagementStoreStudentsMixin:
         self,
         keyword: str | None = None,
         application_form_status: str | None = None,
+        advisor_names: list[str] | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> RegisteredPortalStudentListResponse:
@@ -650,6 +655,7 @@ class RuntimeManagementStoreStudentsMixin:
             items, total = self._postgres_store.list_registered_portal_students_page(
                 keyword=keyword,
                 application_form_status=application_form_status,
+                advisor_names=advisor_names,
                 page=page,
                 page_size=page_size,
             )
@@ -665,11 +671,13 @@ class RuntimeManagementStoreStudentsMixin:
         *,
         keyword: str | None = None,
         application_form_status: str | None = None,
+        advisor_names: list[str] | None = None,
     ) -> bytes:
         normalized_ids = self._resolve_registered_portal_student_export_ids(
             student_ids,
             keyword=keyword,
             application_form_status=application_form_status,
+            advisor_names=advisor_names,
         )
         if not normalized_ids:
             raise ValueError("当前筛选条件下无可导出的注册学生")

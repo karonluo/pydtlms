@@ -9,8 +9,10 @@ from app.schemas.portal import PortalStudentRecord
 from app.schemas.recruitment import RecruitApplicationRecord, RecruitPlanUpsert
 from app.schemas.system import RoleUpsert, SystemUserUpsert
 from app.schemas.student import CenterUpsert
+from app.schemas.student import CenterListResponse
 from app.core.exceptions import DatabaseUnavailableError
 from app.services.management_service import LazyRuntimeManagementStore, RuntimeManagementStore
+from app.services.management_service_shared import PASSWORD_CONTEXT
 from app.services.management_service_students import RuntimeManagementStoreStudentsMixin
 from app.services.recruitment_excel_service import build_registered_portal_students_template
 from app.services.runtime_seed_data import build_runtime_seed_state
@@ -38,6 +40,7 @@ class FakePostgresStateStore:
         self.deleted_recruitment_plan_ids: list[int] = []
         self.portal_application_submissions: list[dict] = []
         self.updated_recruitment_applications: list[dict] = []
+        self.background_assessments: list[dict] = []
         self.saved_states: list[dict] = []
         self.synced_workflow_tasks: list[dict] = []
         self.synced_roles: list[dict] = []
@@ -231,6 +234,33 @@ class FakePostgresStateStore:
     def sync_recruitment_application_status(self, application_id, payload) -> None:
         self.updated_recruitment_applications.append({"application_id": int(application_id), "payload": dict(payload)})
 
+    def list_background_assessments(self, application_id: int) -> list[dict]:
+        return [dict(item) for item in self.background_assessments if int(item.get("application_id") or 0) == int(application_id)]
+
+    def sync_recruitment_background_assessment(
+        self,
+        application_id,
+        assessment_payload,
+        application_payload,
+        workflow_task_payload,
+        operation_log=None,
+        *,
+        counters=None,
+    ) -> None:
+        normalized_application_id = int(application_id)
+        incoming = dict(assessment_payload)
+        self.background_assessments = [
+            item
+            for item in self.background_assessments
+            if not (
+                int(item.get("application_id") or 0) == normalized_application_id
+                and str(item.get("evaluator_username") or "") == str(incoming.get("evaluator_username") or "")
+            )
+        ]
+        self.background_assessments.append({**incoming, "application_id": normalized_application_id})
+        self.updated_recruitment_applications.append({"application_id": normalized_application_id, "payload": dict(application_payload)})
+        self.synced_workflow_tasks.append({"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters})
+
     def sync_workflow_task(self, task_payload, operation_log=None, *, counters=None) -> None:
         self.synced_workflow_tasks.append({"task_payload": dict(task_payload), "operation_log": operation_log, "counters": counters})
 
@@ -299,6 +329,64 @@ class FakePostgresStateStore:
             str(row.get("username") or "") == normalized_username and (excluded is None or int(row.get("id") or 0) != excluded)
             for row in self.system_user_rows.values()
         )
+
+    def list_system_users_page(
+        self,
+        keyword: str | None = None,
+        role_code: str | None = None,
+        account_status: str | None = None,
+        department_name: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict], int]:
+        if not self.system_user_rows:
+            raise AttributeError("list_system_users_page")
+
+        runtime_state = self.load_state() or {}
+        role_rows = self.role_rows
+        if role_rows is None:
+            role_rows = [dict(item) for item in runtime_state.get("roles", [])]
+        profile_rows = self.profile_rows
+        if profile_rows is None:
+            profile_rows = {key: dict(value) for key, value in (runtime_state.get("profiles", {}) or {}).items()}
+
+        items: list[dict] = []
+        for row in sorted(self.system_user_rows.values(), key=lambda item: int(item.get("id") or 0), reverse=True):
+            profile = dict(profile_rows.get(str(row.get("username") or ""), {}))
+            role = next((item for item in role_rows if str(item.get("role_code") or "") == str(row.get("role_code") or "")), None)
+            items.append(
+                {
+                    **dict(row),
+                    "role_name": (role or {}).get("role_name") or row.get("role_code") or "",
+                    "department_name": profile.get("department_name") or row.get("department_name") or "",
+                    "introduction": profile.get("introduction") or row.get("introduction"),
+                    "email": profile.get("email") or row.get("email"),
+                    "phone_number": profile.get("phone_number") or row.get("phone_number"),
+                    "account_status": row.get("account_status") or ("启用" if row.get("is_active", True) else "停用"),
+                }
+            )
+
+        def _contains(source: str | None, target: str | None) -> bool:
+            if not target:
+                return True
+            return str(target).lower() in str(source or "").lower()
+
+        filtered = [
+            item for item in items
+            if _contains(item.get("username"), keyword)
+            or _contains(item.get("full_name"), keyword)
+            or _contains(item.get("department_name"), keyword)
+        ] if keyword else list(items)
+        if role_code:
+            filtered = [item for item in filtered if str(item.get("role_code") or "") == str(role_code)]
+        if account_status:
+            filtered = [item for item in filtered if str(item.get("account_status") or "") == str(account_status)]
+        if department_name:
+            filtered = [item for item in filtered if _contains(item.get("department_name"), department_name)]
+
+        total = len(filtered)
+        offset = max(page - 1, 0) * page_size
+        return filtered[offset: offset + page_size], total
 
 
 class FakeNotificationEmailService:
@@ -760,6 +848,38 @@ def test_get_portal_profile_options_includes_advisor_introduction(monkeypatch) -
     assert options.advisor_options[0].introduction == "长期从事具身智能与多模态学习研究。"
 
 
+def test_get_student_options_registered_portal_advisor_filter_includes_disabled_advisors(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.system_user_rows[901] = {
+        "id": 901,
+        "username": "liu.ya",
+        "full_name": "刘亚",
+        "role_code": "advisor",
+        "department_name": "智能制造学院",
+        "account_status": "启用",
+    }
+    fake_postgres.system_user_rows[902] = {
+        "id": 902,
+        "username": "yuan.ye",
+        "full_name": "袁野",
+        "role_code": "advisor",
+        "department_name": "工业软件学院",
+        "account_status": "停用",
+    }
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    monkeypatch.setattr(store, "get_centers", lambda *args, **kwargs: CenterListResponse(items=[], total=0, page=1, page_size=1000))
+    options = store.get_student_options()
+
+    values = [item.value for item in options.registered_portal_advisor_filter_options]
+    labels = [item.label for item in options.registered_portal_advisor_filter_options]
+
+    assert "刘亚" in values
+    assert "袁野" in values
+    assert any(label == "袁野（停用）" for label in labels)
+
+
 def test_create_recruitment_plan_keeps_internal_defaults_while_returning_trimmed_record(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -860,6 +980,55 @@ def test_get_workflow_task_detail_allows_custom_role_with_matching_permissions(m
     )
 
     assert [item.label for item in detail["task"].available_actions] == ["资格通过", "审核不通过"]
+
+
+def test_get_workflow_task_detail_hides_background_assessment_actions_after_same_reviewer_completed(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.workflow_task_snapshot = {
+        "id": 88,
+        "workflow_name": "招生申请审批",
+        "business_module": "招生管理",
+        "business_key": "SH20270388",
+        "title": "报名审核任务",
+        "applicant_name": "张三",
+        "current_handler": "书院管理员",
+        "current_node": "背景评估",
+        "priority": "高",
+        "status": "处理中",
+        "created_at": "2026-05-27 09:00:00",
+        "due_at": "2026-05-29 18:00:00",
+        "flow_code": "recruitment_application",
+        "node_key": "background_assessment",
+        "entity_id": 34,
+        "candidate_groups": ["AILABMGT"],
+        "history": [],
+    }
+    fake_postgres.background_assessments = [
+        {
+            "application_id": 34,
+            "evaluator_username": "lixiaoyu",
+            "evaluator_name": "李晓宇",
+            "evaluator_role_code": "AILABMGT",
+            "assessment_result": "通过",
+            "assessment_comment": "已评估",
+            "assessed_at": "2026-05-27 10:00:00",
+        }
+    ]
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    detail = store.get_workflow_task_detail(
+        88,
+        {
+            "username": "lixiaoyu",
+            "full_name": "李晓宇",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    assert detail["task"].current_node == "背景评估"
+    assert detail["task"].available_actions == []
 
 
 def test_get_workflow_tasks_allows_custom_role_with_matching_permissions(monkeypatch) -> None:
@@ -1078,15 +1247,101 @@ def test_execute_workflow_action_sends_recruitment_pass_email(monkeypatch) -> No
         principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
     )
 
-    assert fake_mailer.recruitment_status_calls == [
-        {
-            "student_name": "邮件联调考生",
-            "email": "candidate-email@example.com",
-            "business_key": application.business_key,
-            "application_status": "资格审核通过",
-            "plan_name": "2026 秋季博士招生",
-        }
-    ]
+    assert fake_mailer.recruitment_status_calls == []
+
+
+def test_execute_workflow_action_background_assessment_two_passes_advances_to_center_assessment(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload(),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "资料审核通过",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert current_task["node_key"] == "background_assessment"
+    assert current_application["application_status"] == "待背景评估"
+
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "第一位书院管理员通过",
+        principal={"username": "reviewer.a", "full_name": "评估人甲", "roles": ["platform_admin"]},
+    )
+
+    mid_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    mid_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert mid_task["node_key"] == "background_assessment"
+    assert mid_application["application_status"] == "待背景评估"
+    assert len(fake_postgres.list_background_assessments(application.id)) == 1
+
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "第二位书院管理员通过",
+        principal={"username": "reviewer.b", "full_name": "评估人乙", "roles": ["platform_admin"]},
+    )
+
+    completed_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    completed_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert completed_task["node_key"] == "center_assessment"
+    assert completed_application["application_status"] == "待中心考核"
+    assert len(fake_postgres.list_background_assessments(application.id)) == 2
+    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "待中心考核"
+
+
+def test_execute_workflow_action_background_assessment_two_rejects_terminates_application(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(update={"email": "background-reject@example.com"}),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "资料审核通过",
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    store.execute_workflow_action(
+        task_id,
+        "reject",
+        "第一位书院管理员不通过",
+        principal={"username": "reviewer.a", "full_name": "评估人甲", "roles": ["platform_admin"]},
+    )
+    store.execute_workflow_action(
+        task_id,
+        "reject",
+        "第二位书院管理员不通过",
+        principal={"username": "reviewer.b", "full_name": "评估人乙", "roles": ["platform_admin"]},
+    )
+
+    completed_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    completed_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert completed_task["node_key"] is None
+    assert completed_task["status"] == "已驳回"
+    assert completed_application["application_status"] == "报名终止"
+    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "报名终止"
 
 
 def test_execute_workflow_action_rejects_role_without_workflow_permissions(monkeypatch) -> None:
@@ -1115,7 +1370,7 @@ def test_execute_workflow_action_rejects_role_without_workflow_permissions(monke
         )
 
 
-def test_execute_workflow_action_creates_student_master_and_sends_reject_email(monkeypatch) -> None:
+def test_execute_workflow_action_qualification_approve_enters_background_assessment_and_reject_still_sends_email(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     fake_mailer = FakeNotificationEmailService()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -1149,11 +1404,11 @@ def test_execute_workflow_action_creates_student_master_and_sends_reject_email(m
         principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
     )
 
-    created_student = next(item for item in store.state["students"] if item["full_name"] == "邮件联调考生")
-    assert created_student["full_name"] == "邮件联调考生"
-    assert created_student["team_name"] == available_team.team_name
-    assert created_student["advisor_name"] == "刘亚"
-    assert created_student["student_no"].startswith("D")
+    approved_application = next(item for item in store.state["recruitment_applications"] if item["business_key"] == application.application_business_key)
+    approved_task = next(item for item in store.state["workflow_tasks"] if item["business_key"] == application.application_business_key)
+    assert approved_application["application_status"] == "待背景评估"
+    assert approved_task["node_key"] == "background_assessment"
+    assert not any(item["full_name"] == "邮件联调考生" for item in store.state["students"])
 
     rejected_application = store.create_recruitment_application(
         _build_recruitment_application_payload().model_copy(update={"email": "candidate-reject@example.com", "phone_number": "13800009998", "id_number": "32000019990101124X", "student_name": "驳回联调考生"}),
@@ -1176,7 +1431,7 @@ def test_execute_workflow_action_creates_student_master_and_sends_reject_email(m
     }
 
 
-def test_execute_workflow_action_creates_student_master_with_portal_student_id(monkeypatch) -> None:
+def test_execute_workflow_action_qualification_approve_does_not_create_student_master_yet(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
 
@@ -1209,9 +1464,9 @@ def test_execute_workflow_action_creates_student_master_with_portal_student_id(m
         principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
     )
 
-    created_student = next(item for item in store.state["students"] if item["full_name"] == "邮件联调考生")
-    assert created_student["portal_student_id"] == applicant_id
-    assert fake_postgres.created_students[-1]["student_payload"]["portal_student_id"] == applicant_id
+    approved_application = next(item for item in store.state["recruitment_applications"] if item["business_key"] == application.application_business_key)
+    assert approved_application["portal_student_id"] == applicant_id
+    assert fake_postgres.created_students == []
 
 
 def test_rejected_portal_application_resets_submission_and_allows_resubmit(monkeypatch) -> None:
@@ -3086,6 +3341,250 @@ def test_get_system_users_does_not_fallback_to_runtime_seed_when_postgres_query_
 
     with pytest.raises(DatabaseUnavailableError, match="系统用户数据当前仅允许从数据库读取"):
         store.get_system_users(role_code="advisor", page=1, page_size=10)
+
+
+def test_export_system_users_supports_filtered_results(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    target_user = next(item for item in store.state["system_users"] if item["role_code"] == "advisor")
+    user_id = int(target_user["id"])
+    fake_postgres.system_user_rows[user_id] = {
+        "id": user_id,
+        "username": target_user["username"],
+        "full_name": target_user["full_name"],
+        "role_code": target_user["role_code"],
+        "department_name": "智能中心",
+        "introduction": "导师导出测试",
+        "email": "advisor.export@example.com",
+        "phone_number": "13800005555",
+        "account_status": "启用",
+        "last_login_at": "2026-05-25 10:00:00",
+    }
+
+    content = store.export_system_users(role_code="advisor", operator_username="admin")
+
+    workbook = load_workbook(BytesIO(content), data_only=True)
+    worksheet = workbook.active
+    assert worksheet.title == "系统用户"
+    assert worksheet.cell(1, 2).value == "账号"
+    exported_rows = list(worksheet.iter_rows(min_row=2, values_only=True))
+    assert any(row[1] == target_user["username"] for row in exported_rows)
+    assert fake_postgres.synced_operation_logs[-1]["operation_log"]["action"] == "导出账号"
+
+
+def test_export_system_users_supports_selected_ids(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    candidates = [item for item in store.state["system_users"] if item["username"] != "admin"][:2]
+    for index, item in enumerate(candidates, start=1):
+        fake_postgres.system_user_rows[int(item["id"])] = {
+            "id": int(item["id"]),
+            "username": item["username"],
+            "full_name": item["full_name"],
+            "role_code": item["role_code"],
+            "department_name": f"部门{index}",
+            "introduction": f"介绍{index}",
+            "email": f"user{index}@example.com",
+            "phone_number": f"1380000555{index}",
+            "account_status": item["account_status"],
+            "last_login_at": None,
+        }
+
+    selected_ids = [int(candidates[1]["id"]), int(candidates[0]["id"])]
+    content = store.export_system_users(selected_ids, operator_username="auditor")
+
+    workbook = load_workbook(BytesIO(content), data_only=True)
+    worksheet = workbook.active
+    exported_usernames = [worksheet.cell(row, 2).value for row in range(2, worksheet.max_row + 1)]
+    assert exported_usernames == [candidates[1]["username"], candidates[0]["username"]]
+    assert fake_postgres.synced_operation_logs[-1]["operation_log"]["operator_username"] == "auditor"
+
+
+def test_import_system_users_generates_unique_username_and_allows_empty_optional_fields(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    fake_postgres.system_user_rows[901] = {
+        "id": 901,
+        "username": "wangli",
+        "full_name": "王力",
+        "role_code": "admin",
+        "department_name": "基础平台",
+        "email": "wangli@example.com",
+        "phone_number": "13800008888",
+        "account_status": "启用",
+    }
+
+    result = store.import_system_users(
+        [
+            {
+                "row_number": 2,
+                "username": None,
+                "full_name": "王力",
+                "role_code": "advisor",
+                "department_name": None,
+                "introduction": None,
+                "email": None,
+                "phone_number": None,
+                "account_status": "启用",
+                "password": None,
+            }
+        ],
+        operator_username="admin",
+    )
+
+    assert result.created_count == 1
+    assert result.updated_count == 0
+    assert result.failed_count == 0
+    created_row = next(item for item in store.state["system_users"] if item["username"] == "wangli2")
+    assert created_row["role_code"] == "advisor"
+    assert PASSWORD_CONTEXT.verify("wangli2@123", created_row["password_hash"])
+    assert store.state["profiles"]["wangli2"]["introduction"] is None
+    assert store.state["profiles"]["wangli2"]["email"] is None
+    assert store.state["profiles"]["wangli2"]["phone_number"] is None
+
+
+def test_import_system_users_updates_existing_user_and_can_clear_optional_fields(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    target_user = next(item for item in store.state["system_users"] if item["username"] != "admin")
+    original_password_hash = target_user.get("password_hash")
+    fake_postgres.system_user_rows[int(target_user["id"])] = {
+        "id": int(target_user["id"]),
+        "username": target_user["username"],
+        "full_name": target_user["full_name"],
+        "role_code": target_user["role_code"],
+        "department_name": target_user.get("department_name") or "智能中心",
+        "introduction": "旧介绍",
+        "email": "old@example.com",
+        "phone_number": "13800001234",
+        "account_status": "启用",
+    }
+
+    result = store.import_system_users(
+        [
+            {
+                "row_number": 2,
+                "username": target_user["username"],
+                "full_name": "导入覆盖用户",
+                "role_code": target_user["role_code"],
+                "department_name": None,
+                "introduction": None,
+                "email": None,
+                "phone_number": None,
+                "account_status": "停用",
+                "password": None,
+            }
+        ],
+        operator_username="admin",
+    )
+
+    assert result.created_count == 0
+    assert result.updated_count == 1
+    assert result.failed_count == 0
+    updated_row = next(item for item in store.state["system_users"] if item["username"] == target_user["username"])
+    assert updated_row["full_name"] == "导入覆盖用户"
+    assert updated_row["account_status"] == "停用"
+    assert updated_row["password_hash"] == original_password_hash
+    assert store.state["profiles"][target_user["username"]]["email"] is None
+    assert store.state["profiles"][target_user["username"]]["phone_number"] is None
+
+
+def test_import_system_users_updates_existing_user_password_when_provided(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    target_user = next(item for item in store.state["system_users"] if item["username"] != "admin")
+    original_password_hash = target_user.get("password_hash")
+    fake_postgres.system_user_rows[int(target_user["id"])] = {
+        "id": int(target_user["id"]),
+        "username": target_user["username"],
+        "full_name": target_user["full_name"],
+        "role_code": target_user["role_code"],
+        "department_name": target_user.get("department_name") or "智能中心",
+        "introduction": "旧介绍",
+        "email": "old@example.com",
+        "phone_number": "13800001234",
+        "account_status": "启用",
+    }
+
+    result = store.import_system_users(
+        [
+            {
+                "row_number": 2,
+                "username": target_user["username"],
+                "full_name": target_user["full_name"],
+                "role_code": target_user["role_code"],
+                "department_name": target_user.get("department_name"),
+                "introduction": "修改密码",
+                "email": "reset@example.com",
+                "phone_number": "13800001234",
+                "account_status": "启用",
+                "password": "ResetPass@456",
+            }
+        ],
+        operator_username="admin",
+    )
+
+    assert result.created_count == 0
+    assert result.updated_count == 1
+    assert result.failed_count == 0
+    updated_row = next(item for item in store.state["system_users"] if item["username"] == target_user["username"])
+    assert updated_row["password_hash"] != original_password_hash
+    assert PASSWORD_CONTEXT.verify("ResetPass@456", updated_row["password_hash"])
+
+
+def test_import_system_users_can_enable_existing_user(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    target_user = next(item for item in store.state["system_users"] if item["username"] != "admin")
+    target_user["account_status"] = "停用"
+    fake_postgres.system_user_rows[int(target_user["id"])] = {
+        "id": int(target_user["id"]),
+        "username": target_user["username"],
+        "full_name": target_user["full_name"],
+        "role_code": target_user["role_code"],
+        "department_name": target_user.get("department_name") or "智能中心",
+        "introduction": "旧介绍",
+        "email": "old@example.com",
+        "phone_number": "13800001234",
+        "account_status": "停用",
+    }
+
+    result = store.import_system_users(
+        [
+            {
+                "row_number": 2,
+                "username": target_user["username"],
+                "full_name": target_user["full_name"],
+                "role_code": target_user["role_code"],
+                "department_name": target_user.get("department_name"),
+                "introduction": "恢复启用",
+                "email": "restore@example.com",
+                "phone_number": "13800001234",
+                "account_status": "启用",
+                "password": None,
+            }
+        ],
+        operator_username="admin",
+    )
+
+    assert result.created_count == 0
+    assert result.updated_count == 1
+    assert result.failed_count == 0
+    updated_row = next(item for item in store.state["system_users"] if item["username"] == target_user["username"])
+    assert updated_row["account_status"] == "启用"
+
 
 
 def test_get_profile_uses_redis_cache_and_update_profile_refreshes_cache(monkeypatch) -> None:

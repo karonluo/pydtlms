@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.schemas.auth import UserProfile, UserProfileUpdate
-from app.schemas.dashboard import DashboardOverview
+from app.schemas.dashboard import DashboardOverview, DashboardUndergraduateSchoolRankingResponse, DashboardUndergraduateSchoolStudentListResponse
 from app.schemas.portal import (
     PortalApplicationDraftUpsert,
     PortalApplicationSubmissionResponse,
@@ -51,6 +51,7 @@ from app.schemas.system import (
     SystemArchitecture,
     SystemOptionsResponse,
     SystemStats,
+    SystemUserImportResult,
     SystemUserListResponse,
     SystemUserUpsert,
 )
@@ -79,6 +80,14 @@ from app.services.management_service import store
 
 def get_dashboard_overview() -> DashboardOverview:
     return store.get_dashboard_overview()
+
+
+def get_dashboard_undergraduate_school_rankings(limit: int = 20) -> DashboardUndergraduateSchoolRankingResponse:
+    return DashboardUndergraduateSchoolRankingResponse(items=store.get_dashboard_undergraduate_school_rankings(limit=limit))
+
+
+def get_dashboard_undergraduate_school_students(school_name: str) -> DashboardUndergraduateSchoolStudentListResponse:
+    return store.get_dashboard_undergraduate_school_students(school_name)
 
 
 def get_recruitment_workbench() -> RecruitWorkbench:
@@ -115,12 +124,14 @@ def get_student_management_list(
 def get_registered_portal_student_list(
     keyword: str | None = None,
     application_form_status: str | None = None,
+    advisor_names: list[str] | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> RegisteredPortalStudentListResponse:
     return store.get_registered_portal_students(
         keyword=keyword,
         application_form_status=application_form_status,
+        advisor_names=advisor_names,
         page=page,
         page_size=page_size,
     )
@@ -131,11 +142,13 @@ def export_registered_portal_students(
     *,
     keyword: str | None = None,
     application_form_status: str | None = None,
+    advisor_names: list[str] | None = None,
 ) -> bytes:
     return store.export_registered_portal_students(
         student_ids or [],
         keyword=keyword,
         application_form_status=application_form_status,
+        advisor_names=advisor_names,
     )
 
 
@@ -544,6 +557,33 @@ def get_system_user_list(
         page=page,
         page_size=page_size,
     )
+
+
+def export_system_users(
+    ids: list[int] | None = None,
+    *,
+    keyword: str | None = None,
+    role_code: str | None = None,
+    account_status: str | None = None,
+    department_name: str | None = None,
+    operator_username: str = "admin",
+) -> bytes:
+    return store.export_system_users(
+        ids,
+        keyword=keyword,
+        role_code=role_code,
+        account_status=account_status,
+        department_name=department_name,
+        operator_username=operator_username,
+    )
+
+
+def import_system_users(rows: list[dict[str, Any]], operator_username: str = "admin") -> SystemUserImportResult:
+    return store.import_system_users(rows, operator_username=operator_username)
+
+
+def export_system_user_blank_template() -> bytes:
+    return store.export_system_user_blank_template()
 
 
 def create_system_user(payload: SystemUserUpsert):

@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import TYPE_CHECKING
 
+from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from pypinyin import lazy_pinyin
+
 from .management_service_shared import *
+from .system_user_excel_service import build_system_user_import_template
+
+
+SYSTEM_USER_EXPORT_COLUMNS: list[tuple[str, str]] = [
+    ("id", "用户ID"),
+    ("username", "账号"),
+    ("full_name", "姓名"),
+    ("role_name", "岗位角色"),
+    ("role_code", "角色编码"),
+    ("department_name", "部门"),
+    ("email", "邮箱"),
+    ("phone_number", "电话"),
+    ("account_status", "账号状态"),
+    ("last_login_at", "最近登录"),
+    ("introduction", "用户介绍"),
+]
 
 
 class RuntimeManagementStoreSystemMixin:
@@ -193,15 +214,130 @@ class RuntimeManagementStoreSystemMixin:
             raise DatabaseUnavailableError("系统登录数据当前仅允许从数据库或Redis缓存读取，PostgreSQL 查询失败") from exc
         return dict(payload) if isinstance(payload, dict) else None
 
-    def _normalize_system_user_contacts(self, payload: dict[str, Any], *, require_contact: bool) -> dict[str, Any]:
+    def _normalize_system_user_contacts(
+        self,
+        payload: dict[str, Any],
+        *,
+        require_contact: bool,
+        require_advisor_introduction: bool = True,
+    ) -> dict[str, Any]:
         normalized = dict(payload)
         introduction = normalized.get("introduction")
         normalized["introduction"] = str(introduction).strip() if introduction is not None else None
-        if normalized.get("role_code") == "advisor" and not normalized.get("introduction"):
+        if require_advisor_introduction and normalized.get("role_code") == "advisor" and not normalized.get("introduction"):
             raise ValueError("导师角色必须填写介绍")
         normalized["email"] = validate_email(normalized.get("email"), "邮箱") if require_contact else validate_optional_email(normalized.get("email"))
         normalized["phone_number"] = validate_phone_number(normalized.get("phone_number"), "手机号") if require_contact else validate_optional_phone_number(normalized.get("phone_number"))
         return normalized
+
+    def _build_system_user_profile_payload(self, item: dict[str, Any], role_name: str, current_profile: dict[str, Any] | None = None) -> dict[str, Any]:
+        profile = dict(current_profile or {})
+        return {
+            "username": item["username"],
+            "full_name": item["full_name"],
+            "role_name": role_name,
+            "department_name": item["department_name"],
+            "introduction": item.get("introduction"),
+            "phone_number": item.get("phone_number"),
+            "email": item.get("email"),
+            "theme_color": profile.get("theme_color", "#0f4cbd"),
+        }
+
+    def _generate_system_user_username_base(self, full_name: str) -> str:
+        candidate = "".join(part for part in lazy_pinyin(full_name, errors="ignore")).lower()
+        candidate = "".join(char for char in candidate if char.isascii() and char.isalnum())
+        if candidate:
+            return candidate
+        ascii_name = "".join(char.lower() for char in str(full_name) if char.isascii() and char.isalnum())
+        return ascii_name or "user"
+
+    def _generate_unique_import_username(self, full_name: str, reserved_usernames: set[str]) -> str:
+        base_username = self._generate_system_user_username_base(full_name)
+        candidate = base_username
+        suffix = 1
+        while candidate in reserved_usernames or self._system_username_exists(candidate):
+            suffix += 1
+            candidate = f"{base_username}{suffix}"
+        reserved_usernames.add(candidate)
+        return candidate
+
+    def _resolve_import_role_code(self, row: dict[str, Any]) -> str:
+        role_code = str(row.get("role_code") or "").strip()
+        if role_code:
+            self._ensure_role_exists(role_code)
+            return role_code
+        role_name = str(row.get("role_name") or "").strip()
+        if role_name:
+            role = next((item for item in self._role_lookup().values() if str(item.get("role_name") or "") == role_name), None)
+            if role is not None:
+                return str(role.get("role_code") or "")
+        raise ValueError("角色编码不能为空")
+
+    def _build_import_default_password(self, username: str) -> str:
+        return f"{username}@123"
+
+    def _create_import_system_user(self, payload: dict[str, Any]) -> SystemUserRecord:
+        item = self._normalize_system_user_contacts(payload, require_contact=False, require_advisor_introduction=False)
+        if self._system_username_exists(item["username"]):
+            raise ValueError("Username already exists")
+        role = self._ensure_role_exists(item["role_code"])
+        item["id"] = self._next_id("system_users")
+        raw_password = item.pop("password")
+        item["password_hash"] = PASSWORD_CONTEXT.hash(raw_password or self._build_import_default_password(item["username"]))
+        item["last_login_at"] = None
+        self._list("system_users").insert(0, item)
+        profile = self._build_system_user_profile_payload(item, role["role_name"])
+        self.state.setdefault("profiles", {})[item["username"]] = profile
+        operation_log = self._record_operation("系统治理", "系统用户", str(item["id"]), "导入新建账号", f'导入新建系统账号 {item["full_name"]}')
+        try:
+            self._postgres_store.sync_system_user(
+                item,
+                profile,
+                operation_log,
+                counters={
+                    "system_users": int(self._counters.get("system_users", 0)),
+                    "operation_logs": int(self._counters.get("operation_logs", 0)),
+                },
+            )
+        except Exception:
+            self._save()
+        self._invalidate_system_user_cache(item["username"])
+        self._write_json_cache(self._user_profile_cache_key(item["username"]), profile, USER_PROFILE_CACHE_TTL_SECONDS)
+        return self._build_system_user_record(item)
+
+    def _update_import_system_user(self, user_id: int, payload: dict[str, Any]) -> SystemUserRecord:
+        index, item = self._get_system_user_for_write(user_id)
+        new_values = self._normalize_system_user_contacts(payload, require_contact=False, require_advisor_introduction=False)
+        if self._system_username_exists(new_values["username"], exclude_user_id=user_id):
+            raise ValueError("Username already exists")
+        role = self._ensure_role_exists(new_values["role_code"])
+        password = new_values.pop("password")
+        updated = {**item, **new_values, "id": user_id}
+        if password:
+            updated["password_hash"] = PASSWORD_CONTEXT.hash(password)
+        self._list("system_users")[index] = updated
+        profile_store = self.state.setdefault("profiles", {})
+        previous_profile = profile_store.get(updated["username"], profile_store.get(item["username"], {}))
+        profile_store[updated["username"]] = self._build_system_user_profile_payload(updated, role["role_name"], previous_profile)
+        if item["username"] != updated["username"]:
+            old_profile = profile_store.pop(item["username"], None)
+            if old_profile:
+                profile_store[updated["username"]] = {
+                    **old_profile,
+                    **profile_store[updated["username"]],
+                    "username": updated["username"],
+                }
+        current_profile = profile_store[updated["username"]]
+        operation_log = self._record_operation("系统治理", "系统用户", str(user_id), "导入维护账号", f'导入更新系统账号 {updated["full_name"]}')
+        try:
+            self._postgres_store.sync_system_user(updated, current_profile, operation_log)
+            if item["username"] != updated["username"]:
+                self._postgres_store.delete_user_profile(item["username"])
+        except Exception:
+            self._save()
+        self._invalidate_system_user_cache(updated["username"], previous_username=item["username"])
+        self._write_json_cache(self._user_profile_cache_key(updated["username"]), current_profile, USER_PROFILE_CACHE_TTL_SECONDS)
+        return self._build_system_user_record(updated)
 
     def _system_username_exists(self, username: str, *, exclude_user_id: int | None = None) -> bool:
         exists_in_postgres = getattr(self._postgres_store, "system_username_exists", None)
@@ -493,6 +629,207 @@ class RuntimeManagementStoreSystemMixin:
         except Exception as exc:
             logger.warning("Query system users from PostgreSQL failed in database-only mode: %s", exc)
             raise DatabaseUnavailableError("系统用户数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+
+    @staticmethod
+    def _system_user_export_cell_text(value: Any) -> str:
+        if value is None:
+            return ""
+        return ILLEGAL_CHARACTERS_RE.sub("", str(value))
+
+    @staticmethod
+    def _normalize_system_user_export_ids(ids: list[int] | None) -> list[int]:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for raw_id in ids or []:
+            user_id = int(raw_id)
+            if user_id in seen:
+                continue
+            seen.add(user_id)
+            normalized.append(user_id)
+        return normalized
+
+    def _load_all_system_user_rows(
+        self,
+        *,
+        keyword: str | None = None,
+        role_code: str | None = None,
+        account_status: str | None = None,
+        department_name: str | None = None,
+        page_size: int = 500,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        page = 1
+        total = None
+        while total is None or len(rows) < total:
+            items, current_total = self._postgres_store.list_system_users_page(
+                keyword=keyword,
+                role_code=role_code,
+                account_status=account_status,
+                department_name=department_name,
+                page=page,
+                page_size=page_size,
+            )
+            total = int(current_total)
+            if not items:
+                break
+            rows.extend(dict(item) for item in items)
+            if len(items) < page_size:
+                break
+            page += 1
+        return rows
+
+    def export_system_users(
+        self,
+        ids: list[int] | None = None,
+        *,
+        keyword: str | None = None,
+        role_code: str | None = None,
+        account_status: str | None = None,
+        department_name: str | None = None,
+        operator_username: str = "admin",
+    ) -> bytes:
+        normalized_ids = self._normalize_system_user_export_ids(ids)
+        try:
+            if normalized_ids:
+                all_rows = self._load_all_system_user_rows(page_size=max(500, len(normalized_ids)))
+                rows_by_id = {int(item.get("id") or 0): dict(item) for item in all_rows}
+                missing_id = next((user_id for user_id in normalized_ids if user_id not in rows_by_id), None)
+                if missing_id is not None:
+                    raise KeyError(missing_id)
+                rows = [rows_by_id[user_id] for user_id in normalized_ids]
+            else:
+                rows = self._load_all_system_user_rows(
+                    keyword=keyword,
+                    role_code=role_code,
+                    account_status=account_status,
+                    department_name=department_name,
+                )
+        except KeyError:
+            raise
+        except Exception as exc:
+            logger.warning("Export system users from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("系统用户数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+
+        if not rows:
+            raise ValueError("当前条件下无可导出的系统用户")
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "系统用户"
+        worksheet.append([label for _, label in SYSTEM_USER_EXPORT_COLUMNS])
+        for row in rows:
+            worksheet.append([
+                self._system_user_export_cell_text(row.get(field_name))
+                for field_name, _ in SYSTEM_USER_EXPORT_COLUMNS
+            ])
+
+        for column_cells in worksheet.columns:
+            max_length = max(len(self._system_user_export_cell_text(cell.value)) for cell in column_cells)
+            worksheet.column_dimensions[column_cells[0].column_letter].width = min(max(max_length + 2, 12), 36)
+
+        self.record_operation_event(
+            "系统治理",
+            "系统用户",
+            "export",
+            "导出账号",
+            f"导出系统用户 {len(rows)} 条",
+            operator_username=operator_username,
+        )
+
+        stream = BytesIO()
+        workbook.save(stream)
+        return stream.getvalue()
+
+    def export_system_user_blank_template(self) -> bytes:
+        return build_system_user_import_template()
+
+    def import_system_users(self, rows: list[dict[str, Any]], *, operator_username: str = "admin") -> SystemUserImportResult:
+        if not rows:
+            raise ValueError("导入文件中没有可处理的系统用户数据")
+
+        issues: list[SystemUserImportIssue] = []
+        created_count = 0
+        updated_count = 0
+        reserved_usernames: set[str] = set()
+
+        try:
+            existing_rows = self._load_all_system_user_rows(page_size=max(500, len(rows) * 2))
+        except Exception as exc:
+            logger.warning("Import system users from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("系统用户数据当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+
+        existing_by_username = {
+            str(item.get("username") or ""): dict(item)
+            for item in existing_rows
+            if str(item.get("username") or "").strip()
+        }
+        reserved_usernames.update(existing_by_username.keys())
+
+        with self._lock:
+            for row in rows:
+                row_number = int(row.get("row_number") or 0)
+                full_name = str(row.get("full_name") or "").strip()
+                raw_username = str(row.get("username") or "").strip().lower()
+                try:
+                    if not full_name:
+                        raise ValueError("姓名不能为空")
+                    role_code = self._resolve_import_role_code(row)
+                    account_status = str(row.get("account_status") or "").strip()
+                    if not account_status:
+                        raise ValueError("账号状态不能为空")
+
+                    username = raw_username
+                    existing = existing_by_username.get(username) if username else None
+                    if not username:
+                        username = self._generate_unique_import_username(full_name, reserved_usernames)
+                    else:
+                        reserved_usernames.add(username)
+
+                    payload = {
+                        "username": username,
+                        "full_name": full_name,
+                        "role_code": role_code,
+                        "department_name": str(row.get("department_name") or "").strip(),
+                        "introduction": row.get("introduction"),
+                        "email": row.get("email"),
+                        "phone_number": row.get("phone_number"),
+                        "account_status": account_status,
+                        "password": row.get("password"),
+                    }
+
+                    if existing is not None:
+                        self._update_import_system_user(int(existing.get("id") or 0), payload)
+                        existing_by_username[username] = {**existing, **payload}
+                        updated_count += 1
+                    else:
+                        created = self._create_import_system_user(payload)
+                        existing_by_username[username] = {"id": created.id, **payload}
+                        created_count += 1
+                except ValueError as exc:
+                    issues.append(SystemUserImportIssue(row_number=row_number, full_name=full_name or None, username=raw_username or None, reason=str(exc)))
+                    self._record_system_user_failure("导入账号", str(row_number), raw_username or full_name or f"row-{row_number}", str(exc))
+
+        success_count = created_count + updated_count
+        failed_count = len(issues)
+        summary = f"系统用户批量导入完成，成功 {success_count} 条，失败 {failed_count} 条"
+        self.record_operation_event(
+            "系统治理",
+            "系统用户",
+            "import",
+            "批量导入账号",
+            summary,
+            operator_username=operator_username,
+            result="failed" if failed_count else "success",
+        )
+        return SystemUserImportResult(
+            total_count=len(rows),
+            success_count=success_count,
+            created_count=created_count,
+            updated_count=updated_count,
+            failed_count=failed_count,
+            issues=issues,
+            message="全部成功" if failed_count == 0 else summary,
+        )
 
     def create_system_user(self, payload: SystemUserUpsert) -> SystemUserRecord:
         with self._lock:

@@ -52,6 +52,7 @@ export type RegisteredPortalStudentRecord = {
   selected_center_name?: string | null
   selected_advisor_name?: string | null
   recruitment_application_id?: number | null
+  recruitment_application_candidate_no?: string | null
   recruitment_application_business_key?: string | null
   recruitment_application_status?: string | null
   registered_at?: string | null
@@ -80,6 +81,7 @@ export type RegisteredPortalStudentExportRequest = {
   ids?: number[]
   keyword?: string
   application_form_status?: string
+  advisor_names?: string[]
 }
 
 
@@ -147,6 +149,7 @@ export type StudentOptions = {
   status_options: SelectOption[]
   degree_options: SelectOption[]
   advisor_options: SelectOption[]
+  registered_portal_advisor_filter_options: SelectOption[]
   center_options: SelectOption[]
   political_status_options: SelectOption[]
   center_advisor_map: CenterAdvisorMapItem[]
@@ -177,7 +180,7 @@ export function getStudentOptions() {
 }
 
 
-export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string }) {
+export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string; advisor_names?: string }) {
   return http.get<RegisteredPortalStudentListResponse>('/students/portal-registrations', { params })
 }
 

@@ -86,7 +86,7 @@ class RuntimeManagementStorePortalMixin:
             if normalized_status == "待中心考核-第二志愿":
                 stages[3].description = "当前进入第二志愿考核阶段"
             else:
-                stages[3].description = "等待研究中心完成考核结果处理"
+                stages[3].description = "等待导师完成考核结果处理"
                 normalized_status = "待中心考核"
         elif normalized_status in {"结果公布"}:
             stages[0].status = "completed"
@@ -829,7 +829,8 @@ class RuntimeManagementStorePortalMixin:
             try:
                 self._persist_portal_student_change(student, None)
             except Exception:
-                self._save()
+                logger.exception("Portal application draft persistence failed for student %s", student_id)
+                raise
             return self._build_portal_student_record(student)
 
     def submit_portal_application(self, student_id: int, payload: PortalApplicationUpsert) -> PortalApplicationSubmissionResponse:
@@ -1045,7 +1046,8 @@ class RuntimeManagementStorePortalMixin:
                 else:
                     self._persist_portal_student_change(student, None)
             except Exception:
-                self._save()
+                logger.exception("Portal application submission persistence failed for student %s", student_id)
+                raise
             return PortalApplicationSubmissionResponse(
                 student=self.get_portal_student(student_id),
                 application_business_key=business_key,

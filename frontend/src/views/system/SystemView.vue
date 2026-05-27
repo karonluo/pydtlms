@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
+import { utils, writeFileXLSX } from 'xlsx'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
@@ -21,9 +22,12 @@ import {
   deleteIntegration,
   deleteRole,
   deleteSystemUser,
+  downloadSystemUserTemplate,
+  exportSystemUsers,
   getPermissionCatalog,
   getSystemOptions,
   getSystemStats,
+  importSystemUserRows,
   listAuditPolicies,
   listIntegrations,
   listNotificationDeliveryLogs,
@@ -31,6 +35,7 @@ import {
   listRoles,
   listSyncLogs,
   listSystemUsers,
+  parseSystemUserImportFile,
   updateAuditPolicy,
   updateIntegration,
   updateRole,
@@ -47,6 +52,10 @@ import {
   type SyncLogRecord,
   type SystemOptions,
   type SystemStats,
+  type SystemUserImportIssue,
+  type SystemUserImportRow,
+  type SystemUserImportParseResult,
+  type SystemUserImportResult,
   type SystemUserRecord,
   type SystemUserUpsert,
 } from '../../api/system'
@@ -55,13 +64,42 @@ const route = useRoute()
 const loading = ref(false)
 const bootstrapping = ref(false)
 const submitting = ref(false)
+const exportAllSubmitting = ref(false)
+const exportSelectedSubmitting = ref(false)
+const importSubmitting = ref(false)
+const templateSubmitting = ref(false)
 const dialogVisible = ref(false)
 const userSaveResultDialogVisible = ref(false)
+const userImportDialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedIds = ref<number[]>([])
+const userImportInputRef = ref<HTMLInputElement | null>(null)
 const systemTagColors = ref<DictColorMap>({})
 const userSaveResult = ref<{ title: string; actionLabel: string; username: string; message: string } | null>(null)
+const USER_IMPORT_BATCH_SIZE = 20
+
+const userImportState = reactive<{
+  file: File | null
+  fileName: string
+  totalCount: number
+  processedCount: number
+  createdCount: number
+  updatedCount: number
+  failedCount: number
+  issues: SystemUserImportIssue[]
+  phase: 'idle' | 'ready' | 'importing' | 'completed'
+}>({
+  file: null,
+  fileName: '',
+  totalCount: 0,
+  processedCount: 0,
+  createdCount: 0,
+  updatedCount: 0,
+  failedCount: 0,
+  issues: [],
+  phase: 'idle',
+})
 
 const stats = ref<SystemStats>({
   integration_total: 0,
@@ -226,6 +264,25 @@ const notificationStatusOptions = [
   { label: '失败', value: 'failed' },
   { label: '已跳过', value: 'skipped' },
 ]
+const userImportProgressPercentage = computed(() => {
+  if (userImportState.totalCount <= 0) {
+    return 0
+  }
+  return Math.min(100, Math.round((userImportState.processedCount / userImportState.totalCount) * 100))
+})
+const userImportStatusText = computed(() => {
+  if (userImportState.phase === 'importing') {
+    return '正在导入系统用户'
+  }
+  if (userImportState.phase === 'completed') {
+    return userImportState.failedCount > 0 ? '导入完成，存在失败记录' : '导入完成'
+  }
+  if (userImportState.fileName) {
+    return '已选择文件，点击开始导入'
+  }
+  return '请先在弹窗中选择要导入的 Excel 文件'
+})
+const userImportIssuePreview = computed(() => userImportState.issues.slice(0, 5))
 const userPager = useServerPagination()
 const rolePager = useServerPagination()
 const auditPager = useServerPagination()
@@ -236,6 +293,9 @@ const syncLogPager = useServerPagination()
 
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
+    if (error.code === 'ECONNABORTED' || String(error.message || '').toLowerCase().includes('timeout')) {
+      return '请求超时。系统用户导入文件较大或服务器处理较慢，请稍后重试。'
+    }
     return String(error.response?.data?.detail || error.message || '请求失败')
   }
   return '请求失败'
@@ -253,6 +313,68 @@ function openUserSaveResultDialog(title: string, actionLabel: string, username: 
 
 function resetSelection() {
   selectedIds.value = []
+}
+
+function resetUserImportState() {
+  userImportState.file = null
+  userImportState.fileName = ''
+  userImportState.totalCount = 0
+  userImportState.processedCount = 0
+  userImportState.createdCount = 0
+  userImportState.updatedCount = 0
+  userImportState.failedCount = 0
+  userImportState.issues = []
+  userImportState.phase = 'idle'
+  if (userImportInputRef.value) {
+    userImportInputRef.value.value = ''
+  }
+}
+
+function openUserImportDialog() {
+  if (activeSection.value !== 'users') {
+    return
+  }
+  resetUserImportState()
+  userImportDialogVisible.value = true
+}
+
+function triggerUserImportFileSelect() {
+  userImportInputRef.value?.click()
+}
+
+function chunkSystemUserImportRows(rows: SystemUserImportRow[], batchSize: number) {
+  const batches: SystemUserImportRow[][] = []
+  for (let index = 0; index < rows.length; index += batchSize) {
+    batches.push(rows.slice(index, index + batchSize))
+  }
+  return batches
+}
+
+function getUserImportProgressStatus() {
+  if (userImportState.phase !== 'completed') {
+    return undefined
+  }
+  return userImportState.failedCount > 0 ? 'warning' : 'success'
+}
+
+function exportUserImportIssues() {
+  if (userImportState.issues.length === 0) {
+    ElMessage.warning('当前没有可导出的失败明细')
+    return
+  }
+
+  const worksheet = utils.json_to_sheet(
+    userImportState.issues.map((item) => ({
+      行号: item.row_number,
+      姓名: item.full_name || '',
+      账号: item.username || '',
+      失败原因: item.reason,
+    })),
+  )
+  const workbook = utils.book_new()
+  utils.book_append_sheet(workbook, worksheet, '失败明细')
+  writeFileXLSX(workbook, `系统用户导入失败明细_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}.xlsx`)
+  ElMessage.success('导入失败明细已导出')
 }
 
 function resetForms() {
@@ -700,6 +822,147 @@ async function handleBatchDelete() {
   }
 }
 
+async function handleUserExport(mode: 'filtered' | 'selected') {
+  if (activeSection.value !== 'users') {
+    return
+  }
+  if (mode === 'selected' && selectedIds.value.length === 0) {
+    ElMessage.warning('请先选择要导出的系统用户')
+    return
+  }
+
+  const loadingRef = mode === 'selected' ? exportSelectedSubmitting : exportAllSubmitting
+  loadingRef.value = true
+  try {
+    const response = await exportSystemUsers(
+      mode === 'selected'
+        ? { ids: selectedIds.value }
+        : {
+            keyword: userFilters.keyword || undefined,
+            role_code: userFilters.role_code || undefined,
+            account_status: userFilters.account_status || undefined,
+            department_name: userFilters.department_name || undefined,
+          },
+    )
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const disposition = String(response.headers['content-disposition'] || '')
+    const matched = disposition.match(/filename\*=UTF-8''([^;]+)/)
+    link.href = url
+    link.download = matched ? decodeURIComponent(matched[1]) : '系统用户导出.xlsx'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success(mode === 'selected' ? '选中系统用户已导出' : '系统用户筛选结果已导出')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    loadingRef.value = false
+  }
+}
+
+function handleUserImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+
+  userImportState.file = file
+  userImportState.fileName = file.name
+  userImportState.totalCount = 0
+  userImportState.processedCount = 0
+  userImportState.createdCount = 0
+  userImportState.updatedCount = 0
+  userImportState.failedCount = 0
+  userImportState.issues = []
+  userImportState.phase = 'ready'
+}
+
+async function submitUserImport() {
+  if (!userImportState.file) {
+    ElMessage.warning('请先选择要导入的 Excel 文件')
+    return
+  }
+
+  importSubmitting.value = true
+  try {
+    userImportState.totalCount = 0
+    userImportState.processedCount = 0
+    userImportState.createdCount = 0
+    userImportState.updatedCount = 0
+    userImportState.failedCount = 0
+    userImportState.issues = []
+    userImportState.phase = 'importing'
+
+    const parsedResponse = await parseSystemUserImportFile(userImportState.file)
+    const parsedResult: SystemUserImportParseResult = parsedResponse.data
+    const rows = parsedResult.rows
+    userImportState.totalCount = parsedResult.total_count
+    if (rows.length === 0) {
+      userImportState.phase = 'ready'
+      ElMessage.warning('导入文件中没有可处理的系统用户数据')
+      return
+    }
+
+    const batches = chunkSystemUserImportRows(rows, USER_IMPORT_BATCH_SIZE)
+    for (const batch of batches) {
+      const response = await importSystemUserRows(batch)
+      const result: SystemUserImportResult = response.data
+      userImportState.processedCount += result.total_count
+      userImportState.createdCount += result.created_count
+      userImportState.updatedCount += result.updated_count
+      userImportState.failedCount += result.failed_count
+      userImportState.issues.push(...result.issues)
+    }
+
+    userImportState.phase = 'completed'
+    resetSelection()
+    await refreshAfterMutation(true)
+
+    if (userImportState.failedCount > 0) {
+      const topIssues = userImportState.issues.slice(0, 3).map((item) => `${item.full_name || '未命名'}${item.username ? `(${item.username})` : ''}：${item.reason}`)
+      ElMessage.warning(`系统用户导入完成，新增 ${userImportState.createdCount} 条，更新 ${userImportState.updatedCount} 条，失败 ${userImportState.failedCount} 条。${topIssues.join('；')}`)
+    } else {
+      ElMessage.success(`系统用户导入完成，新增 ${userImportState.createdCount} 条，更新 ${userImportState.updatedCount} 条。全部成功`)
+    }
+  } catch (error) {
+    userImportState.phase = userImportState.processedCount > 0 ? 'completed' : 'ready'
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
+async function handleUserTemplateDownload() {
+  templateSubmitting.value = true
+  try {
+    const response = await downloadSystemUserTemplate()
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const disposition = String(response.headers['content-disposition'] || '')
+    const matched = disposition.match(/filename\*=UTF-8''([^;]+)/)
+    link.href = url
+    link.download = matched ? decodeURIComponent(matched[1]) : '系统用户导入模板.xlsx'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('系统用户导入模板已下载')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    templateSubmitting.value = false
+  }
+}
+
 async function handleSearch() {
   try {
     if (activeSection.value === 'users') userPager.reset()
@@ -815,7 +1078,18 @@ watch(
     resetFilters()
     resetSelection()
     dialogVisible.value = false
+    userImportDialogVisible.value = false
+    resetUserImportState()
     await loadSectionData()
+  },
+)
+
+watch(
+  () => userImportDialogVisible.value,
+  (visible) => {
+    if (!visible && !importSubmitting.value) {
+      resetUserImportState()
+    }
   },
 )
 
@@ -846,6 +1120,39 @@ onMounted(async () => {
         </div>
         <div class="header-actions">
           <span class="summary-text">当前共 {{ currentTotal }} 条记录</span>
+          <el-button
+            v-if="activeSection === 'users'"
+            plain
+            :loading="templateSubmitting"
+            @click="handleUserTemplateDownload"
+          >
+            下载导入模板
+          </el-button>
+          <el-button
+            v-if="activeSection === 'users'"
+            plain
+            :loading="importSubmitting"
+            @click="openUserImportDialog"
+          >
+            导入用户
+          </el-button>
+          <el-button
+            v-if="activeSection === 'users'"
+            plain
+            :loading="exportAllSubmitting"
+            @click="handleUserExport('filtered')"
+          >
+            导出筛选结果
+          </el-button>
+          <el-button
+            v-if="activeSection === 'users'"
+            plain
+            :disabled="selectedIds.length === 0"
+            :loading="exportSelectedSubmitting"
+            @click="handleUserExport('selected')"
+          >
+            导出选中
+          </el-button>
           <el-button v-if="editableSection" type="danger" plain :disabled="selectedIds.length === 0" @click="handleBatchDelete">
             {{ sectionConfig.batchDeleteLabel }}
           </el-button>
@@ -1133,6 +1440,8 @@ onMounted(async () => {
         已选择 {{ selectedIds.length }} 条记录，可执行批量删除。
       </div>
 
+      <input ref="userImportInputRef" type="file" accept=".xlsx" class="hidden-input" @change="handleUserImport" />
+
       <div class="pagination-bar">
         <el-pagination
           v-if="activeSection === 'users'"
@@ -1206,6 +1515,86 @@ onMounted(async () => {
         />
       </div>
     </article>
+
+    <el-dialog
+      v-model="userImportDialogVisible"
+      title="导入系统用户"
+      width="680px"
+      destroy-on-close
+      :close-on-click-modal="!importSubmitting"
+      :close-on-press-escape="!importSubmitting"
+      :show-close="!importSubmitting"
+    >
+      <div class="dialog-form user-import-dialog">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="导入说明"
+          description="请在弹窗中选择系统用户导入模板 Excel。导入过程中会分批处理并实时显示已导入条数、总条数和进度。"
+        />
+
+        <section class="user-import-panel">
+          <div>
+            <div class="user-import-panel__label">导入文件</div>
+            <div class="user-import-panel__filename">{{ userImportState.fileName || '未选择 Excel 文件' }}</div>
+          </div>
+          <el-button plain :disabled="importSubmitting" @click="triggerUserImportFileSelect">
+            {{ userImportState.fileName ? '重新选择 Excel' : '选择 Excel' }}
+          </el-button>
+        </section>
+
+        <section class="user-import-progress-card">
+          <div class="user-import-progress-card__header">
+            <div>
+              <span class="user-import-progress-card__label">导入进度</span>
+              <strong>{{ userImportState.processedCount }} / {{ userImportState.totalCount }}</strong>
+            </div>
+            <span class="user-import-progress-card__status">{{ userImportStatusText }}</span>
+          </div>
+          <el-progress :percentage="userImportProgressPercentage" :status="getUserImportProgressStatus()" :stroke-width="14" />
+        </section>
+
+        <section class="user-import-stats">
+          <article>
+            <span>新增</span>
+            <strong>{{ userImportState.createdCount }}</strong>
+          </article>
+          <article>
+            <span>更新</span>
+            <strong>{{ userImportState.updatedCount }}</strong>
+          </article>
+          <article>
+            <span>失败</span>
+            <strong>{{ userImportState.failedCount }}</strong>
+          </article>
+        </section>
+
+        <section v-if="userImportIssuePreview.length > 0" class="user-import-issues">
+          <div class="user-import-issues__header">
+            <div class="user-import-issues__title">失败预览</div>
+            <span class="user-import-issues__meta">共 {{ userImportState.issues.length }} 条，当前展示前 {{ userImportIssuePreview.length }} 条</span>
+          </div>
+          <ul>
+            <li v-for="item in userImportIssuePreview" :key="`${item.row_number}-${item.username || item.full_name || 'row'}`">
+              第 {{ item.row_number }} 行，{{ item.full_name || '未命名' }}{{ item.username ? `（${item.username}）` : '' }}：{{ item.reason }}
+            </li>
+          </ul>
+        </section>
+      </div>
+      <template #footer>
+        <el-button :disabled="importSubmitting" @click="userImportDialogVisible = false">关闭</el-button>
+        <el-button
+          v-if="userImportState.phase === 'completed' && userImportState.failedCount > 0"
+          plain
+          :disabled="importSubmitting"
+          @click="exportUserImportIssues"
+        >
+          导出失败明细
+        </el-button>
+        <el-button type="primary" :loading="importSubmitting" @click="submitUserImport">开始导入</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? sectionConfig.createLabel : `维护${sectionConfig.title}`" width="820px">
       <el-form v-if="activeSection === 'users'" label-width="110px" class="dialog-grid">
@@ -1378,6 +1767,10 @@ onMounted(async () => {
   margin-bottom: 18px;
 }
 
+.hidden-input {
+  display: none;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -1529,6 +1922,115 @@ onMounted(async () => {
   padding-top: 8px;
 }
 
+.user-import-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.user-import-panel,
+.user-import-progress-card,
+.user-import-stats article,
+.user-import-issues {
+  border: 1px solid rgba(18, 50, 95, 0.08);
+  border-radius: 16px;
+  background: rgba(244, 248, 252, 0.78);
+}
+
+.user-import-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+}
+
+.user-import-panel__label,
+.user-import-progress-card__label,
+.user-import-issues__title {
+  color: #7183a0;
+  font-size: 12px;
+}
+
+.user-import-panel__filename {
+  margin-top: 6px;
+  color: #12284d;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.user-import-progress-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.user-import-progress-card__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.user-import-progress-card__header strong {
+  display: block;
+  margin-top: 6px;
+  color: #12315e;
+  font-size: 24px;
+}
+
+.user-import-progress-card__status {
+  color: #5f6f87;
+  font-size: 13px;
+}
+
+.user-import-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.user-import-stats article {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+}
+
+.user-import-stats span {
+  color: #7183a0;
+  font-size: 12px;
+}
+
+.user-import-stats strong {
+  color: #12284d;
+  font-size: 22px;
+}
+
+.user-import-issues {
+  padding: 16px 18px;
+}
+
+.user-import-issues__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-import-issues__meta {
+  color: #7183a0;
+  font-size: 12px;
+}
+
+.user-import-issues ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #4b5d78;
+}
+
+.user-import-issues li + li {
+  margin-top: 8px;
+}
+
 .reset-password-dialog {
   display: grid;
   gap: 16px;
@@ -1576,6 +2078,17 @@ onMounted(async () => {
   }
 
   .reset-password-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .user-import-panel,
+  .user-import-progress-card__header,
+  .user-import-issues__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .user-import-stats {
     grid-template-columns: 1fr;
   }
 

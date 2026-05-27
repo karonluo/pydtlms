@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_preferences (
     id BIGSERIAL PRIMARY KEY,
     application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
     preference_order INTEGER NOT NULL,
-    research_center_name VARCHAR(128) NOT NULL,
+    research_center_name VARCHAR(128),
     advisor_name VARCHAR(128),
     is_optional BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -550,6 +550,21 @@ CREATE TABLE IF NOT EXISTS dtlms_qualification_reviews (
     review_comment TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_background_assessments (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id),
+    evaluator_user_id BIGINT,
+    evaluator_username VARCHAR(64) NOT NULL,
+    evaluator_name VARCHAR(128),
+    evaluator_role_code VARCHAR(64) NOT NULL,
+    assessment_result VARCHAR(32) NOT NULL,
+    assessment_comment TEXT,
+    assessed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (application_id, evaluator_username)
 );
 
 CREATE TABLE IF NOT EXISTS dtlms_reviewer_assignments (
@@ -744,6 +759,8 @@ CREATE INDEX IF NOT EXISTS idx_portal_application_achievement_application ON dtl
 CREATE INDEX IF NOT EXISTS idx_portal_application_attachment_owner ON dtlms_portal_application_attachments(application_id, owner_type, owner_id);
 CREATE INDEX IF NOT EXISTS idx_interview_schedule_time ON dtlms_interview_schedules(starts_at, ends_at);
 CREATE INDEX IF NOT EXISTS idx_admission_decision_status ON dtlms_admission_decisions(decision_status);
+CREATE INDEX IF NOT EXISTS idx_background_assessment_application ON dtlms_background_assessments(application_id, assessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_background_assessment_result ON dtlms_background_assessments(assessment_result);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_module_time ON dtlms_operation_logs(module_name, created_at);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_entity ON dtlms_operation_logs(entity_name, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_source_target ON dtlms_data_sync_logs(source_system, target_system, created_at);

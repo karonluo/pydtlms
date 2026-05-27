@@ -72,6 +72,7 @@ class RegisteredPortalStudentRecord(BaseModel):
     selected_center_name: str | None = None
     selected_advisor_name: str | None = None
     recruitment_application_id: int | None = None
+    recruitment_application_candidate_no: str | None = None
     recruitment_application_business_key: str | None = None
     recruitment_application_status: str | None = None
     registered_at: str | None = None
@@ -86,6 +87,7 @@ class RegisteredPortalStudentExportRequest(BaseModel):
     ids: list[int] = Field(default_factory=list)
     keyword: str | None = None
     application_form_status: str | None = None
+    advisor_names: list[str] = Field(default_factory=list)
 
 
 class RegisteredPortalStudentExportJobRecord(BaseModel):
@@ -132,6 +134,7 @@ class StudentOptionsResponse(BaseModel):
     status_options: list[SelectOption]
     degree_options: list[SelectOption]
     advisor_options: list[SelectOption]
+    registered_portal_advisor_filter_options: list[SelectOption] = Field(default_factory=list)
     center_options: list[SelectOption]
     political_status_options: list[SelectOption] = Field(default_factory=list)
     center_advisor_map: list[CenterAdvisorMapItem] = Field(default_factory=list)

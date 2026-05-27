@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Document, Download } from '@element-plus/icons-vue'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import type { RecruitPortalApplicationDetail } from '../../api/recruitment'
@@ -28,6 +28,8 @@ const visible = computed({
   set: (value: boolean) => emit('update:modelValue', value),
 })
 
+const backgroundAssessmentDialogVisible = ref(false)
+
 const declarationReminderText = '本表及证明材料仅作为申请上海人工智能实验室联培博士项目的参考依据，并承诺提交材料的所有内容均真实、准确、完整。所提供的材料中如有任何不实信息，将被取消录取资格。'
 
 function displayDetailValue(value: unknown) {
@@ -39,6 +41,62 @@ function displayDetailValue(value: unknown) {
 
 function hasDisplayValue(value: unknown) {
   return !(value === null || value === undefined || String(value).trim() === '')
+}
+
+const backgroundAssessmentRecords = computed(() => props.detail?.background_assessments ?? [])
+
+const backgroundAssessmentSummary = computed(() => {
+  let passed = 0
+  let rejected = 0
+
+  backgroundAssessmentRecords.value.forEach((item) => {
+    const normalized = String(item.assessment_result || '').trim()
+    if (['passed', 'pass', 'approved', '通过'].includes(normalized)) {
+      passed += 1
+      return
+    }
+    if (['rejected', 'reject', 'failed', '不通过'].includes(normalized)) {
+      rejected += 1
+    }
+  })
+
+  return {
+    passed,
+    rejected,
+    total: backgroundAssessmentRecords.value.length,
+  }
+})
+
+const showBackgroundAssessmentTools = computed(() => {
+  const currentNode = String(props.workflowTask?.current_node || '').trim()
+  const taskDefinitionKey = String(props.workflowTask?.task_definition_key || '').trim()
+  return taskDefinitionKey === 'background_assessment' || currentNode.includes('背景评估') || backgroundAssessmentSummary.value.total > 0
+})
+
+function openBackgroundAssessmentDialog() {
+  backgroundAssessmentDialogVisible.value = true
+}
+
+function formatAssessmentResult(result: string | null | undefined) {
+  const normalized = String(result || '').trim()
+  if (['passed', 'pass', 'approved'].includes(normalized)) {
+    return '通过'
+  }
+  if (['rejected', 'reject', 'failed'].includes(normalized)) {
+    return '不通过'
+  }
+  return normalized || '未填写'
+}
+
+function resolveAssessmentTagType(result: string | null | undefined) {
+  const normalized = String(result || '').trim()
+  if (['passed', 'pass', 'approved', '通过'].includes(normalized)) {
+    return 'success'
+  }
+  if (['rejected', 'reject', 'failed', '不通过'].includes(normalized)) {
+    return 'danger'
+  }
+  return 'info'
 }
 
 function isHighSchoolEducation(stage: string | null | undefined) {
@@ -108,24 +166,83 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
         </div>
         <div class="review-toolbar__actions">
           <el-skeleton v-if="workflowTaskLoading" :rows="1" animated />
-          <template v-else-if="workflowTask?.available_actions?.length">
-            <el-button
-              v-for="action in workflowTask.available_actions"
-              :key="action.action"
-              :type="action.action.includes('reject') ? 'danger' : 'primary'"
-              :loading="actionLoading"
-              @click="emit('executeAction', action)"
-            >
-              {{ action.label }}
-            </el-button>
+          <template v-else>
+            <span v-if="showBackgroundAssessmentTools" class="review-toolbar__assessment-counts">
+              已通过 {{ backgroundAssessmentSummary.passed }} 人 / 未通过 {{ backgroundAssessmentSummary.rejected }} 人
+            </span>
+            <button v-if="showBackgroundAssessmentTools" type="button" class="review-toolbar__detail-link" @click="openBackgroundAssessmentDialog">
+              详情
+            </button>
+            <template v-if="workflowTask?.available_actions?.length">
+              <el-button
+                v-for="action in workflowTask.available_actions"
+                :key="action.action"
+                :type="action.action.includes('reject') ? 'danger' : 'primary'"
+                :loading="actionLoading"
+                @click="emit('executeAction', action)"
+              >
+                {{ action.label }}
+              </el-button>
+            </template>
+            <span v-else class="review-toolbar__empty">当前无可执行审批动作</span>
           </template>
-          <span v-else class="review-toolbar__empty">当前无可执行审批动作</span>
         </div>
       </section>
 
+      <el-dialog v-model="backgroundAssessmentDialogVisible" title="书院管理员评估清单" width="720px" append-to-body>
+        <div class="assessment-summary">
+          <div class="assessment-summary__card">
+            <span class="assessment-summary__label">已通过</span>
+            <strong class="assessment-summary__value">{{ backgroundAssessmentSummary.passed }} 人</strong>
+          </div>
+          <div class="assessment-summary__card">
+            <span class="assessment-summary__label">未通过</span>
+            <strong class="assessment-summary__value">{{ backgroundAssessmentSummary.rejected }} 人</strong>
+          </div>
+          <div class="assessment-summary__card">
+            <span class="assessment-summary__label">总记录</span>
+            <strong class="assessment-summary__value">{{ backgroundAssessmentSummary.total }} 条</strong>
+          </div>
+        </div>
+        <el-table v-if="backgroundAssessmentRecords.length" :data="backgroundAssessmentRecords" border>
+          <el-table-column prop="evaluator_name" label="评估人" min-width="120">
+            <template #default="scope">
+              {{ displayDetailValue(scope.row.evaluator_name || scope.row.evaluator_username) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="assessment_result" label="结果" width="100">
+            <template #default="scope">
+              <el-tag :type="resolveAssessmentTagType(scope.row.assessment_result)">
+                {{ formatAssessmentResult(scope.row.assessment_result) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="assessment_comment" label="评估意见" min-width="220">
+            <template #default="scope">
+              {{ displayDetailValue(scope.row.assessment_comment) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="assessed_at" label="评估时间" min-width="180">
+            <template #default="scope">
+              {{ displayDetailValue(scope.row.assessed_at) }}
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else description="当前暂无书院管理员评估记录" />
+      </el-dialog>
+
       <section class="detail-section">
         <h3 class="dialog-section__title">基本信息</h3>
-        <div class="detail-media-grid">
+        <div v-if="detail.personal_statement?.resume_attachment_url" class="detail-text-list section-spacing-top">
+          <article class="detail-text-card">
+            <h4>简历附件</h4>
+            <div class="detail-attachment-actions detail-attachment-actions--stacked">
+              <a class="detail-attachment-link" :href="detail.personal_statement.resume_attachment_url" target="_blank" rel="noopener noreferrer"><el-icon><Document /></el-icon><span>{{ resolveAttachmentDisplayName(detail.personal_statement.resume_attachment_url, detail.personal_statement.resume_attachment_name, '简历附件') }}</span></a>
+              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(detail.personal_statement.resume_attachment_url, resolveAttachmentDisplayName(detail.personal_statement.resume_attachment_url, detail.personal_statement.resume_attachment_name, '简历附件'))"><el-icon><Download /></el-icon><span>下载</span></button>
+            </div>
+          </article>
+        </div>
+        <div class="detail-media-grid section-spacing-top">
           <div v-if="detail.profile?.profile_photo_url" class="detail-media-card">
             <span class="detail-item__label">个人照片</span>
             <div class="detail-attachment-actions detail-attachment-actions--stacked">
@@ -153,7 +270,7 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
             </div>
           </div>
         </div>
-        <div class="detail-grid">
+        <div class="detail-grid section-spacing-top">
           <div class="detail-item"><span class="detail-item__label">姓名</span><span class="detail-item__value">{{ displayDetailValue(detail.student_name) }}</span></div>
           <div class="detail-item"><span class="detail-item__label">姓名拼音</span><span class="detail-item__value">{{ displayDetailValue(detail.profile?.full_name_pinyin) }}</span></div>
           <div class="detail-item"><span class="detail-item__label">性别</span><span class="detail-item__value">{{ displayDetailValue(detail.profile?.gender) }}</span></div>
@@ -330,13 +447,6 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
           <article class="detail-text-card"><h4>个人陈述</h4><p>{{ displayDetailValue(detail.personal_statement?.personal_statement_text) }}</p></article>
           <article class="detail-text-card"><h4>你认为目前 AI 技术发展过程中还未被解决的，且你未来希望去作为科研目标解决的最重要问题是什么？</h4><p>{{ displayDetailValue(detail.personal_statement?.ai_problem_statement) }}</p></article>
           <article class="detail-text-card"><h4>AI 行业不同观点</h4><p>{{ displayDetailValue(detail.personal_statement?.ai_industry_opinion) }}</p></article>
-          <article v-if="detail.personal_statement?.resume_attachment_url" class="detail-text-card">
-            <h4>简历附件</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="detail.personal_statement.resume_attachment_url" target="_blank" rel="noopener noreferrer"><el-icon><Document /></el-icon><span>{{ resolveAttachmentDisplayName(detail.personal_statement.resume_attachment_url, detail.personal_statement.resume_attachment_name, '简历附件') }}</span></a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(detail.personal_statement.resume_attachment_url, resolveAttachmentDisplayName(detail.personal_statement.resume_attachment_url, detail.personal_statement.resume_attachment_name, '简历附件'))"><el-icon><Download /></el-icon><span>下载</span></button>
-            </div>
-          </article>
           <article v-if="detail.personal_statement?.supporting_material_attachment_url" class="detail-text-card">
             <h4>补充材料附件</h4>
             <div class="detail-attachment-actions detail-attachment-actions--stacked">
@@ -393,6 +503,55 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 .review-toolbar__empty {
   color: #6b7f93;
   font-size: 13px;
+}
+
+.review-toolbar__assessment-counts {
+  color: #24415f;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.review-toolbar__detail-link {
+  border: none;
+  background: transparent;
+  color: #1d5fbf;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 2px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.review-toolbar__detail-link:hover {
+  color: #173f80;
+}
+
+.assessment-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.assessment-summary__card {
+  padding: 14px 16px;
+  border: 1px solid rgba(28, 63, 102, 0.12);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(246, 249, 253, 0.92), rgba(255, 255, 255, 0.98));
+}
+
+.assessment-summary__label {
+  display: block;
+  color: #6b7f93;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.assessment-summary__value {
+  color: #173557;
+  font-size: 20px;
 }
 
 .detail-section {
@@ -561,6 +720,10 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 @media (max-width: 768px) {
   .review-toolbar {
     flex-direction: column;
+  }
+
+  .assessment-summary {
+    grid-template-columns: 1fr;
   }
 
   .detail-media-grid,

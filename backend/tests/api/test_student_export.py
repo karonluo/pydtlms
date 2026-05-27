@@ -58,6 +58,37 @@ def test_export_registered_portal_students_endpoint_returns_excel_stream(monkeyp
     assert "attachment; filename*=UTF-8''" in response.headers["content-disposition"]
 
 
+def test_registered_portal_students_list_endpoint_accepts_multiple_advisor_names(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "student-admin", ["students:read"])
+    captured: dict[str, Any] = {}
+
+    def fake_get_registered_portal_student_list(**kwargs):
+        captured.update(kwargs)
+        return {
+            "items": [],
+            "total": 0,
+            "page": kwargs.get("page", 1),
+            "page_size": kwargs.get("page_size", 10),
+        }
+
+    monkeypatch.setattr("app.api.v1.students.get_registered_portal_student_list", fake_get_registered_portal_student_list)
+
+    response = client.get(
+        "/api/v1/students/portal-registrations",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={
+            "keyword": "张三",
+            "application_form_status": "已填写报名",
+            "advisor_names": "刘亚,何琳",
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["advisor_names"] == ["刘亚", "何琳"]
+
+
 def test_create_registered_portal_student_export_job_endpoint_returns_job(monkeypatch, client: TestClient) -> None:
     access_token = _install_principal_resolution(monkeypatch, "student-admin", ["students:read"])
     monkeypatch.setattr(

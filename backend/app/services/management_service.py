@@ -50,14 +50,6 @@ class LazyRuntimeManagementStore:
 store = LazyRuntimeManagementStore()
 
 
-def repair_startup_postgres_state() -> dict[str, int]:
-    postgres_store = PostgresStateStore()
-    renamed_recruitment_application_keys = postgres_store.normalize_recruitment_application_business_keys()
-    return {
-        "renamed_recruitment_application_keys": renamed_recruitment_application_keys,
-    }
-
-
 def warm_up_runtime_management_store() -> float:
     start = perf_counter()
     store._get_instance()

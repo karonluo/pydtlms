@@ -305,6 +305,46 @@ def test_list_registered_portal_students_page_marks_returned_forms(monkeypatch) 
     assert items[0]["application_form_status"] == "驳回重填"
 
 
+def test_list_registered_portal_students_page_filters_by_multiple_advisor_names(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[{"total": 1}],
+        fetchall_results=[[{
+            "id": 9,
+            "full_name": "李四",
+            "phone_number": "13800002222",
+            "email": "lisi@example.com",
+            "id_number": "320000199901011234",
+            "account_status": "启用",
+            "selected_plan_name": "2026博士招生",
+            "selected_team_name": "智能制造联合团队",
+            "selected_advisor_name": "何琳",
+            "created_at": "2026-04-01 10:00:00",
+            "submitted_at": "2026-04-20 10:00:00",
+            "recruitment_application_id": 25,
+            "recruitment_application_business_key": "RECRUIT-20260420-0025",
+            "application_status": "submitted",
+            "applied_at": "2026-04-20 10:00:00",
+        }]],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    items, total = store.list_registered_portal_students_page(
+        advisor_names=["刘亚", "何琳"],
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 1
+    assert items[0]["selected_advisor_name"] == "何琳"
+    count_sql, count_params = cursor.executed[0]
+    assert "selected_advisor_name" in count_sql
+    assert count_params == [["刘亚", "何琳"]]
+
+
 def test_sync_recruitment_application_status_falls_back_to_db_portal_student_id(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor(fetchone_results=[(7,)])
@@ -724,6 +764,7 @@ def test_get_recruitment_application_detail_returns_full_portal_v2_sections(monk
             [{"id": 31, "exam_name": "IELTS", "score_text": "7.0", "certificate_attachment_url": "/api/v1/portal/attachments/ielts.pdf"}],
             [],
             [{"id": 41, "achievement_type": "获奖经历", "paper_title": None, "author_order": None, "journal_or_conference": None, "publish_or_index_month": None, "achievement_month": "2024-06", "award_name": "挑战杯", "award_rank": "一等奖", "award_certificate_attachment_url": "/api/v1/portal/attachments/award.pdf", "awarding_organization": None, "award_level": "一等奖", "award_year": "2024", "description_text": "获奖描述", "responsibility_text": "获奖描述"}],
+            [{"evaluator_user_id": 7, "evaluator_username": "admin", "evaluator_name": "管理员", "evaluator_role_code": "platform_admin", "assessment_result": "通过", "assessment_comment": "综合表现稳定", "assessed_at": "2026-05-21 09:30:00"}],
         ],
     )
     connection = FakeConnection(cursor)
@@ -746,6 +787,9 @@ def test_get_recruitment_application_detail_returns_full_portal_v2_sections(monk
     assert len(item["achievement_records"]) == 1
     assert item["achievement_records"][0]["award_name"] == "挑战杯"
     assert item["achievement_records"][0]["award_certificate_attachment_name"] == "award.pdf"
+    assert len(item["background_assessments"]) == 1
+    assert item["background_assessments"][0]["evaluator_name"] == "管理员"
+    assert item["background_assessments"][0]["assessment_result"] == "通过"
     assert item["personal_statement"]["growth_experience_text"] == "成长经历"
     assert item["personal_statement"]["program_application_reason_text"] == "申报理由"
     assert item["personal_statement"]["career_plan_text"] == "职业规划"
@@ -809,6 +853,73 @@ def test_sync_portal_application_submission_syncs_workflow_task_when_provided(mo
         }
     ]
     assert connection.committed is True
+
+
+def test_sync_portal_application_submission_allows_null_research_center_name(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchone_results=[None])
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+    monkeypatch.setattr(store, "_sync_runtime_counters_in_tx", lambda cur, counters: None)
+    monkeypatch.setattr(store, "_sync_operation_log_in_tx", lambda cur, operation_log: None)
+    monkeypatch.setattr(store, "_derive_portal_profile", lambda portal_student_payload: None)
+    monkeypatch.setattr(
+        store,
+        "_derive_portal_application_draft",
+        lambda portal_student_payload: {
+            "preferences": [
+                {
+                    "preference_order": 1,
+                    "team_id": None,
+                    "research_center_name": None,
+                    "advisor_user_id": 21,
+                    "advisor_name": "张文蔚",
+                    "is_optional": False,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(store, "_execute_dynamic", lambda cur, sql, params=None: cur.execute(sql, params))
+    monkeypatch.setattr(store, "_sync_workflow_task_in_tx", lambda cur, task_payload: None)
+
+    store.sync_portal_application_submission(
+        {
+            "id": 19,
+            "full_name": "导师直选学生",
+            "phone_number": "13800001119",
+            "email": "advisor-only@example.com",
+            "id_number": "320000199901011119",
+            "password_hash": "hashed",
+            "account_status": "启用",
+            "created_at": "2026-05-21 20:00:00",
+            "updated_at": "2026-05-21 20:00:00",
+        },
+        {
+            "id": 407,
+            "portal_student_id": 19,
+            "plan_id": 3,
+            "business_key": "SH20270019",
+            "student_name": "导师直选学生",
+            "application_status": "报名已提交",
+            "material_status": "待审核",
+            "created_at": "2026-05-21 20:00:00",
+            "updated_at": "2026-05-21 20:00:00",
+        },
+        None,
+    )
+
+    preference_inserts = [
+        params
+        for sql, params in cursor.executed
+        if "INSERT INTO dtlms_portal_application_preferences" in sql
+    ]
+
+    assert len(preference_inserts) == 1
+    assert preference_inserts[0][2] is None
+    assert preference_inserts[0][3] == ""
+    assert preference_inserts[0][5] == "张文蔚"
 
 
 def test_derive_portal_profile_includes_id_card_collage_url() -> None:

@@ -54,6 +54,16 @@ pydtlms/
 - 权限：RBAC + JWT
 - 审计：登录日志、操作日志、同步日志
 
+## 系统用户导入导出说明
+
+- 系统治理中的系统用户支持两类导出：导出当前筛选结果、导出当前勾选记录。
+- 系统用户支持 Excel 批量导入，建议先下载“系统用户导入模板.xlsx”后填写再导入。
+- 导入按账号处理：Excel 中账号已存在则更新该账号；账号为空则根据姓名中文生成拼音账号，若重名则按“账号+顺序数字”自动补唯一值后新建。
+- 导入时会按 Excel 中的“账号状态”覆盖系统用户当前状态，因此可以批量把账号更新为“启用”或“停用”。
+- 导入模板包含系统用户治理所需字段；其中部门、邮箱、电话、用户介绍、登录密码可以留空。
+- 登录密码留空时：若该行没有账号而由系统自动新建，则默认初始密码为“最终登录名@123”；若该行已有账号并走更新，则保持原密码不变；若填写了登录密码，则按填写值覆盖更新密码。
+- 导入结果全部成功时返回“全部成功”；若存在失败行，系统会返回失败的姓名、账号和失败原因，便于修正后重新导入。
+
 ## 快速开始
 
 ### 1. Python 虚拟环境
@@ -457,6 +467,20 @@ Linux 使用项目虚拟环境执行示例：
 - 脚本以单事务执行整份 SQL，执行异常会回滚。
 - `--dry-run` 只校验文件可读、目标库名称和连接参数来源，不真正执行 SQL。
 - 运行前需确认当前 `backend/.env` 中的 `POSTGRES_HOST`、`POSTGRES_PORT`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 指向正确环境。
+
+仓库另提供一次性数据修复脚本 [backend/scripts/normalize_recruitment_application_business_keys.py](backend/scripts/normalize_recruitment_application_business_keys.py)，用于手工统一招生报名 `business_key/candidate_no` 与 Flowable 兼容表里的业务编号。该修复已不再随服务启动自动执行；仅在历史数据需要补修时手工运行。
+
+Windows 根目录手工执行示例：
+
+```powershell
+.\.venv\Scripts\python.exe backend\scripts\normalize_recruitment_application_business_keys.py --apply
+```
+
+只读检查示例：
+
+```powershell
+.\.venv\Scripts\python.exe backend\scripts\normalize_recruitment_application_business_keys.py --dry-run
+```
 
 ### 3. 数据库升级标准步骤
 

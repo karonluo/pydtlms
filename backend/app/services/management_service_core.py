@@ -640,6 +640,28 @@ class RuntimeManagementStoreCoreMixin:
             options.append(SelectOption(label=self._build_advisor_option_label(item), value=str(advisor_id) if advisor_id is not None else full_name))
         return options
 
+    def _registered_portal_advisor_filter_options(self) -> list[SelectOption]:
+        try:
+            advisor_rows, _ = self._postgres_store.list_system_users_page(role_code="advisor", page=1, page_size=1000)
+        except Exception as exc:
+            logger.exception("Load advisor filter options from PostgreSQL failed")
+            raise DatabaseUnavailableError("数据库暂不可用，请稍后重试") from exc
+
+        status_map: dict[str, set[str]] = {}
+        for item in advisor_rows:
+            full_name = str(item.get("full_name") or "").strip()
+            if not full_name:
+                continue
+            account_status = str(item.get("account_status") or "").strip() or "未知"
+            status_map.setdefault(full_name, set()).add(account_status)
+
+        options: list[SelectOption] = []
+        for full_name in sorted(status_map.keys()):
+            statuses = sorted(status_map[full_name], key=lambda item: (item != "启用", item))
+            label_suffix = "/".join(statuses)
+            options.append(SelectOption(label=f"{full_name}（{label_suffix}）", value=full_name))
+        return options
+
     def _resolve_portal_advisor_selection(
         self,
         selected_advisor_user_id: int | None,
@@ -1180,6 +1202,7 @@ class RuntimeManagementStoreCoreMixin:
 
     def get_student_options(self) -> StudentOptionsResponse:
         advisor_options = self._advisor_select_options()
+        registered_portal_advisor_filter_options = self._registered_portal_advisor_filter_options()
         advisor_option_map = {item.value: item for item in advisor_options}
         centers = self.get_centers(page=1, page_size=1000).items
         political_values = {
@@ -1190,6 +1213,7 @@ class RuntimeManagementStoreCoreMixin:
             status_options=self._dict_options("student_status"),
             degree_options=self._dict_options("student_degree_type"),
             advisor_options=advisor_options,
+            registered_portal_advisor_filter_options=registered_portal_advisor_filter_options,
             center_options=[SelectOption(label=item.center_name, value=item.center_name) for item in centers if item.is_enabled],
             political_status_options=self._select_options_from_values(political_values),
             center_advisor_map=[

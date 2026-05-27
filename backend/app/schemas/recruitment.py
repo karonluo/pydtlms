@@ -134,6 +134,16 @@ class RecruitPlanListResponse(PaginationResponseBase):
     items: list[RecruitPlanRecord]
 
 
+class BackgroundAssessmentRecord(BaseModel):
+    evaluator_user_id: int | None = None
+    evaluator_username: str
+    evaluator_name: str | None = None
+    evaluator_role_code: str
+    assessment_result: str
+    assessment_comment: str | None = None
+    assessed_at: str | None = None
+
+
 class RecruitApplicationRecord(BaseModel):
     id: int
     plan_id: int
@@ -197,6 +207,7 @@ class RecruitApplicationRecord(BaseModel):
     application_status: str
     reviewer_name: str | None = None
     final_score: float | None = None
+    background_assessments: list[BackgroundAssessmentRecord] = Field(default_factory=list)
     profile: PortalApplicantProfileData | None = None
     preferences: list[PortalApplicationPreferenceItem] = Field(default_factory=list)
     education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
@@ -294,6 +305,7 @@ class RecruitPortalApplicationDetail(BaseModel):
     material_status: str
     reviewer_name: str | None = None
     submitted_at: str | None = None
+    background_assessments: list[BackgroundAssessmentRecord] = Field(default_factory=list)
     profile: PortalApplicantProfileData | None = None
     source_channel: str | None = None
     source_channel_other: str | None = None

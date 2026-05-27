@@ -53,6 +53,13 @@ from app.services.dashboard_service import (
 router = APIRouter(prefix="/students", tags=["students"])
 
 
+def _normalize_multi_value_filter(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    values = [item.strip() for item in str(raw_value).split(",")]
+    return [item for item in values if item]
+
+
 @router.get("/lifecycle", response_model=StudentLifecycleBoard)
 def student_lifecycle(principal: Principal = Depends(require_permissions("students:read"))) -> StudentLifecycleBoard:
     return get_student_lifecycle_board()
@@ -75,6 +82,7 @@ def student_management_list(
 def registered_portal_student_list(
     keyword: str | None = Query(default=None),
     application_form_status: str | None = Query(default=None),
+    advisor_names: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("students:read")),
@@ -82,6 +90,7 @@ def registered_portal_student_list(
     return get_registered_portal_student_list(
         keyword=keyword,
         application_form_status=application_form_status,
+        advisor_names=_normalize_multi_value_filter(advisor_names),
         page=page,
         page_size=page_size,
     )
@@ -97,6 +106,7 @@ def export_registered_portal_student_records(
             payload.ids,
             keyword=payload.keyword,
             application_form_status=payload.application_form_status,
+            advisor_names=payload.advisor_names,
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc

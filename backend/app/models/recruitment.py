@@ -66,6 +66,20 @@ class QualificationReview(Base, TimestampMixin):
     review_comment: Mapped[str | None] = mapped_column(Text)
 
 
+class BackgroundAssessment(Base, TimestampMixin):
+    __tablename__ = "dtlms_background_assessments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("dtlms_recruitment_applications.id"), nullable=False)
+    evaluator_user_id: Mapped[int | None] = mapped_column(Integer)
+    evaluator_username: Mapped[str] = mapped_column(String(64), nullable=False)
+    evaluator_name: Mapped[str | None] = mapped_column(String(128))
+    evaluator_role_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    assessment_result: Mapped[str] = mapped_column(String(32), nullable=False)
+    assessment_comment: Mapped[str | None] = mapped_column(Text)
+    assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 class ReviewerAssignment(Base, TimestampMixin):
     __tablename__ = "dtlms_reviewer_assignments"
 

@@ -1,5 +1,5 @@
 import type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
-import http from './http'
+import http, { DEFAULT_HTTP_TIMEOUT_MS } from './http'
 
 
 export type { BulkActionResponse, PagedResponse, PaginationParams, SelectOption } from './common'
@@ -100,6 +100,57 @@ export type SystemUserUpsert = {
   phone_number?: string | null
   account_status: string
   password?: string | null
+}
+
+
+export type SystemUserExportRequest = {
+  ids?: number[]
+  keyword?: string
+  role_code?: string
+  account_status?: string
+  department_name?: string
+}
+
+
+export type SystemUserImportIssue = {
+  row_number: number
+  full_name?: string | null
+  username?: string | null
+  reason: string
+}
+
+
+export type SystemUserImportRow = {
+  row_number: number
+  username?: string | null
+  full_name?: string | null
+  role_name?: string | null
+  role_code?: string | null
+  department_name?: string | null
+  email?: string | null
+  phone_number?: string | null
+  account_status?: string | null
+  introduction?: string | null
+  password?: string | null
+}
+
+
+export type SystemUserImportParseResult = {
+  total_count: number
+  rows: SystemUserImportRow[]
+}
+
+const SYSTEM_USER_IMPORT_TIMEOUT_MS = DEFAULT_HTTP_TIMEOUT_MS
+
+
+export type SystemUserImportResult = {
+  total_count: number
+  success_count: number
+  created_count: number
+  updated_count: number
+  failed_count: number
+  issues: SystemUserImportIssue[]
+  message: string
 }
 
 
@@ -286,6 +337,46 @@ export function deleteSystemUser(id: number) {
 
 export function batchDeleteSystemUsers(ids: number[]) {
   return http.post<BulkActionResponse>('/system/users/batch-delete', { ids })
+}
+
+
+export function exportSystemUsers(payload: SystemUserExportRequest) {
+  return http.post<Blob>('/system/users/export', payload, { responseType: 'blob' })
+}
+
+
+export function importSystemUsers(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<SystemUserImportResult>('/system/users/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+}
+
+
+export function parseSystemUserImportFile(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<SystemUserImportParseResult>('/system/users/import/parse', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    timeout: SYSTEM_USER_IMPORT_TIMEOUT_MS,
+  })
+}
+
+
+export function importSystemUserRows(rows: SystemUserImportRow[]) {
+  return http.post<SystemUserImportResult>('/system/users/import/batch', { rows }, { timeout: SYSTEM_USER_IMPORT_TIMEOUT_MS })
+}
+
+
+export function downloadSystemUserTemplate() {
+  return http.get<Blob>('/system/users/template', {
+    responseType: 'blob',
+  })
 }
 
 

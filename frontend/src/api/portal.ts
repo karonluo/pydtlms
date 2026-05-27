@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { DEFAULT_HTTP_TIMEOUT_MS } from './http'
 
 import type { SelectOption } from './common'
 
@@ -361,10 +362,10 @@ export type PortalAttachmentUploadResponse = {
 
 const portalHttp = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
-  timeout: 10000,
+  timeout: DEFAULT_HTTP_TIMEOUT_MS,
 })
 
-const PORTAL_EMAIL_REQUEST_TIMEOUT_MS = 60000
+const PORTAL_EMAIL_REQUEST_TIMEOUT_MS = DEFAULT_HTTP_TIMEOUT_MS
 
 portalHttp.interceptors.request.use((config) => {
   const token = localStorage.getItem(PORTAL_TOKEN_KEY)

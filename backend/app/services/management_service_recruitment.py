@@ -30,6 +30,7 @@ class RuntimeManagementStoreRecruitmentMixin:
             material_status=application.material_status,
             reviewer_name=application.reviewer_name,
             submitted_at=application.applied_at,
+            background_assessments=list(application.background_assessments or []),
             profile=application.profile,
             source_channel=application.source_channel or application.discovery_channel,
             source_channel_other=application.source_channel_other,
@@ -192,6 +193,27 @@ class RuntimeManagementStoreRecruitmentMixin:
     def get_recruitment_portal_application_detail(self, application_id: int) -> RecruitPortalApplicationDetail:
         application = self.get_recruitment_application_detail(application_id)
         return self._build_recruitment_portal_application_detail(application)
+
+    def get_dashboard_undergraduate_school_rankings(self, limit: int = 20) -> list[DashboardUndergraduateSchoolRankingItem]:
+        try:
+            items = self._postgres_store.list_dashboard_undergraduate_school_rankings(limit=limit)
+            return [DashboardUndergraduateSchoolRankingItem(**item) for item in items]
+        except Exception as exc:
+            logger.warning("Query dashboard undergraduate school rankings from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("本科院校排名当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+
+    def get_dashboard_undergraduate_school_students(self, school_name: str) -> DashboardUndergraduateSchoolStudentListResponse:
+        try:
+            items = self._postgres_store.list_dashboard_undergraduate_school_students(school_name)
+            normalized_school_name = str(school_name or "").strip()
+            return DashboardUndergraduateSchoolStudentListResponse(
+                school_name=normalized_school_name,
+                total=len(items),
+                items=[DashboardUndergraduateSchoolStudentItem(**item) for item in items],
+            )
+        except Exception as exc:
+            logger.warning("Query dashboard undergraduate school student list from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("本科院校报名学生清单当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
     def create_recruitment_application(self, payload: RecruitApplicationUpsert, principal: Any | None = None) -> RecruitApplicationRecord:
         with self._lock:
