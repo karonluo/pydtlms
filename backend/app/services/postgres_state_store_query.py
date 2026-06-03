@@ -229,6 +229,22 @@ class PostgresStateStoreQueryMixin:
                     )
                 return cur.fetchone() is not None
 
+    def missing_permission_codes(self, permission_codes: list[str]) -> list[str]:
+        normalized_codes = list(dict.fromkeys(str(code).strip() for code in permission_codes if str(code).strip()))
+        if not normalized_codes:
+            return []
+        placeholders = ", ".join(["%s"] * len(normalized_codes))
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._execute_dynamic(
+                    cur,
+                    f"SELECT permission_code FROM dtlms_permissions WHERE is_deleted = FALSE AND permission_code IN ({placeholders})",
+                    normalized_codes,
+                )
+                existing_codes = {str(row[0]).strip() for row in cur.fetchall() if str(row[0]).strip()}
+        return [code for code in normalized_codes if code not in existing_codes]
+
     def load_system_user_state(self) -> list[dict[str, Any]]:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -620,6 +636,48 @@ class PostgresStateStoreQueryMixin:
                 )
                 background_assessments = [dict(item) for item in cur.fetchall()]
 
+                cur.execute(
+                    """
+                    SELECT
+                        reviewer_username,
+                        reviewer_name,
+                        reviewer_role_code,
+                        action,
+                        action_label,
+                        review_comment,
+                        reviewed_at
+                    FROM dtlms_qualification_review_logs
+                    WHERE application_id = %s
+                    ORDER BY reviewed_at DESC, id DESC
+                    """,
+                    (int(application_id),),
+                )
+                qualification_review_history = [dict(item) for item in cur.fetchall()]
+
+                screening_round = str(application_row.get("advisor_screening_round") or "").strip()
+                current_screening_batch_id = (
+                    int(application_row.get("second_choice_screening_batch_id") or 0)
+                    if screening_round == "second_choice"
+                    else int(application_row.get("first_choice_screening_batch_id") or 0)
+                ) or None
+                if current_screening_batch_id is None:
+                    current_screening_batch_id = int(application_row.get("first_choice_screening_batch_id") or 0) or int(application_row.get("second_choice_screening_batch_id") or 0) or None
+
+                advisor_screening_batch: dict[str, Any] = {}
+                if current_screening_batch_id is not None:
+                    cur.execute(
+                        """
+                        SELECT signature_base64, submitted_at
+                        FROM dtlms_advisor_screening_batches
+                        WHERE id = %s
+                        LIMIT 1
+                        """,
+                        (int(current_screening_batch_id),),
+                    )
+                    advisor_screening_batch_row = cur.fetchone()
+                    if advisor_screening_batch_row is not None:
+                        advisor_screening_batch = dict(advisor_screening_batch_row)
+
                 application = self._normalize_recruitment_application_row(dict(application_row))
                 profile = self._derive_portal_profile(dict(application_row))
                 if profile is not None:
@@ -631,6 +689,13 @@ class PostgresStateStoreQueryMixin:
                     }
                     for item in background_assessments
                 ]
+                application["qualification_review_history"] = [
+                    {
+                        **item,
+                        "reviewed_at": self._stringify_datetime(item.get("reviewed_at")),
+                    }
+                    for item in qualification_review_history
+                ]
                 application["preferences"] = preferences
                 application["education_experiences"] = education_experiences
                 application["practice_experiences"] = practice_experiences
@@ -639,6 +704,12 @@ class PostgresStateStoreQueryMixin:
                 application["achievement_records"] = achievement_records
                 application["personal_statement"] = personal_statement
                 application["declaration"] = dict(declaration_row) if declaration_row else {"has_read_declaration": False}
+                application["advisor_signature_base64"] = advisor_screening_batch.get("signature_base64")
+                application["advisor_screening_submitted_at"] = self._stringify_datetime(
+                    advisor_screening_batch.get("submitted_at")
+                    or application.get("second_choice_screening_submitted_at")
+                    or application.get("first_choice_screening_submitted_at")
+                )
                 application["material_list_attachment_name"] = self._resolve_attachment_name(
                     attachment_rows,
                     "portal_application",
@@ -919,8 +990,10 @@ class PostgresStateStoreQueryMixin:
                 cur.execute(
                     """
                     SELECT id, plan_id, business_key, candidate_no, source_channel, source_channel_other,
-                           intended_advisor_name, application_status, applied_at
-                        , first_choice_team_id, second_choice_team_id, intended_advisor_user_id
+                           intended_advisor_name, application_status, applied_at,
+                           advisor_screening_status, advisor_screening_round,
+                           initial_screening_status, initial_screening_result,
+                           first_choice_team_id, second_choice_team_id, intended_advisor_user_id
                     FROM dtlms_recruitment_applications
                     WHERE is_deleted = FALSE AND portal_student_id = %s
                     ORDER BY CASE WHEN plan_id = %s THEN 0 ELSE 1 END,
@@ -1052,6 +1125,29 @@ class PostgresStateStoreQueryMixin:
                     (application_id,),
                 )
                 declaration_row = cur.fetchone()
+                cur.execute(
+                    """
+                    SELECT
+                        evaluator_user_id,
+                        evaluator_username,
+                        evaluator_name,
+                        evaluator_role_code,
+                        assessment_result,
+                        assessment_comment,
+                        assessed_at
+                    FROM dtlms_background_assessments
+                    WHERE application_id = %s
+                    ORDER BY assessed_at ASC, id ASC
+                    """,
+                    (application_id,),
+                )
+                background_assessments = [
+                    {
+                        **dict(item),
+                        "assessed_at": self._stringify_datetime(item.get("assessed_at")),
+                    }
+                    for item in cur.fetchall()
+                ]
                 student["application_draft"] = {
                     "selected_plan_id": int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None,
                     "selected_team_id": int(student.get("selected_team_id") or 0) or None,
@@ -1088,6 +1184,12 @@ class PostgresStateStoreQueryMixin:
                     personal_statement["supporting_material_attachment_url"] = application.get("material_list_attachment")
                 student["business_key"] = application.get("business_key")
                 student["candidate_no"] = application.get("candidate_no")
+                student["recruitment_application_status"] = self._application_status_label(application.get("application_status"))
+                student["advisor_screening_status"] = application.get("advisor_screening_status")
+                student["advisor_screening_round"] = application.get("advisor_screening_round")
+                student["initial_screening_status"] = application.get("initial_screening_status")
+                student["initial_screening_result"] = application.get("initial_screening_result")
+                student["background_assessments"] = background_assessments
                 if preferences:
                     student["selected_team_id"] = int(preferences[0].get("team_id") or application.get("first_choice_team_id") or student.get("selected_team_id") or 0) or None
                     student["selected_team_name"] = preferences[0].get("research_center_name") or student.get("selected_team_name")
@@ -1716,6 +1818,8 @@ class PostgresStateStoreQueryMixin:
         self,
         keyword: str | None = None,
         application_form_status: str | None = None,
+        recruitment_application_status: str | None = None,
+        exclude_background_assessed_username: str | None = None,
         advisor_names: list[str] | None = None,
         page: int = 1,
         page_size: int = 10,
@@ -1754,10 +1858,36 @@ class PostgresStateStoreQueryMixin:
             where_clauses.append("COALESCE(latest_application.application_status, '') <> 'returned'")
             where_clauses.append("COALESCE(ps.submitted_at, latest_application.applied_at) IS NULL")
 
+        normalized_recruitment_status = str(recruitment_application_status or "").strip()
+        if normalized_recruitment_status:
+            candidate_statuses = [normalized_recruitment_status]
+            mapped_recruitment_status = self._map_application_status(normalized_recruitment_status)
+            if mapped_recruitment_status != normalized_recruitment_status and self._application_status_label(mapped_recruitment_status) == normalized_recruitment_status:
+                candidate_statuses.append(mapped_recruitment_status)
+            where_clauses.append("COALESCE(latest_application.application_status, '') = ANY(%s)")
+            params.append(candidate_statuses)
+
         normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
         if normalized_advisor_names:
             where_clauses.append("COALESCE(ps.selected_advisor_name, '') = ANY(%s)")
             params.append(normalized_advisor_names)
+
+        normalized_background_assessed_username = str(exclude_background_assessed_username or "").strip()
+        if normalized_background_assessed_username:
+            where_clauses.append(
+                """
+                (
+                    COALESCE(latest_application.application_status, '') <> 'background_review'
+                    OR NOT EXISTS (
+                        SELECT 1
+                        FROM dtlms_background_assessments ba
+                        WHERE ba.application_id = latest_application.id
+                          AND COALESCE(ba.evaluator_username, '') = %s
+                    )
+                )
+                """
+            )
+            params.append(normalized_background_assessed_username)
 
         where_sql = " AND ".join(where_clauses)
         latest_application_sql = """
@@ -1857,6 +1987,244 @@ class PostgresStateStoreQueryMixin:
                     for row in cur.fetchall()
                 ]
 
+    def list_dashboard_undergraduate_school_group_distribution(self) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH target_groups(dict_type, group_name, group_order) AS (
+                        VALUES
+                            ('system_c9_university', 'C9大学', 1),
+                            ('system_211_university', '211大学', 2),
+                            ('system_985_university', '985大学', 3)
+                    ),
+                    dictionary_schools AS (
+                        SELECT
+                            tg.dict_type,
+                            tg.group_name,
+                            tg.group_order,
+                            NULLIF(BTRIM(d.label), '') AS school_name,
+                            d.sort_order
+                        FROM target_groups tg
+                        JOIN dtlms_dict_types t
+                          ON t.dict_type = tg.dict_type
+                         AND t.is_deleted = FALSE
+                         AND t.status = '启用'
+                        JOIN dtlms_dict_data d
+                          ON d.dict_type_id = t.id
+                         AND d.dict_type = t.dict_type
+                         AND d.is_deleted = FALSE
+                         AND d.status = '启用'
+                        WHERE NULLIF(BTRIM(d.label), '') IS NOT NULL
+                    ),
+                    latest_application AS (
+                        SELECT DISTINCT ON (ps.id)
+                            ps.id AS portal_student_id,
+                            COALESCE(
+                                undergraduate_education.school_name,
+                                NULLIF(BTRIM(ra.undergraduate_school), '')
+                            ) AS school_name
+                        FROM dtlms_portal_students ps
+                        JOIN dtlms_recruitment_applications ra ON ra.portal_student_id = ps.id AND ra.is_deleted = FALSE
+                        LEFT JOIN LATERAL (
+                            SELECT NULLIF(BTRIM(ee.school_name), '') AS school_name
+                            FROM dtlms_portal_application_education_experiences ee
+                            WHERE ee.application_id = ra.id
+                              AND ee.education_stage IN ('本科在读', '本科毕业')
+                              AND NULLIF(BTRIM(ee.school_name), '') IS NOT NULL
+                            ORDER BY ee.sort_order ASC, ee.id ASC
+                            LIMIT 1
+                        ) undergraduate_education ON TRUE
+                        ORDER BY ps.id, COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                    ),
+                    latest_application_total AS (
+                        SELECT COUNT(*)::int AS total_applications
+                        FROM latest_application
+                        WHERE school_name IS NOT NULL AND BTRIM(school_name) <> ''
+                    ),
+                    school_counts AS (
+                        SELECT school_name, COUNT(*)::int AS student_count
+                        FROM latest_application
+                        WHERE school_name IS NOT NULL AND BTRIM(school_name) <> ''
+                        GROUP BY school_name
+                    ),
+                    grouped_counts AS (
+                        SELECT
+                            ds.dict_type,
+                            ds.group_name,
+                            ds.group_order,
+                            ds.school_name,
+                            ds.sort_order,
+                            COALESCE(SUM(sc.student_count), 0)::int AS student_count
+                        FROM dictionary_schools ds
+                        LEFT JOIN school_counts sc ON sc.school_name LIKE ds.school_name || '%%'
+                        GROUP BY ds.dict_type, ds.group_name, ds.group_order, ds.school_name, ds.sort_order
+                    )
+                    SELECT
+                        gc.dict_type,
+                        gc.group_name,
+                        gc.school_name,
+                        gc.student_count,
+                        SUM(gc.student_count) OVER (PARTITION BY gc.dict_type)::int AS group_total,
+                        lat.total_applications
+                    FROM grouped_counts gc
+                    CROSS JOIN latest_application_total lat
+                    ORDER BY gc.group_order ASC, gc.student_count DESC, gc.sort_order ASC, gc.school_name ASC
+                    """
+                )
+                group_order = [
+                    ("system_c9_university", "C9大学"),
+                    ("system_211_university", "211大学"),
+                    ("system_985_university", "985大学"),
+                ]
+                groups: dict[str, dict[str, Any]] = {
+                    dict_type: {"group_name": group_name, "dict_type": dict_type, "total": 0, "items": []}
+                    for dict_type, group_name in group_order
+                }
+                total_applications = 0
+                for row in cur.fetchall():
+                    dict_type = str(row.get("dict_type") or "")
+                    if dict_type not in groups:
+                        continue
+                    group_total = int(row.get("group_total") or 0)
+                    student_count = int(row.get("student_count") or 0)
+                    total_applications = int(row.get("total_applications") or total_applications or 0)
+                    groups[dict_type]["total"] = group_total
+                    groups[dict_type]["items"].append(
+                        {
+                            "school_name": str(row.get("school_name") or ""),
+                            "student_count": student_count,
+                            "percentage": round(student_count * 100 / group_total, 2) if group_total else 0.0,
+                        }
+                    )
+
+                return {
+                    "total_applications": total_applications,
+                    "groups": [groups[dict_type] for dict_type, _group_name in group_order],
+                }
+
+    def list_dashboard_undergraduate_school_group_students(
+        self,
+        *,
+        dict_type: str,
+        school_name: str | None = None,
+        bucket: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        normalized_dict_type = str(dict_type or "").strip()
+        normalized_school_name = str(school_name or "").strip()
+        normalized_bucket = str(bucket or "").strip().lower()
+        allowed_dict_types = {"system_c9_university", "system_211_university", "system_985_university"}
+        if normalized_dict_type not in allowed_dict_types:
+            return []
+
+        if normalized_bucket == "other":
+            selected_condition = "school_rank > %s"
+            selected_params: list[Any] = [5]
+        elif normalized_school_name:
+            selected_condition = "school_name = %s"
+            selected_params = [normalized_school_name]
+        else:
+            return []
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                self._execute_dynamic(
+                    cur,
+                    f"""
+                    WITH dictionary_schools AS (
+                        SELECT
+                            NULLIF(BTRIM(d.label), '') AS school_name,
+                            d.sort_order
+                        FROM dtlms_dict_types t
+                        JOIN dtlms_dict_data d
+                          ON d.dict_type_id = t.id
+                         AND d.dict_type = t.dict_type
+                         AND d.is_deleted = FALSE
+                         AND d.status = '启用'
+                        WHERE t.dict_type = %s
+                          AND t.is_deleted = FALSE
+                          AND t.status = '启用'
+                          AND NULLIF(BTRIM(d.label), '') IS NOT NULL
+                    ),
+                    latest_application AS (
+                        SELECT DISTINCT ON (ps.id)
+                            ps.id AS portal_student_id,
+                            ps.full_name AS student_name,
+                            ps.phone_number,
+                            ps.email,
+                            ps.created_at AS registered_at,
+                            ra.id AS recruitment_application_id,
+                            ra.candidate_no,
+                            COALESCE(
+                                undergraduate_education.school_name,
+                                NULLIF(BTRIM(ra.undergraduate_school), '')
+                            ) AS school_name
+                        FROM dtlms_portal_students ps
+                        JOIN dtlms_recruitment_applications ra ON ra.portal_student_id = ps.id AND ra.is_deleted = FALSE
+                        LEFT JOIN LATERAL (
+                            SELECT NULLIF(BTRIM(ee.school_name), '') AS school_name
+                            FROM dtlms_portal_application_education_experiences ee
+                            WHERE ee.application_id = ra.id
+                              AND ee.education_stage IN ('本科在读', '本科毕业')
+                              AND NULLIF(BTRIM(ee.school_name), '') IS NOT NULL
+                            ORDER BY ee.sort_order ASC, ee.id ASC
+                            LIMIT 1
+                        ) undergraduate_education ON TRUE
+                        ORDER BY ps.id, COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                    ),
+                    school_counts AS (
+                        SELECT
+                            ds.school_name,
+                            ds.sort_order,
+                            COUNT(la.portal_student_id)::int AS student_count
+                        FROM dictionary_schools ds
+                        LEFT JOIN latest_application la ON la.school_name LIKE ds.school_name || '%%'
+                        GROUP BY ds.school_name, ds.sort_order
+                    ),
+                    ranked_schools AS (
+                        SELECT
+                            school_name,
+                            ROW_NUMBER() OVER (ORDER BY student_count DESC, sort_order ASC, school_name ASC)::int AS school_rank
+                        FROM school_counts
+                        WHERE student_count > 0
+                    ),
+                    selected_schools AS (
+                        SELECT school_name
+                        FROM ranked_schools
+                        WHERE {selected_condition}
+                    )
+                    SELECT
+                        la.recruitment_application_id,
+                        la.student_name,
+                        la.school_name,
+                        la.candidate_no,
+                        la.registered_at,
+                        la.phone_number,
+                        la.email
+                    FROM latest_application la
+                    JOIN selected_schools ss ON la.school_name LIKE ss.school_name || '%%'
+                    ORDER BY la.registered_at DESC NULLS LAST, la.recruitment_application_id DESC
+                    """,
+                    [normalized_dict_type, *selected_params],
+                )
+                return [
+                    {
+                        "recruitment_application_id": int(row.get("recruitment_application_id") or 0),
+                        "student_name": str(row.get("student_name") or ""),
+                        "school_name": row.get("school_name"),
+                        "candidate_no": row.get("candidate_no"),
+                        "registered_at": self._stringify_datetime(row.get("registered_at")),
+                        "phone_number": row.get("phone_number"),
+                        "email": row.get("email"),
+                    }
+                    for row in cur.fetchall()
+                    if int(row.get("recruitment_application_id") or 0) > 0
+                ]
+
     def list_dashboard_undergraduate_school_students(self, school_name: str) -> list[dict[str, Any]]:
         self.ensure_schema()
         normalized_school_name = str(school_name or "").strip()
@@ -1894,17 +2262,18 @@ class PostgresStateStoreQueryMixin:
                         ) undergraduate_education ON TRUE
                         ORDER BY ps.id, COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
                     )
-                    SELECT recruitment_application_id, student_name, candidate_no, registered_at, phone_number, email
+                    SELECT recruitment_application_id, student_name, school_name, candidate_no, registered_at, phone_number, email
                     FROM latest_application
-                    WHERE school_name = %s
+                    WHERE school_name LIKE %s
                     ORDER BY registered_at DESC NULLS LAST, recruitment_application_id DESC
                     """,
-                    (normalized_school_name,),
+                    (f"{normalized_school_name}%",),
                 )
                 return [
                     {
                         "recruitment_application_id": int(row.get("recruitment_application_id") or 0),
                         "student_name": str(row.get("student_name") or ""),
+                        "school_name": row.get("school_name"),
                         "candidate_no": row.get("candidate_no"),
                         "registered_at": self._stringify_datetime(row.get("registered_at")),
                         "phone_number": row.get("phone_number"),
@@ -2155,6 +2524,9 @@ class PostgresStateStoreQueryMixin:
         keyword: str | None = None,
         plan_id: int | None = None,
         status: str | None = None,
+        portal_student_only: bool = False,
+        advisor_name: str | None = None,
+        advisor_names: list[str] | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -2166,9 +2538,56 @@ class PostgresStateStoreQueryMixin:
         if plan_id is not None:
             where_clauses.append("ra.plan_id = %s")
             params.append(int(plan_id))
+        if portal_student_only:
+            where_clauses.append("ra.portal_student_id IS NOT NULL")
         if status:
-            where_clauses.append("ra.application_status = %s")
-            params.append(self._map_application_status(status))
+            status_filters = [
+                self._map_application_status(item)
+                for item in (segment.strip() for segment in str(status).split(","))
+                if item
+            ]
+            if len(status_filters) == 1:
+                where_clauses.append("ra.application_status = %s")
+                params.append(status_filters[0])
+            elif status_filters:
+                where_clauses.append("ra.application_status = ANY(%s)")
+                params.append(status_filters)
+        if advisor_name and str(advisor_name).strip():
+            normalized_advisor_name = str(advisor_name).strip()
+            where_clauses.append(
+                """
+                (
+                    (
+                        COALESCE(ra.advisor_screening_round, '') = 'second_choice'
+                        AND COALESCE(ra.second_choice, '') = %s
+                    )
+                    OR
+                    (
+                        COALESCE(ra.advisor_screening_round, '') <> 'second_choice'
+                        AND COALESCE(NULLIF(ra.first_choice, ''), ra.intended_advisor_name, '') = %s
+                    )
+                )
+                """
+            )
+            params.extend([normalized_advisor_name, normalized_advisor_name])
+        normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
+        if normalized_advisor_names:
+            where_clauses.append(
+                """
+                (
+                    (
+                        COALESCE(ra.advisor_screening_round, '') = 'second_choice'
+                        AND COALESCE(ra.second_choice, '') = ANY(%s)
+                    )
+                    OR
+                    (
+                        COALESCE(ra.advisor_screening_round, '') <> 'second_choice'
+                        AND COALESCE(NULLIF(ra.first_choice, ''), ra.intended_advisor_name, '') = ANY(%s)
+                    )
+                )
+                """
+            )
+            params.extend([normalized_advisor_names, normalized_advisor_names])
         if keyword and str(keyword).strip():
             keyword_like = f"%{str(keyword).strip()}%"
             where_clauses.append(
@@ -2208,11 +2627,16 @@ class PostgresStateStoreQueryMixin:
                 page_sql = f"""
                     SELECT
                         ra.*,
+                        CASE WHEN COALESCE(ps.account_status, 'active') = 'inactive' THEN '停用' ELSE '启用' END AS account_status,
+                        rp.plan_name AS selected_plan_name,
+                        ps.created_at AS registered_at,
                         rf.field_name AS intended_field,
                         am.material_status,
                         qr.reviewer_username AS reviewer_name,
                         ad.final_score
                     FROM dtlms_recruitment_applications ra
+                    LEFT JOIN dtlms_portal_students ps ON ps.id = ra.portal_student_id
+                    LEFT JOIN dtlms_recruitment_plans rp ON rp.id = ra.plan_id
                     LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
                     LEFT JOIN LATERAL (
                         SELECT material_status

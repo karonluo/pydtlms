@@ -3,6 +3,7 @@ VALUES
     ('platform_admin', '平台管理员', '系统级配置与全链路治理'),
     ('student', '博士生', '个人学习、培养与学位办理'),
     ('advisor', '导师', '培养方案制定、报告审阅、答辩指导'),
+    ('AILABMGT', '书院管理员', '招生初筛确认与背景评估管理'),
     ('secretary', '学位秘书', '学位流程复核、送审与归档管理'),
     ('recruit_reviewer', '评分人', '招生材料评审与推荐'),
     ('interview_officer', '面试官', '面试分组、评分与校算'),
@@ -13,9 +14,14 @@ ON CONFLICT (role_code) DO NOTHING;
 
 INSERT INTO dtlms_permissions (permission_code, permission_name, module_name)
 VALUES
-    ('dashboard:read', '查看驾驶舱', 'dashboard'),
+    ('dashboard:read', '查看经营总览', 'workspace'),
+    ('workflow_center_menu:read', '查看流程待办菜单', 'workspace'),
     ('recruitment:read', '查看招生工作台', 'recruitment'),
     ('recruitment:write', '维护招生流程', 'recruitment'),
+    ('recruitment_plan:read', '查看招生计划菜单', 'recruitment'),
+    ('recruitment_registered_students:read', '查看注册学生菜单', 'recruitment'),
+    ('recruitment_advisor_screening:read', '查看导师初筛菜单', 'recruitment'),
+    ('recruitment_initial_screening_confirmation:read', '查看初筛确认菜单', 'recruitment'),
     ('students:read', '查看学生主数据', 'students'),
     ('students:write', '维护学生主数据', 'students'),
     ('training:read', '查看培养过程', 'training'),
@@ -26,7 +32,7 @@ VALUES
     ('audit:write', '维护审计日志与同步策略', 'system'),
     ('system:read', '查看系统治理', 'system'),
     ('system:write', '维护系统治理', 'system'),
-    ('workflow:read', '查看流程中心', 'workflow'),
+    ('workflow:read', '查看流程处理数据', 'workflow'),
     ('workflow:write', '处理流程任务', 'workflow')
 ON CONFLICT (permission_code) DO NOTHING;
 
@@ -36,12 +42,13 @@ FROM dtlms_roles r
 JOIN dtlms_permissions p ON (
     (r.role_code = 'platform_admin') OR
     (r.role_code = 'student' AND p.permission_code IN ('dashboard:read')) OR
-    (r.role_code = 'advisor' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read', 'training:write', 'degree:read', 'workflow:read', 'workflow:write')) OR
+    (r.role_code = 'advisor' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'recruitment_plan:read', 'recruitment_registered_students:read', 'recruitment_advisor_screening:read', 'students:read', 'training:read', 'training:write', 'degree:read', 'workflow:read', 'workflow:write')) OR
+    (r.role_code = 'AILABMGT' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'recruitment_plan:read', 'recruitment_registered_students:read', 'recruitment_initial_screening_confirmation:read', 'students:read', 'workflow:read', 'workflow:write')) OR
     (r.role_code = 'secretary' AND p.permission_code IN ('dashboard:read', 'degree:read', 'degree:write', 'workflow:read', 'workflow:write', 'system:read')) OR
-    (r.role_code = 'recruit_reviewer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'workflow:read')) OR
-    (r.role_code = 'interview_officer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'workflow:read')) OR
-    (r.role_code = 'hrbp' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read')) OR
-    (r.role_code = 'party_affairs' AND p.permission_code IN ('dashboard:read', 'students:read', 'audit:read'))
+    (r.role_code = 'recruit_reviewer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment_plan:read', 'workflow:read')) OR
+    (r.role_code = 'interview_officer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'recruitment_plan:read', 'workflow:read')) OR
+    (r.role_code = 'hrbp' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read', 'recruitment_registered_students:read')) OR
+    (r.role_code = 'party_affairs' AND p.permission_code IN ('dashboard:read', 'students:read', 'audit:read', 'recruitment_registered_students:read'))
 )
 ON CONFLICT DO NOTHING;
 

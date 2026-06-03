@@ -16,7 +16,7 @@ from passlib.context import CryptContext
 from app.core.cache import build_cache_key, get_cache_client
 from app.core.exceptions import DatabaseUnavailableError
 from app.schemas.contact import validate_email, validate_optional_email, validate_optional_phone_number, validate_phone_number
-from app.schemas.auth import UserProfile, UserProfileUpdate
+from app.schemas.auth import Principal, UserProfile, UserProfileUpdate
 from app.schemas.portal import (
     PortalAdvisorRecord,
     PortalApplicationSubmissionResponse,
@@ -25,6 +25,7 @@ from app.schemas.portal import (
     PortalWorkflowProgressSummary,
     PortalWorkflowStageItem,
     PortalLoginRequest,
+    PortalImpersonationLaunchResponse,
     PortalPasswordChangeRequest,
     PortalPlanListResponse,
     PortalPlanRecord,
@@ -33,6 +34,7 @@ from app.schemas.portal import (
     PortalRegistrationEmailCodeResponse,
     PortalRegistrationRequest,
     PortalRegistrationResponse,
+    PortalSessionResponse,
     PortalStudentRecord,
     PortalTeamListResponse,
     PortalTeamRecord,
@@ -40,12 +42,18 @@ from app.schemas.portal import (
 from app.schemas.dashboard import (
     DashboardAlert,
     DashboardOverview,
+    DashboardUndergraduateSchoolGroupDistribution,
+    DashboardUndergraduateSchoolGroupDistributionResponse,
+    DashboardUndergraduateSchoolGroupItem,
     DashboardUndergraduateSchoolRankingItem,
     DashboardUndergraduateSchoolStudentItem,
     DashboardUndergraduateSchoolStudentListResponse,
     MetricCard,
 )
 from app.schemas.recruitment import (
+    AdvisorScreeningBatchSubmitRequest,
+    AdvisorScreeningBatchSubmitResponse,
+    InitialScreeningConfirmationRequest,
     RecruitApplicationImportIssue,
     RecruitApplicationImportResult,
     RecruitApplicationListResponse,
@@ -292,9 +300,9 @@ MANAGED_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "actions": {
                     "approve": {
                         "label": "评估通过",
-                        "next_node": "center_assessment",
+                        "next_node": "advisor_screening",
                         "task_status": "处理中",
-                        "field_updates": {"application_status": "待中心考核"},
+                        "field_updates": {"application_status": "待导师初筛-第一志愿"},
                     },
                     "reject": {
                         "label": "评估不通过",
@@ -304,9 +312,21 @@ MANAGED_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
-            "center_assessment": {
-                "label": "中心考核",
+            "advisor_screening": {
+                "label": "导师初筛",
                 "handler_roles": ["advisor"],
+                "due_days": 2,
+                "actions": {},
+            },
+            "initial_screening_confirmation": {
+                "label": "初筛确认",
+                "handler_roles": ["AILABMGT"],
+                "due_days": 2,
+                "actions": {},
+            },
+            "camp_interview": {
+                "label": "入营面试",
+                "handler_roles": ["AILABMGT"],
                 "due_days": 2,
                 "actions": {},
             },
@@ -562,6 +582,7 @@ DEFAULT_USER_PASSWORD = "ChangeMe@123"
 DEFAULT_PASSWORD_BY_USERNAME = {
     "admin": "Admin@123456",
     "liu.ya": "LiuYa@2026",
+    "qin.rao": "QinRao@2026",
     "yuan.ye": "YuanYe@2026",
     "xu.sutian": "XuSutian@2026",
     "zhou.qing": "ZhouQing@2026",
@@ -571,9 +592,14 @@ DEFAULT_PASSWORD_BY_USERNAME = {
     "sun.wei": "SunWei@2026",
 }
 PERMISSION_CATALOG: list[dict[str, str]] = [
-    {"code": "dashboard:read", "name": "查看驾驶舱", "module_name": "驾驶舱", "description": "查看系统总览、预警和统计看板。"},
+    {"code": "dashboard:read", "name": "查看经营总览", "module_name": "工作台", "description": "查看工作台下的经营总览、预警和统计看板。"},
+    {"code": "workflow_center_menu:read", "name": "查看流程待办菜单", "module_name": "工作台", "description": "查看工作台下的流程待办入口。"},
     {"code": "recruitment:read", "name": "查看招生业务", "module_name": "招生管理", "description": "查看招生计划、报名申请和过程数据。"},
     {"code": "recruitment:write", "name": "维护招生业务", "module_name": "招生管理", "description": "新建、编辑和推进招生业务流程。"},
+    {"code": "recruitment_plan:read", "name": "查看招生计划菜单", "module_name": "招生管理", "description": "查看招生管理下的招生计划入口。"},
+    {"code": "recruitment_registered_students:read", "name": "查看注册学生菜单", "module_name": "招生管理", "description": "查看招生管理下的注册学生入口。"},
+    {"code": "recruitment_advisor_screening:read", "name": "查看导师初筛菜单", "module_name": "招生管理", "description": "查看招生管理下的导师初筛入口。"},
+    {"code": "recruitment_initial_screening_confirmation:read", "name": "查看初筛确认菜单", "module_name": "招生管理", "description": "查看招生管理下的初筛确认入口。"},
     {"code": "students:read", "name": "查看学生主档", "module_name": "学生管理", "description": "查看学生档案、状态和导师信息。"},
     {"code": "students:write", "name": "维护学生主档", "module_name": "学生管理", "description": "维护学生信息、导师和团队关系。"},
     {"code": "training:read", "name": "查看培养业务", "module_name": "培养管理", "description": "查看培养方案、科研汇报和研修安排。"},
@@ -584,6 +610,6 @@ PERMISSION_CATALOG: list[dict[str, str]] = [
     {"code": "audit:write", "name": "维护审计治理", "module_name": "审计治理", "description": "维护审计策略和审计治理配置。"},
     {"code": "system:read", "name": "查看系统治理", "module_name": "系统管理", "description": "查看系统用户、角色、权限和集成信息。"},
     {"code": "system:write", "name": "维护系统治理", "module_name": "系统管理", "description": "维护系统用户、角色、权限和集成配置。"},
-    {"code": "workflow:read", "name": "查看流程任务", "module_name": "流程中心", "description": "查看审批任务和流程状态。"},
-    {"code": "workflow:write", "name": "处理流程任务", "module_name": "流程中心", "description": "处理审批任务和推进流程节点。"},
+    {"code": "workflow:read", "name": "查看流程处理数据", "module_name": "流程处理", "description": "查看流程详情、候选动作和状态数据，供各业务菜单内处理流程时使用。"},
+    {"code": "workflow:write", "name": "处理流程任务", "module_name": "流程处理", "description": "在各业务菜单内处理流程任务和推进流程节点。"},
 ]

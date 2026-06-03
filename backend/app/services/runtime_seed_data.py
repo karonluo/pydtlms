@@ -6,12 +6,36 @@ from typing import Any
 
 PERMISSION_GROUPS: dict[str, list[str]] = {
     "platform_admin": ["*"],
-    "advisor": ["dashboard:read", "students:read", "training:read", "training:write", "degree:read", "workflow:read", "workflow:write"],
+    "advisor": [
+        "dashboard:read",
+        "recruitment:read",
+        "recruitment:write",
+        "recruitment_plan:read",
+        "recruitment_registered_students:read",
+        "recruitment_advisor_screening:read",
+        "students:read",
+        "training:read",
+        "training:write",
+        "degree:read",
+        "workflow:read",
+        "workflow:write",
+    ],
+    "AILABMGT": [
+        "dashboard:read",
+        "recruitment:read",
+        "recruitment:write",
+        "recruitment_plan:read",
+        "recruitment_registered_students:read",
+        "recruitment_initial_screening_confirmation:read",
+        "students:read",
+        "workflow:read",
+        "workflow:write",
+    ],
     "secretary": ["dashboard:read", "degree:read", "degree:write", "workflow:read", "workflow:write"],
-    "recruit_reviewer": ["dashboard:read", "recruitment:read"],
-    "interview_officer": ["dashboard:read", "recruitment:read", "recruitment:write"],
-    "hrbp": ["dashboard:read", "students:read", "training:read"],
-    "party_affairs": ["dashboard:read", "students:read", "audit:read"],
+    "recruit_reviewer": ["dashboard:read", "recruitment:read", "recruitment_plan:read"],
+    "interview_officer": ["dashboard:read", "recruitment:read", "recruitment:write", "recruitment_plan:read"],
+    "hrbp": ["dashboard:read", "students:read", "training:read", "recruitment_registered_students:read"],
+    "party_affairs": ["dashboard:read", "students:read", "audit:read", "recruitment_registered_students:read"],
 }
 
 
@@ -29,23 +53,25 @@ def build_runtime_seed_state() -> dict[str, Any]:
     roles = [
         {"id": 1, "role_code": "platform_admin", "role_name": "平台管理员", "scope_name": "系统治理", "permissions": PERMISSION_GROUPS["platform_admin"]},
         {"id": 2, "role_code": "advisor", "role_name": "导师", "scope_name": "培养与学位", "permissions": PERMISSION_GROUPS["advisor"]},
-        {"id": 3, "role_code": "secretary", "role_name": "学位秘书", "scope_name": "学位管理", "permissions": PERMISSION_GROUPS["secretary"]},
-        {"id": 4, "role_code": "recruit_reviewer", "role_name": "评分人", "scope_name": "招生管理", "permissions": PERMISSION_GROUPS["recruit_reviewer"]},
-        {"id": 5, "role_code": "interview_officer", "role_name": "面试官", "scope_name": "招生管理", "permissions": PERMISSION_GROUPS["interview_officer"]},
-        {"id": 6, "role_code": "hrbp", "role_name": "中心HRBP", "scope_name": "跨部门协同", "permissions": PERMISSION_GROUPS["hrbp"]},
-        {"id": 7, "role_code": "party_affairs", "role_name": "党群负责人", "scope_name": "学生管理", "permissions": PERMISSION_GROUPS["party_affairs"]},
+        {"id": 3, "role_code": "AILABMGT", "role_name": "书院管理员", "scope_name": "招生管理", "permissions": PERMISSION_GROUPS["AILABMGT"]},
+        {"id": 4, "role_code": "secretary", "role_name": "学位秘书", "scope_name": "学位管理", "permissions": PERMISSION_GROUPS["secretary"]},
+        {"id": 5, "role_code": "recruit_reviewer", "role_name": "评分人", "scope_name": "招生管理", "permissions": PERMISSION_GROUPS["recruit_reviewer"]},
+        {"id": 6, "role_code": "interview_officer", "role_name": "面试官", "scope_name": "招生管理", "permissions": PERMISSION_GROUPS["interview_officer"]},
+        {"id": 7, "role_code": "hrbp", "role_name": "中心HRBP", "scope_name": "跨部门协同", "permissions": PERMISSION_GROUPS["hrbp"]},
+        {"id": 8, "role_code": "party_affairs", "role_name": "党群负责人", "scope_name": "学生管理", "permissions": PERMISSION_GROUPS["party_affairs"]},
     ]
 
     users = [
         {"id": 1, "username": "admin", "full_name": "系统管理员", "role_code": "platform_admin", "department_name": "学科与研究生管理处", "phone_number": "13800000000", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(hours=1))},
         {"id": 2, "username": "liu.ya", "full_name": "刘亚", "role_code": "advisor", "department_name": "智能制造学院", "phone_number": "13800000021", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=1, hours=2))},
-        {"id": 3, "username": "yuan.ye", "full_name": "袁野", "role_code": "advisor", "department_name": "工业软件学院", "phone_number": "13800000022", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=1, hours=3))},
-        {"id": 4, "username": "xu.sutian", "full_name": "徐素天", "role_code": "advisor", "department_name": "数据智能学院", "phone_number": "13800000023", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=2))},
-        {"id": 5, "username": "zhou.qing", "full_name": "周晴", "role_code": "secretary", "department_name": "学位办公室", "phone_number": "13800000024", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(hours=8))},
-        {"id": 6, "username": "he.lin", "full_name": "何琳", "role_code": "recruit_reviewer", "department_name": "招生办公室", "phone_number": "13800000025", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=2, hours=4))},
-        {"id": 7, "username": "cao.bo", "full_name": "曹博", "role_code": "interview_officer", "department_name": "招生办公室", "phone_number": "13800000026", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=3))},
-        {"id": 8, "username": "yang.qin", "full_name": "杨琴", "role_code": "hrbp", "department_name": "人力资源部", "phone_number": "13800000027", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=1, hours=5))},
-        {"id": 9, "username": "sun.wei", "full_name": "孙伟", "role_code": "party_affairs", "department_name": "党群工作部", "phone_number": "13800000028", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=4))},
+        {"id": 3, "username": "qin.rao", "full_name": "秦饶", "role_code": "AILABMGT", "department_name": "书院", "phone_number": "13800000022", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(hours=6))},
+        {"id": 4, "username": "yuan.ye", "full_name": "袁野", "role_code": "advisor", "department_name": "工业软件学院", "phone_number": "13800000023", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=1, hours=3))},
+        {"id": 5, "username": "xu.sutian", "full_name": "徐素天", "role_code": "advisor", "department_name": "数据智能学院", "phone_number": "13800000024", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=2))},
+        {"id": 6, "username": "zhou.qing", "full_name": "周晴", "role_code": "secretary", "department_name": "学位办公室", "phone_number": "13800000025", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(hours=8))},
+        {"id": 7, "username": "he.lin", "full_name": "何琳", "role_code": "recruit_reviewer", "department_name": "招生办公室", "phone_number": "13800000026", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=2, hours=4))},
+        {"id": 8, "username": "cao.bo", "full_name": "曹博", "role_code": "interview_officer", "department_name": "招生办公室", "phone_number": "13800000027", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=3))},
+        {"id": 9, "username": "yang.qin", "full_name": "杨琴", "role_code": "hrbp", "department_name": "人力资源部", "phone_number": "13800000028", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=1, hours=5))},
+        {"id": 10, "username": "sun.wei", "full_name": "孙伟", "role_code": "party_affairs", "department_name": "党群工作部", "phone_number": "13800000029", "account_status": "启用", "last_login_at": _fmt_datetime(now - timedelta(days=4))},
     ]
 
     profiles = {

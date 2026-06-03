@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../../stores/auth'
+import { resolveAccessibleRoutePath } from '../../router/menuAccess'
 import { showPortalAlert } from '../../utils/portalAlerts'
 
 const router = useRouter()
@@ -27,8 +28,8 @@ async function submit() {
     await authStore.login(form.username, form.password)
     ElMessage.success('登录成功')
     const queryRedirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-    const redirect = queryRedirect || authStore.consumeRedirectTarget() || '/dashboard'
-    const target = redirect === '/login' ? '/dashboard' : redirect
+    const redirect = queryRedirect || authStore.consumeRedirectTarget()
+    const target = resolveAccessibleRoutePath(redirect, authStore.permissions)
     await router.replace(target)
     await router.isReady()
     await nextTick()

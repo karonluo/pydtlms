@@ -26,9 +26,20 @@ const router = useRouter()
 const defaultProfilePhotoUrl = '/images/default_head.png'
 const showPortalHomeNewsSections = false
 const portalAdmissionsInfoUrl = ref('')
+const terminatedWorkflowNotice = '很遗憾您未通过此环节的选拔，但请不要灰心，您已进入项目滚动补录调剂池，有机会时会优先联系您，可关注邮箱与电话，谢谢。'
 
 function trimText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeStudentWorkflowText(value: unknown): string {
+  const text = trimText(value)
+  if (!text) {
+    return ''
+  }
+  return text
+    .replaceAll('初筛环节', '初筛')
+    .replaceAll('入营面试', '夏令营选拔')
 }
 
 function resolveProgressCount(value: unknown): number {
@@ -93,12 +104,14 @@ const workflowStageCards = computed<WorkflowStageCard[]>(() => {
   const stages = workflowSummary.value?.stages || []
   return stages.map((item) => ({
     key: item.key,
-    label: item.label,
+    label: normalizeStudentWorkflowText(item.label) || item.label,
     status: item.status,
-    description: trimText(item.description) || resolveWorkflowStageDescription(item.status),
+    description: normalizeStudentWorkflowText(item.description) || resolveWorkflowStageDescription(item.status),
   }))
 })
-const workflowCurrentStageLabel = computed(() => workflowSummary.value?.current_stage_label || '在线申请')
+const workflowCurrentStageLabel = computed(() => normalizeStudentWorkflowText(workflowSummary.value?.current_stage_label) || '在线申请')
+const showWorkflowTerminationNotice = computed(() => workflowSummary.value?.result_label === '终止')
+const workflowReviewComment = computed(() => trimText(workflowSummary.value?.review_comment))
 const showApplicationSectionProgress = computed(() => {
   const currentStageKey = workflowSummary.value?.current_stage_key
   const stageStatus = workflowStageCards.value.find((item) => item.key === 'online_application')?.status
@@ -398,7 +411,10 @@ onMounted(() => {
 
       <section id="portal-progress" class="portal-home-progress">
         <div class="portal-home-progress__header">
-          <h3>我的申请进度</h3>
+          <div class="portal-home-progress__title-row">
+            <h3>我的申请进度</h3>
+            <span class="portal-home-progress__deadline">（本次夏令营集中选拔申请将于2026年6月9日(周二)23:59截止。）</span>
+          </div>
           <p v-if="showApplicationSectionProgress">已完成 {{ completedProgressCount }}/{{ progressCards.length }} 项，继续填写即可提交申请。</p>
         </div>
 
@@ -407,6 +423,10 @@ onMounted(() => {
             <div>
               <h4>申请环节状态</h4>
               <p>当前所在环节：{{ workflowCurrentStageLabel }}</p>
+              <div v-if="showWorkflowTerminationNotice || workflowReviewComment" class="portal-home-workflow__notice">
+                <p v-if="showWorkflowTerminationNotice">{{ terminatedWorkflowNotice }}</p>
+                <p v-if="workflowReviewComment">原因：{{ workflowReviewComment }}</p>
+              </div>
             </div>
           </div>
 
@@ -957,10 +977,41 @@ onMounted(() => {
   color: #9a2f2f;
 }
 
+.portal-home-workflow__notice {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  max-width: 720px;
+  padding: 10px 12px;
+  border: 1px solid #f0b4b4;
+  border-radius: 10px;
+  background: #fff5f5;
+  color: #9a2f2f;
+  line-height: 1.6;
+}
+
+.portal-home-workflow__notice p {
+  margin: 0;
+  color: inherit;
+}
+
 .portal-home-progress__header h3 {
   margin: 0 0 8px;
   font-size: 20px;
   color: #0053bc;
+}
+
+.portal-home-progress__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.portal-home-progress__deadline {
+  color: #8b9eb7;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .portal-home-progress__header p {

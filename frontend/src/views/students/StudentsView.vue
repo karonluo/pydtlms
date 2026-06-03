@@ -22,8 +22,10 @@ import {
   deleteStudent,
   getStudentOptions,
   getStudentStats,
+  impersonateRegisteredPortalStudent,
   listCenters,
   listRegisteredPortalStudents,
+  rollbackRegisteredPortalStudentStage,
   listStudents,
   resetRegisteredPortalStudentPassword,
   sendRegisteredPortalStudentEmail,
@@ -33,6 +35,7 @@ import {
   type CenterRecord,
   type CenterUpsert,
   type RegisteredPortalStudentEmailRequest,
+  type RegisteredPortalStudentRollbackStageRequest,
   type RegisteredPortalStudentRecord,
   type SelectOption,
   type StudentOptions,
@@ -41,9 +44,11 @@ import {
   type StudentUpsert,
 } from '../../api/students'
 import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
+import { useAuthStore } from '../../stores/auth'
 import { useExportJobStore } from '../../stores/exportJobs'
 
 const route = useRoute()
+const authStore = useAuthStore()
 const exportJobStore = useExportJobStore()
 const loading = ref(false)
 const bootstrapping = ref(false)
@@ -53,11 +58,16 @@ const deleteCenterDialogVisible = ref(false)
 const portalEmailDialogVisible = ref(false)
 const portalEmailSubmitting = ref(false)
 const portalEmailResultDialogVisible = ref(false)
+const portalNoticeDialogVisible = ref(false)
 const exportJobResultDialogVisible = ref(false)
 const resetPasswordDialogVisible = ref(false)
+const rollbackDialogVisible = ref(false)
 const exportSubmitting = ref(false)
 const resetPasswordSubmitting = ref(false)
+const rollbackSubmitting = ref(false)
+const rollbackLoading = ref(false)
 const deleteCenterSubmitting = ref(false)
+const portalImpersonationSubmitting = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedCenterIds = ref<number[]>([])
@@ -69,6 +79,8 @@ const portalEmailResult = ref<RegisteredPortalStudentActionResponse | null>(null
 const portalEmailResultContext = ref<{ recipient: string; subject: string } | null>(null)
 const resetPasswordTarget = ref<RegisteredPortalStudentRecord | null>(null)
 const resetPasswordResult = ref<RegisteredPortalStudentActionResponse | null>(null)
+const rollbackTarget = ref<RegisteredPortalStudentRecord | null>(null)
+const rollbackDetail = ref<RecruitPortalApplicationDetail | null>(null)
 const portalApplicationDetailVisible = ref(false)
 const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
 const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
@@ -78,6 +90,7 @@ const portalWorkflowCommentDialogVisible = ref(false)
 const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
 const portalWorkflowComment = ref('')
 const exportJobResult = ref<{ message: string; scopeLabel: string; recordCount: number; filterSummary: string } | null>(null)
+const portalNotice = ref<{ title: string; message: string; type: 'success' | 'warning' | 'error' | 'info' } | null>(null)
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -96,6 +109,7 @@ const options = ref<StudentOptions>({
   degree_options: [],
   advisor_options: [],
   registered_portal_advisor_filter_options: [],
+  registered_portal_application_status_options: [],
   center_options: [],
   political_status_options: [],
   center_advisor_map: [],
@@ -118,12 +132,35 @@ const centerFilters = reactive({
 const registeredPortalFilters = reactive({
   keyword: '',
   application_form_status: '',
+  recruitment_application_status: '',
+  show_all_background_assessed: false,
   advisor_names: [] as string[],
 })
 const portalEmailForm = reactive<RegisteredPortalStudentEmailRequest>({
   subject: '',
   content: '',
 })
+const rollbackForm = reactive<RegisteredPortalStudentRollbackStageRequest>({
+  target_stage: '',
+  comment: '',
+})
+
+type RegisteredPortalRollbackStageKey =
+  | 'qualification_review'
+  | 'background_assessment'
+  | 'advisor_screening_first'
+  | 'advisor_screening_second'
+  | 'initial_screening_confirmation'
+  | 'camp_interview'
+
+const registeredPortalRollbackStageCatalog: Array<{ label: string; value: RegisteredPortalRollbackStageKey; rank: number }> = [
+  { label: '资格审核', value: 'qualification_review', rank: 1 },
+  { label: '背景评估', value: 'background_assessment', rank: 2 },
+  { label: '导师初筛-第一志愿', value: 'advisor_screening_first', rank: 3 },
+  { label: '导师初筛-第二志愿', value: 'advisor_screening_second', rank: 4 },
+  { label: '初筛确认', value: 'initial_screening_confirmation', rank: 5 },
+  { label: '入营面试', value: 'camp_interview', rank: 6 },
+]
 
 const studentFormRef = ref<FormInstance>()
 const centerFormRef = ref<FormInstance>()
@@ -177,7 +214,9 @@ const centerRules: FormRules<CenterUpsert> = {
 const activeSection = computed(() => String(route.meta.section || 'records'))
 const isRecordSection = computed(() => activeSection.value === 'records')
 const isCenterSection = computed(() => activeSection.value === 'centers')
+const isPlatformAdmin = computed(() => authStore.roles.includes('platform_admin'))
 const isRegisteredPortalSection = computed(() => activeSection.value === 'portal-registrations')
+const isRegisteredPortalAcademyAdmin = computed(() => !isPlatformAdmin.value && authStore.roles.some((role) => role === 'AILABMGT' || role === 'academy_admin'))
 const canMutateSection = computed(() => !isRegisteredPortalSection.value)
 const sectionConfig = computed(() => {
   if (activeSection.value === 'portal-registrations') {
@@ -250,6 +289,7 @@ const resetPasswordResultMessage = computed(() => {
     '当前未配置邮件服务，本次未发送邮件。',
   )
 })
+const portalNoticeDialogTitle = computed(() => portalNotice.value?.title || '提示')
 const studentPager = useServerPagination()
 const centerPager = useServerPagination()
 const registeredStudentPager = useServerPagination()
@@ -272,6 +312,15 @@ function normalizeCenterPayload(payload: CenterUpsert): CenterUpsert {
     advisor_ids: Array.from(new Set(payload.advisor_ids.filter(Boolean).map((item) => String(item)))),
     created_date: payload.created_date || new Date().toISOString().slice(0, 10),
   }
+}
+
+function showPortalNotice(message: string, type: 'success' | 'warning' | 'error' | 'info' = 'info', title?: string) {
+  portalNotice.value = {
+    title: title || (type === 'success' ? '操作成功' : type === 'error' ? '操作失败' : '提示'),
+    message,
+    type,
+  }
+  portalNoticeDialogVisible.value = true
 }
 
 async function loadStats() {
@@ -314,6 +363,8 @@ async function loadRegisteredPortalStudents() {
   const response = await listRegisteredPortalStudents({
     keyword: registeredPortalFilters.keyword || undefined,
     application_form_status: registeredPortalFilters.application_form_status || undefined,
+    recruitment_application_status: registeredPortalFilters.recruitment_application_status || undefined,
+    show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
     advisor_names: registeredPortalFilters.advisor_names.length ? registeredPortalFilters.advisor_names.join(',') : undefined,
     page: registeredStudentPager.pagination.currentPage,
     page_size: registeredStudentPager.pagination.pageSize,
@@ -565,7 +616,7 @@ async function handleSearch() {
 async function handleReset() {
   Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
   Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
-  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '', advisor_names: [] })
+  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '', recruitment_application_status: '', show_all_background_assessed: false, advisor_names: [] })
   selectedCenterIds.value = []
   selectedRegisteredPortalStudentIds.value = []
   studentPager.reset()
@@ -608,6 +659,8 @@ function buildRegisteredPortalExportFilters() {
   return {
     keyword: registeredPortalFilters.keyword || undefined,
     application_form_status: registeredPortalFilters.application_form_status || undefined,
+    recruitment_application_status: registeredPortalFilters.recruitment_application_status || undefined,
+    show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
     advisor_names: registeredPortalFilters.advisor_names.length ? [...registeredPortalFilters.advisor_names] : undefined,
   }
 }
@@ -620,6 +673,12 @@ function buildRegisteredPortalExportFilterSummary() {
   if (registeredPortalFilters.application_form_status) {
     items.push(`报名状态：${registeredPortalFilters.application_form_status}`)
   }
+  if (registeredPortalFilters.recruitment_application_status) {
+    items.push(`申请流转状态：${registeredPortalFilters.recruitment_application_status}`)
+  }
+  if (isRegisteredPortalAcademyAdmin.value) {
+    items.push(`背景评估视图：${registeredPortalFilters.show_all_background_assessed ? '查看全部' : '隐藏本人已完成背景评估'}`)
+  }
   if (registeredPortalFilters.advisor_names.length) {
     items.push(`导师：${registeredPortalFilters.advisor_names.join('、')}`)
   }
@@ -628,7 +687,7 @@ function buildRegisteredPortalExportFilterSummary() {
 
 async function handleExportRegisteredPortalStudents() {
   if (!selectedRegisteredPortalStudentIds.value.length) {
-    ElMessage.warning('请先选择需要导出的注册学生')
+    showPortalNotice('请先选择需要导出的注册学生', 'warning')
     return
   }
   exportSubmitting.value = true
@@ -644,7 +703,7 @@ async function handleExportRegisteredPortalStudents() {
     exportJobResultDialogVisible.value = true
   } catch (error) {
     const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '导出失败') : '导出失败'
-    ElMessage.error(message)
+    showPortalNotice(message, 'error', '导出失败')
   } finally {
     exportSubmitting.value = false
   }
@@ -652,7 +711,7 @@ async function handleExportRegisteredPortalStudents() {
 
 async function handleExportAllRegisteredPortalStudents() {
   if (!registeredStudentPager.pagination.total) {
-    ElMessage.warning('当前没有可导出的注册学生')
+    showPortalNotice('当前没有可导出的注册学生', 'warning')
     return
   }
   exportSubmitting.value = true
@@ -668,7 +727,7 @@ async function handleExportAllRegisteredPortalStudents() {
     exportJobResultDialogVisible.value = true
   } catch (error) {
     const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '导出失败') : '导出失败'
-    ElMessage.error(message)
+    showPortalNotice(message, 'error', '导出失败')
   } finally {
     exportSubmitting.value = false
   }
@@ -782,10 +841,16 @@ async function handleDeactivateRegisteredPortalStudent(row: RegisteredPortalStud
     await ElMessageBox.alert('该注册学生账号已停用。', '提示', { type: 'info' })
     return
   }
-  await ElMessageBox.confirm(`确定停用 ${row.full_name} 的门户账号吗？停用后将无法登录和提交报名。`, '停用确认', { type: 'warning' })
-  const response = await deactivateRegisteredPortalStudent(row.id)
-  await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
-  await refreshAfterMutation()
+  try {
+    await ElMessageBox.confirm(`确定停用 ${row.full_name} 的门户账号吗？停用后将无法登录和提交报名。`, '停用确认', { type: 'warning' })
+    const response = await deactivateRegisteredPortalStudent(row.id)
+    await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
+    await refreshAfterMutation()
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      showPortalNotice(String(error.response?.data?.detail || error.message || '停用账号失败'), 'error', '停用账号失败')
+    }
+  }
 }
 
 async function handleActivateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
@@ -793,15 +858,21 @@ async function handleActivateRegisteredPortalStudent(row: RegisteredPortalStuden
     await ElMessageBox.alert('该注册学生账号已启用。', '提示', { type: 'info' })
     return
   }
-  await ElMessageBox.confirm(`确定重新启用 ${row.full_name} 的门户账号吗？启用后可恢复登录和报名操作。`, '启用确认', { type: 'warning' })
-  const response = await activateRegisteredPortalStudent(row.id)
-  await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
-  await refreshAfterMutation()
+  try {
+    await ElMessageBox.confirm(`确定重新启用 ${row.full_name} 的门户账号吗？启用后可恢复登录和报名操作。`, '启用确认', { type: 'warning' })
+    const response = await activateRegisteredPortalStudent(row.id)
+    await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
+    await refreshAfterMutation()
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      showPortalNotice(String(error.response?.data?.detail || error.message || '启用账号失败'), 'error', '启用账号失败')
+    }
+  }
 }
 
 async function handleResetRegisteredPortalStudentPassword(row: RegisteredPortalStudentRecord) {
   if (row.account_status !== '启用') {
-    ElMessage.warning('已停用账号不可重置密码。')
+    showPortalNotice('已停用账号不可重置密码。', 'warning')
     return
   }
   resetPasswordTarget.value = row
@@ -840,6 +911,86 @@ function canReviewRegisteredPortalApplication(row: RegisteredPortalStudentRecord
     && row.recruitment_application_status === '报名已提交'
 }
 
+function canRollbackRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
+  return isPlatformAdmin.value
+    && canViewRegisteredPortalApplication(row)
+    && !!row.recruitment_application_id
+    && !!String(row.recruitment_application_status || '').trim()
+}
+
+function inferRegisteredPortalRollbackStage(
+  row: RegisteredPortalStudentRecord,
+  detail: RecruitPortalApplicationDetail,
+): RegisteredPortalRollbackStageKey | '' {
+  const status = String(row.recruitment_application_status || detail.application_status || '').trim()
+  if (status === '报名已提交' || status === '驳回重填') {
+    return 'qualification_review'
+  }
+  if (status === '待背景评估') {
+    return 'background_assessment'
+  }
+  if (status === '待导师初筛-第一志愿') {
+    return 'advisor_screening_first'
+  }
+  if (status === '待导师初筛-第二志愿') {
+    return 'advisor_screening_second'
+  }
+  if (status === '待初筛确认') {
+    return 'initial_screening_confirmation'
+  }
+  if (status === '入营面试') {
+    return 'camp_interview'
+  }
+  if (status === '报名终止') {
+    if (detail.initial_screening_status === 'confirmed' || detail.initial_screening_result) {
+      return 'initial_screening_confirmation'
+    }
+    if (detail.advisor_screening_round === 'second_choice' || detail.second_choice_screening_score !== null && detail.second_choice_screening_score !== undefined) {
+      return 'advisor_screening_second'
+    }
+    if (detail.first_choice_screening_score !== null && detail.first_choice_screening_score !== undefined || detail.advisor_screening_status) {
+      return 'advisor_screening_first'
+    }
+    if ((detail.background_assessments || []).length > 0) {
+      return 'background_assessment'
+    }
+    return 'qualification_review'
+  }
+  return ''
+}
+
+const rollbackCurrentStage = computed(() => {
+  if (!rollbackTarget.value || !rollbackDetail.value) {
+    return ''
+  }
+  return inferRegisteredPortalRollbackStage(rollbackTarget.value, rollbackDetail.value)
+})
+
+const rollbackCurrentStageLabel = computed(() => {
+  const currentStage = rollbackCurrentStage.value
+  return registeredPortalRollbackStageCatalog.find((item) => item.value === currentStage)?.label || '未知环节'
+})
+
+const rollbackStageOptions = computed(() => {
+  const currentStage = rollbackCurrentStage.value
+  if (!currentStage || !rollbackDetail.value) {
+    return []
+  }
+  const currentRank = registeredPortalRollbackStageCatalog.find((item) => item.value === currentStage)?.rank || 0
+  const hasSecondChoice = rollbackDetail.value.advisor_screening_round === 'second_choice'
+    || (rollbackDetail.value.second_choice_screening_score !== null && rollbackDetail.value.second_choice_screening_score !== undefined)
+
+  return registeredPortalRollbackStageCatalog.filter((item) => {
+    if (item.rank >= currentRank) {
+      return false
+    }
+    if (item.value === 'advisor_screening_second' && !hasSecondChoice) {
+      return false
+    }
+    return true
+  })
+})
+
 async function loadPortalViewingWorkflowTask(businessKey?: string | null) {
   const normalizedKey = String(businessKey || '').trim()
   if (!normalizedKey) {
@@ -852,7 +1003,7 @@ async function loadPortalViewingWorkflowTask(businessKey?: string | null) {
     portalViewingWorkflowTask.value = response.data.items.find((item) => item.business_key === normalizedKey) || null
   } catch (error) {
     const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载审批任务失败'
-    ElMessage.error(message)
+    showPortalNotice(message, 'error', '加载审批任务失败')
     portalViewingWorkflowTask.value = null
   } finally {
     portalWorkflowTaskLoading.value = false
@@ -861,7 +1012,7 @@ async function loadPortalViewingWorkflowTask(businessKey?: string | null) {
 
 async function openRegisteredPortalApplicationDetail(row: RegisteredPortalStudentRecord) {
   if (!canViewRegisteredPortalApplication(row) || !row.recruitment_application_id) {
-    ElMessage.warning('当前学生尚未完成申报，无法查看填报内容')
+    showPortalNotice('当前学生尚未完成申报，无法查看填报内容', 'warning')
     return
   }
   try {
@@ -871,13 +1022,77 @@ async function openRegisteredPortalApplicationDetail(row: RegisteredPortalStuden
     await loadPortalViewingWorkflowTask(row.recruitment_application_business_key || response.data.business_key)
   } catch (error) {
     const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载填报详情失败'
-    ElMessage.error(message)
+    showPortalNotice(message, 'error', '加载填报详情失败')
+  }
+}
+
+function resetRegisteredPortalRollbackDialog() {
+  rollbackTarget.value = null
+  rollbackDetail.value = null
+  rollbackForm.target_stage = ''
+  rollbackForm.comment = ''
+}
+
+async function openRegisteredPortalRollbackDialog(row: RegisteredPortalStudentRecord) {
+  if (!canRollbackRegisteredPortalApplication(row) || !row.recruitment_application_id) {
+    showPortalNotice('当前申请不支持退回环节', 'warning')
+    return
+  }
+  rollbackLoading.value = true
+  rollbackTarget.value = row
+  rollbackDetail.value = null
+  rollbackForm.target_stage = ''
+  rollbackForm.comment = ''
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.recruitment_application_id)
+    rollbackDetail.value = response.data
+    const stageOptions = rollbackStageOptions.value
+    if (!stageOptions.length) {
+      showPortalNotice('当前申请没有可退回的前序环节', 'warning')
+      resetRegisteredPortalRollbackDialog()
+      return
+    }
+    rollbackForm.target_stage = stageOptions[0].value
+    rollbackDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载可退回环节失败'
+    showPortalNotice(message, 'error', '加载可退回环节失败')
+    resetRegisteredPortalRollbackDialog()
+  } finally {
+    rollbackLoading.value = false
+  }
+}
+
+async function submitRegisteredPortalRollbackDialog() {
+  if (!rollbackTarget.value || !rollbackForm.target_stage) {
+    showPortalNotice('请选择目标环节', 'warning')
+    return
+  }
+  rollbackSubmitting.value = true
+  try {
+    const response = await rollbackRegisteredPortalStudentStage(rollbackTarget.value.id, {
+      target_stage: rollbackForm.target_stage,
+      comment: rollbackForm.comment?.trim() || undefined,
+    })
+    rollbackDialogVisible.value = false
+    if (portalViewingApplication.value?.application_id === rollbackTarget.value.recruitment_application_id) {
+      portalApplicationDetailVisible.value = false
+      portalViewingApplication.value = null
+      portalViewingWorkflowTask.value = null
+    }
+    await refreshAfterMutation()
+    showPortalNotice(`${response.data.message}${response.data.email_sent ? '，已发送邮件通知' : '，当前未发送邮件通知'}`, 'success')
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '退回环节失败'
+    showPortalNotice(message, 'error', '退回环节失败')
+  } finally {
+    rollbackSubmitting.value = false
   }
 }
 
 async function handlePortalWorkflowAction(action: WorkflowActionOption) {
   if (!portalViewingWorkflowTask.value) {
-    ElMessage.warning('当前未找到可执行的审批任务')
+    showPortalNotice('当前未找到可执行的审批任务', 'warning')
     return
   }
   pendingPortalWorkflowAction.value = action
@@ -900,20 +1115,20 @@ async function submitPortalWorkflowCommentDialog() {
     portalApplicationDetailVisible.value = false
     portalViewingApplication.value = null
     portalViewingWorkflowTask.value = null
-    ElMessage.success(`${currentAction.label}已完成`)
+    showPortalNotice(`${currentAction.label}已完成`, 'success')
     try {
       await refreshAfterMutation()
     } catch (refreshError) {
       const refreshMessage = axios.isAxiosError(refreshError)
         ? String(refreshError.response?.data?.detail || refreshError.message)
         : '列表刷新失败，请手动刷新页面'
-      ElMessage.warning(`操作已完成，但${refreshMessage}`)
+      showPortalNotice(`操作已完成，但${refreshMessage}`, 'warning')
     }
   } catch (error) {
     const message = axios.isAxiosError(error)
       ? String(error.response?.data?.detail || error.message)
       : `${currentAction.label}失败`
-    ElMessage.error(message)
+    showPortalNotice(message, 'error', `${currentAction.label}失败`)
   } finally {
     portalWorkflowActionSubmitting.value = false
   }
@@ -950,10 +1165,23 @@ function registeredPortalMainActions(row: RegisteredPortalStudentRecord): TableR
 }
 
 function registeredPortalMoreActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
-  return [
+  const actions: TableRowAction<RegisteredPortalStudentRecord>[] = [
     { key: 'reset-password', label: '重置密码', type: 'primary', disabled: row.account_status !== '启用', onClick: handleResetRegisteredPortalStudentPassword },
     { key: 'send-email', label: '发送邮件', type: 'success', onClick: openRegisteredPortalStudentEmailDialog },
   ]
+  if (isRegisteredPortalAcademyAdmin.value) {
+    actions.unshift({
+      key: 'impersonate',
+      label: '模拟学生',
+      type: 'success',
+      disabled: row.account_status !== '启用' || portalImpersonationSubmitting.value,
+      onClick: handleImpersonateRegisteredPortalStudent,
+    })
+  }
+  if (canRollbackRegisteredPortalApplication(row)) {
+    actions.unshift({ key: 'rollback-stage', label: '退回环节', type: 'warning', onClick: openRegisteredPortalRollbackDialog })
+  }
+  return actions
 }
 
 async function submitPortalEmailDialog() {
@@ -981,8 +1209,38 @@ async function submitPortalEmailDialog() {
     portalEmailResult.value = response.data
     portalEmailDialogVisible.value = false
     portalEmailResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message || '发送邮件失败')
+      : '发送邮件失败'
+    showPortalNotice(message, 'error', '发送邮件失败')
   } finally {
     portalEmailSubmitting.value = false
+  }
+}
+
+async function handleImpersonateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
+  if (!isRegisteredPortalAcademyAdmin.value) {
+    await showPortalNotice('仅书院管理员可以使用模拟学生功能', 'warning', '权限不足')
+    return
+  }
+  if (row.account_status !== '启用') {
+    await showPortalNotice('仅启用状态的注册学生可以模拟登录', 'warning', '无法模拟')
+    return
+  }
+
+  portalImpersonationSubmitting.value = true
+  try {
+    const response = await impersonateRegisteredPortalStudent(row.id)
+    const launchUrl = new URL(response.data.launch_url, window.location.origin).toString()
+    window.location.assign(launchUrl)
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message || '模拟学生失败')
+      : '模拟学生失败'
+    await showPortalNotice(message, 'error', '模拟学生失败')
+  } finally {
+    portalImpersonationSubmitting.value = false
   }
 }
 
@@ -999,6 +1257,11 @@ watch(() => portalEmailResultDialogVisible.value, (visible) => {
     resetPortalEmailResultDialog()
   }
 })
+watch(() => portalNoticeDialogVisible.value, (visible) => {
+  if (!visible) {
+    portalNotice.value = null
+  }
+})
 watch(() => exportJobResultDialogVisible.value, (visible) => {
   if (!visible) {
     exportJobResult.value = null
@@ -1007,6 +1270,11 @@ watch(() => exportJobResultDialogVisible.value, (visible) => {
 watch(() => resetPasswordDialogVisible.value, (visible) => {
   if (!visible) {
     resetResetPasswordDialog()
+  }
+})
+watch(() => rollbackDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetRegisteredPortalRollbackDialog()
   }
 })
 watch(() => portalWorkflowCommentDialogVisible.value, (visible) => {
@@ -1020,6 +1288,7 @@ watch(() => activeSection.value, () => {
   portalEmailResultDialogVisible.value = false
   exportJobResultDialogVisible.value = false
   resetPasswordDialogVisible.value = false
+  rollbackDialogVisible.value = false
   portalWorkflowCommentDialogVisible.value = false
   selectedCenterIds.value = []
   selectedRegisteredPortalStudentIds.value = []
@@ -1134,6 +1403,20 @@ onMounted(() => {
           <el-select v-model="registeredPortalFilters.application_form_status" placeholder="全部状态" clearable style="width: 180px">
             <el-option v-for="item in portalApplicationFormStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="申请流转状态">
+          <el-select v-model="registeredPortalFilters.recruitment_application_status" placeholder="全部流转状态" clearable filterable style="width: 200px">
+            <el-option v-for="item in options.registered_portal_application_status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="isRegisteredPortalAcademyAdmin" label="查看全部">
+          <el-switch
+            v-model="registeredPortalFilters.show_all_background_assessed"
+            inline-prompt
+            active-text="全部"
+            inactive-text="隐藏已评"
+            @change="handleSearch"
+          />
         </el-form-item>
         <el-form-item label="导师姓名">
           <el-select
@@ -1312,6 +1595,60 @@ onMounted(() => {
         <el-button type="primary" :loading="portalWorkflowActionSubmitting" @click="submitPortalWorkflowCommentDialog">
           {{ pendingPortalWorkflowAction?.label || '确认' }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="rollbackDialogVisible" title="退回报名环节" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="rollbackTarget && rollbackDetail">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">学生姓名</span>
+              <strong>{{ rollbackTarget.full_name }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">业务编号</span>
+              <strong>{{ rollbackDetail.business_key || rollbackTarget.recruitment_application_business_key || '未生成' }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">当前环节</span>
+              <strong>{{ rollbackCurrentStageLabel }}</strong>
+            </div>
+          </div>
+          <p class="reset-password-hint">该功能仅平台管理员可见。系统会校验只能退回到当前之前的环节，并在处理后向学生发送邮件通知。</p>
+          <el-form label-width="88px" class="dialog-form">
+            <div class="dialog-grid">
+              <el-form-item label="目标环节" class="dialog-grid--full">
+                <el-select v-model="rollbackForm.target_stage" placeholder="请选择目标环节" :loading="rollbackLoading">
+                  <el-option v-for="item in rollbackStageOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="退回说明" class="dialog-grid--full">
+                <el-input
+                  v-model="rollbackForm.comment"
+                  type="textarea"
+                  :rows="4"
+                  maxlength="200"
+                  show-word-limit
+                  placeholder="请输入退回说明，可选"
+                />
+              </el-form-item>
+            </div>
+          </el-form>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="rollbackDialogVisible = false">取消</el-button>
+        <el-button type="warning" :loading="rollbackSubmitting" :disabled="!rollbackForm.target_stage" @click="submitRegisteredPortalRollbackDialog">
+          确认退回
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="portalNoticeDialogVisible" :title="portalNoticeDialogTitle" width="520px" destroy-on-close>
+      <el-result v-if="portalNotice" :icon="portalNotice.type" :title="portalNotice.title" :sub-title="portalNotice.message" />
+      <template #footer>
+        <el-button type="primary" @click="portalNoticeDialogVisible = false">确定</el-button>
       </template>
     </el-dialog>
 
@@ -1564,7 +1901,7 @@ onMounted(() => {
 .content-stack,
 .state-grid {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .content-stack {
@@ -1586,7 +1923,7 @@ onMounted(() => {
 }
 
 .state-card {
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 
 .state-card p,
@@ -1597,9 +1934,9 @@ onMounted(() => {
 
 .state-card strong {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: #111827;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.1;
 }
 
@@ -1617,7 +1954,7 @@ onMounted(() => {
 }
 
 .section-card {
-  padding: 14px 16px;
+  padding: 12px 14px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1627,8 +1964,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .section-tag {
@@ -1639,14 +1976,15 @@ onMounted(() => {
 .section-card h2 {
   margin-top: 4px;
   color: #303133;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .summary-text {
@@ -1655,15 +1993,15 @@ onMounted(() => {
 }
 
 .filter-form {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   flex: 0 0 auto;
-  padding: 12px 12px 2px;
+  padding: 10px 10px 0;
   border-radius: 8px;
   background: #f5f7fa;
 }
 
 .filter-form :deep(.el-form-item) {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .table-host {
@@ -1675,6 +2013,12 @@ onMounted(() => {
 
 .table-host :deep(.el-table) {
   width: 100%;
+}
+
+.table-host :deep(.el-table th.el-table__cell),
+.table-host :deep(.el-table td.el-table__cell) {
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .cell-stack {
@@ -1703,7 +2047,7 @@ onMounted(() => {
 .stat-stack {
   display: grid;
   justify-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .stat-stack span {

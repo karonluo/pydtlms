@@ -39,9 +39,31 @@ export type DashboardUndergraduateSchoolRankingResponse = {
 }
 
 
+export type DashboardUndergraduateSchoolGroupItem = {
+  school_name: string
+  student_count: number
+  percentage: number
+}
+
+
+export type DashboardUndergraduateSchoolGroupDistribution = {
+  group_name: string
+  dict_type: string
+  total: number
+  items: DashboardUndergraduateSchoolGroupItem[]
+}
+
+
+export type DashboardUndergraduateSchoolGroupDistributionResponse = {
+  total_applications: number
+  groups: DashboardUndergraduateSchoolGroupDistribution[]
+}
+
+
 export type DashboardUndergraduateSchoolStudentItem = {
   recruitment_application_id: number
   student_name: string
+  school_name?: string | null
   candidate_no?: string | null
   registered_at?: string | null
   phone_number?: string | null
@@ -64,6 +86,18 @@ export function getDashboardOverview() {
 export function getDashboardUndergraduateSchoolRankings(limit = 20) {
   return http.get<DashboardUndergraduateSchoolRankingResponse>('/dashboard/undergraduate-school-rankings', {
     params: { limit },
+  })
+}
+
+
+export function getDashboardUndergraduateSchoolGroupDistribution() {
+  return http.get<DashboardUndergraduateSchoolGroupDistributionResponse>('/dashboard/undergraduate-school-group-distribution')
+}
+
+
+export function getDashboardUndergraduateSchoolGroupStudents(params: { dict_type: string; school_name?: string; bucket?: string }) {
+  return http.get<DashboardUndergraduateSchoolStudentListResponse>('/dashboard/undergraduate-school-group-distribution/students', {
+    params,
   })
 }
 

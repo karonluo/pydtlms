@@ -153,6 +153,7 @@ export type PortalWorkflowProgressSummary = {
   application_form_status: string
   recruitment_application_status?: string | null
   result_label?: string | null
+  review_comment?: string | null
   stages: PortalWorkflowStageItem[]
 }
 
@@ -210,6 +211,16 @@ export type PortalSessionResponse = {
   access_token: string
   token_type: string
   student: PortalStudentRecord
+}
+
+export type PortalImpersonationExchangeRequest = {
+  impersonation_code: string
+}
+
+export type PortalImpersonationLaunchResponse = {
+  message: string
+  launch_url: string
+  expires_in_seconds: number
 }
 
 export type PortalPlanRecord = {
@@ -419,6 +430,10 @@ export function sendPortalLoginEmailCode(payload: PortalLoginEmailCodeRequest) {
 
 export function loginPortalStudentByEmailCode(payload: PortalEmailCodeLoginRequest) {
   return portalHttp.post<PortalSessionResponse>('/portal/login/email-code', payload)
+}
+
+export function exchangePortalImpersonation(payload: PortalImpersonationExchangeRequest) {
+  return portalHttp.post<PortalSessionResponse>('/portal/impersonation', payload)
 }
 
 export function resetPortalStudentPassword(payload: PortalPasswordResetRequest) {

@@ -18,17 +18,24 @@ class RuntimeManagementStoreWorkflowMixin:
         "thesis": {"degree:write", "workflow:write"},
     }
 
+    WORKFLOW_ROLE_ALIASES = {
+        "AILABMGT": {"academy_admin"},
+        "academy_admin": {"AILABMGT"},
+    }
+
     def _workflow_action_result(
         self,
         task: dict[str, Any],
         principal_roles: list[str] | None = None,
         principal_permissions: list[str] | None = None,
+        principal_username: str | None = None,
     ) -> dict[str, Any]:
         return {
             "task": self._build_workflow_task_record(
                 task,
                 principal_roles=principal_roles,
                 principal_permissions=principal_permissions,
+                principal_username=principal_username,
             ),
             "history": [self._build_workflow_history_record(item) for item in task.get("history", [])],
         }
@@ -64,6 +71,27 @@ class RuntimeManagementStoreWorkflowMixin:
             "assessment_result": "通过" if action == "approve" else "不通过",
             "assessment_comment": comment,
             "assessed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def _build_qualification_review_payload(
+        self,
+        application_id: int,
+        action: str,
+        action_label: str,
+        comment: str | None,
+        principal_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "application_id": int(application_id),
+            "reviewer_user_id": None,
+            "reviewer_username": str(principal_summary["username"]),
+            "reviewer_name": str(principal_summary["full_name"]),
+            "reviewer_role_code": "AILABMGT",
+            "review_status": "approved" if action == "approve" else "rejected",
+            "action": action,
+            "action_label": "审核通过" if action == "approve" else "驳回重填",
+            "review_comment": comment,
+            "reviewed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
     @staticmethod
@@ -358,6 +386,23 @@ class RuntimeManagementStoreWorkflowMixin:
     def _workflow_required_permissions(self, flow_code: str) -> set[str]:
         return set(self.WORKFLOW_REQUIRED_PERMISSIONS.get(flow_code, {"workflow:write"}))
 
+    def _principal_matches_workflow_roles(
+        self,
+        handler_roles: list[str] | tuple[str, ...],
+        principal_roles: list[str] | None,
+    ) -> bool:
+        if not principal_roles:
+            return False
+        normalized_principal_roles = {str(item) for item in principal_roles if str(item).strip()}
+        for role in handler_roles:
+            normalized_role = str(role).strip()
+            if not normalized_role:
+                continue
+            compatible_roles = {normalized_role, *self.WORKFLOW_ROLE_ALIASES.get(normalized_role, set())}
+            if compatible_roles.intersection(normalized_principal_roles):
+                return True
+        return False
+
     def _principal_can_handle_workflow_node(
         self,
         flow_code: str,
@@ -366,12 +411,19 @@ class RuntimeManagementStoreWorkflowMixin:
         principal_roles: list[str] | None = None,
         principal_permissions: list[str] | None = None,
     ) -> bool:
+        if self._principal_matches_workflow_roles(node["handler_roles"], principal_roles):
+            granted_permissions = {str(item) for item in principal_permissions or [] if str(item).strip()}
+            if not granted_permissions:
+                return True
+            if "*" in granted_permissions:
+                return True
+            return self._workflow_required_permissions(flow_code).issubset(granted_permissions)
         granted_permissions = {str(item) for item in principal_permissions or [] if str(item).strip()}
         if granted_permissions:
             if "*" in granted_permissions:
                 return True
-            return self._workflow_required_permissions(flow_code).issubset(granted_permissions)
-        return bool(principal_roles and set(node["handler_roles"]).intersection(principal_roles))
+            return False
+        return False
 
     def _workflow_action_options(
         self,
@@ -558,9 +610,14 @@ class RuntimeManagementStoreWorkflowMixin:
                 "材料评分中": ("interview_arrangement", "处理中"),
                 "面试待安排": ("admission_decision", "处理中"),
                 "面试完成": ("admission_confirmation", "处理中"),
-                "待中心考核": ("center_assessment", "处理中"),
-                "待中心考核-第一志愿": ("center_assessment", "处理中"),
-                "待中心考核-第二志愿": ("center_assessment", "处理中"),
+                "待导师初筛": ("advisor_screening", "处理中"),
+                "待导师初筛-第一志愿": ("advisor_screening", "处理中"),
+                "待导师初筛-第二志愿": ("advisor_screening", "处理中"),
+                "待初筛确认": ("initial_screening_confirmation", "处理中"),
+                "入营面试": ("camp_interview", "处理中"),
+                "待中心考核": ("advisor_screening", "处理中"),
+                "待中心考核-第一志愿": ("advisor_screening", "处理中"),
+                "待中心考核-第二志愿": ("advisor_screening", "处理中"),
                 "结果公布": ("result_publish", "处理中"),
                 "预录取": ("pre_admission", "处理中"),
                 "预录取": (None, "已通过"),
@@ -874,8 +931,10 @@ class RuntimeManagementStoreWorkflowMixin:
                 next_node = node_key
                 task_status = "处理中"
                 if pass_count >= 2:
-                    updated_entity["application_status"] = "待中心考核"
-                    next_node = "center_assessment"
+                    updated_entity["application_status"] = "待导师初筛-第一志愿"
+                    updated_entity["advisor_screening_status"] = "pending"
+                    updated_entity["advisor_screening_round"] = "first_choice"
+                    next_node = "advisor_screening"
                 elif reject_count >= 2:
                     updated_entity["application_status"] = "报名终止"
                     next_node = None
@@ -926,8 +985,8 @@ class RuntimeManagementStoreWorkflowMixin:
                 )
                 self._list(definition["business_dataset"])[entity_index] = updated_entity
                 self._list("workflow_tasks")[index] = updated_task
-                if str(updated_entity.get("application_status") or "") in {"待中心考核", "报名终止"}:
-                    notification_payload = self._build_recruitment_email_notification(updated_entity)
+                if str(updated_entity.get("application_status") or "") in {"待导师初筛-第一志愿", "报名终止"}:
+                    notification_payload = self._build_recruitment_email_notification(updated_entity, review_comment=comment)
                 result = self._workflow_action_result(
                     updated_task,
                     principal_roles=principal_summary["roles"],
@@ -974,19 +1033,41 @@ class RuntimeManagementStoreWorkflowMixin:
                 f'{principal_summary["full_name"]} 执行 {definition["workflow_name"]} - {action_definition["label"]}',
                 operator_username=principal_summary["username"],
             )
-            try:
-                self._update_runtime_managed_entity(definition["business_dataset"], int(task["entity_id"]), updated_entity)
-                self._postgres_store.sync_workflow_task(
+            qualification_review_payload = None
+            if flow_code == "recruitment_application" and node_key == "qualification_review":
+                qualification_review_payload = self._build_qualification_review_payload(
+                    int(entity["id"]),
+                    action,
+                    action_definition["label"],
+                    comment,
+                    principal_summary,
+                )
+            if qualification_review_payload is not None:
+                sync_qualification_review = getattr(self._postgres_store, "sync_recruitment_qualification_review", None)
+                if not callable(sync_qualification_review):
+                    raise DatabaseUnavailableError("资格审核当前仅允许写入数据库，缺少正式持久化能力")
+                sync_qualification_review(
+                    int(entity["id"]),
+                    qualification_review_payload,
+                    updated_entity,
                     updated_task,
                     operation_log,
                     counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
                 )
-                if reset_portal_student is not None:
-                    self._persist_portal_student_change(reset_portal_student, operation_log)
-            except Exception:
-                self._save()
+            else:
+                try:
+                    self._update_runtime_managed_entity(definition["business_dataset"], int(task["entity_id"]), updated_entity)
+                    self._postgres_store.sync_workflow_task(
+                        updated_task,
+                        operation_log,
+                        counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+                    )
+                    if reset_portal_student is not None:
+                        self._persist_portal_student_change(reset_portal_student, operation_log)
+                except Exception:
+                    self._save()
             if flow_code == "recruitment_application":
-                notification_payload = self._build_recruitment_email_notification(updated_entity)
+                notification_payload = self._build_recruitment_email_notification(updated_entity, review_comment=comment)
                 sync_student_master = str(updated_entity.get("application_status") or "").strip() in ADMITTED_RECRUITMENT_APPLICATION_STATUSES
             result = self._workflow_action_result(
                 updated_task,
@@ -1013,9 +1094,22 @@ class RuntimeManagementStoreWorkflowMixin:
             draft["submitted_at"] = None
         return student
 
-    def _build_recruitment_email_notification(self, application: dict[str, Any]) -> dict[str, str] | None:
+    def _build_recruitment_email_notification(self, application: dict[str, Any], review_comment: str | None = None) -> dict[str, str] | None:
         status = str(application.get("application_status") or "").strip()
-        if status not in {"驳回重填", "待中心考核", "资格审核通过", "预录取", "同意录取", "不录取", "报名终止"}:
+        if status not in {
+            "驳回重填",
+            "待导师初筛",
+            "待导师初筛-第一志愿",
+            "待导师初筛-第二志愿",
+            "待初筛确认",
+            "入营面试",
+            "资格审核通过",
+            "预录取",
+            "同意录取",
+            "不录取",
+            "报名终止",
+            "待中心考核",
+        }:
             return None
 
         email = str(application.get("email") or "").strip()
@@ -1035,6 +1129,7 @@ class RuntimeManagementStoreWorkflowMixin:
             "business_key": str(application.get("business_key") or ""),
             "application_status": status,
             "plan_name": plan_name,
+            "review_comment": str(review_comment or "").strip(),
         }
 
     def get_workflow_options(self) -> WorkflowOptionsResponse:

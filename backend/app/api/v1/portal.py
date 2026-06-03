@@ -15,6 +15,7 @@ from app.schemas.portal import (
     PortalApplicationDraftUpsert,
     PortalAttachmentUploadResponse,
     PortalEmailCodeLoginRequest,
+    PortalImpersonationExchangeRequest,
     PortalLoginEmailCodeRequest,
     PortalPublicConfigResponse,
     PortalApplicationSubmissionResponse,
@@ -38,6 +39,7 @@ from app.services.dashboard_service import (
     get_portal_student,
     get_public_recruitment_plans,
     get_public_teams,
+    consume_portal_impersonation_code,
     login_portal_student,
     login_portal_student_by_email_code,
     clear_portal_registration_email_code,
@@ -401,6 +403,16 @@ def portal_login_by_email_code(payload: PortalEmailCodeLoginRequest) -> PortalSe
             failure_detail=str(exc),
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+@router.post("/impersonation", response_model=PortalSessionResponse)
+def portal_impersonation_login(payload: PortalImpersonationExchangeRequest) -> PortalSessionResponse:
+    try:
+        return consume_portal_impersonation_code(payload.impersonation_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.post("/forgot-password")

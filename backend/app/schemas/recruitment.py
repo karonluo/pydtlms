@@ -144,11 +144,24 @@ class BackgroundAssessmentRecord(BaseModel):
     assessed_at: str | None = None
 
 
+class QualificationReviewHistoryRecord(BaseModel):
+    reviewer_username: str
+    reviewer_name: str | None = None
+    reviewer_role_code: str | None = None
+    action: str
+    action_label: str
+    review_comment: str | None = None
+    reviewed_at: str | None = None
+
+
 class RecruitApplicationRecord(BaseModel):
     id: int
     plan_id: int
     business_key: str
     portal_student_id: int | None = None
+    account_status: str | None = None
+    selected_plan_name: str | None = None
+    registered_at: str | None = None
     candidate_no: str | None = None
     review_round: str | None = None
     student_name: str
@@ -205,9 +218,28 @@ class RecruitApplicationRecord(BaseModel):
     supplementary_profile: str | None = None
     material_status: str
     application_status: str
+    advisor_screening_status: str | None = None
+    advisor_screening_round: str | None = None
+    advisor_screening_submitted_at: str | None = None
+    advisor_signature_base64: str | None = None
+    first_choice_screening_batch_id: int | None = None
+    second_choice_screening_batch_id: int | None = None
+    first_choice_screening_submitted_at: str | None = None
+    second_choice_screening_submitted_at: str | None = None
+    first_choice_screening_score: float | None = None
+    second_choice_screening_score: float | None = None
+    initial_screening_status: str | None = None
+    initial_screening_result: str | None = None
+    initial_screening_confirmed_at: str | None = None
+    initial_screening_confirmer_username: str | None = None
+    initial_screening_confirmer_name: str | None = None
+    initial_screening_notification_status: str | None = None
+    initial_screening_notification_sent_at: str | None = None
+    next_stage_name: str | None = None
     reviewer_name: str | None = None
     final_score: float | None = None
     background_assessments: list[BackgroundAssessmentRecord] = Field(default_factory=list)
+    qualification_review_history: list[QualificationReviewHistoryRecord] = Field(default_factory=list)
     profile: PortalApplicantProfileData | None = None
     preferences: list[PortalApplicationPreferenceItem] = Field(default_factory=list)
     education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
@@ -305,7 +337,17 @@ class RecruitPortalApplicationDetail(BaseModel):
     material_status: str
     reviewer_name: str | None = None
     submitted_at: str | None = None
+    advisor_screening_status: str | None = None
+    advisor_screening_round: str | None = None
+    advisor_screening_submitted_at: str | None = None
+    advisor_signature_base64: str | None = None
+    first_choice_screening_score: float | None = None
+    second_choice_screening_score: float | None = None
+    initial_screening_status: str | None = None
+    initial_screening_result: str | None = None
+    next_stage_name: str | None = None
     background_assessments: list[BackgroundAssessmentRecord] = Field(default_factory=list)
+    qualification_review_history: list[QualificationReviewHistoryRecord] = Field(default_factory=list)
     profile: PortalApplicantProfileData | None = None
     source_channel: str | None = None
     source_channel_other: str | None = None
@@ -378,6 +420,24 @@ class RecruitApplicationUpsert(BaseModel):
     supplementary_profile: str | None = None
     material_status: str
     application_status: str
+    advisor_screening_status: str | None = None
+    advisor_screening_round: str | None = None
+    advisor_screening_submitted_at: str | None = None
+    advisor_signature_base64: str | None = None
+    first_choice_screening_batch_id: int | None = None
+    second_choice_screening_batch_id: int | None = None
+    first_choice_screening_submitted_at: str | None = None
+    second_choice_screening_submitted_at: str | None = None
+    first_choice_screening_score: float | None = None
+    second_choice_screening_score: float | None = None
+    initial_screening_status: str | None = None
+    initial_screening_result: str | None = None
+    initial_screening_confirmed_at: str | None = None
+    initial_screening_confirmer_username: str | None = None
+    initial_screening_confirmer_name: str | None = None
+    initial_screening_notification_status: str | None = None
+    initial_screening_notification_sent_at: str | None = None
+    next_stage_name: str | None = None
     reviewer_name: str | None = None
     final_score: float | None = None
     profile: PortalApplicantProfileData | None = None
@@ -474,6 +534,58 @@ class RecruitApplicationListResponse(PaginationResponseBase):
     items: list[RecruitApplicationRecord]
 
 
+class AdvisorScreeningSubmitItem(BaseModel):
+    application_id: int
+    advisor_score: float
+
+    @field_validator("advisor_score")
+    @classmethod
+    def validate_advisor_score(cls, value: float) -> float:
+        score = float(value)
+        if score < 0 or score > 100:
+            raise ValueError("导师初筛分数必须在 0 到 100 之间")
+        return score
+
+
+class AdvisorScreeningBatchSubmitRequest(BaseModel):
+    signature_base64: str
+    items: list[AdvisorScreeningSubmitItem] = Field(default_factory=list)
+
+    @field_validator("signature_base64")
+    @classmethod
+    def validate_signature_base64(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("缺少导师签名数据")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_items(self) -> "AdvisorScreeningBatchSubmitRequest":
+        if not self.items:
+            raise ValueError("至少需要提交一条导师初筛记录")
+        return self
+
+
+class AdvisorScreeningBatchSubmitResponse(BaseModel):
+    batch_id: int
+    screening_round: str
+    submitted_count: int
+    applications: list[RecruitApplicationRecord] = Field(default_factory=list)
+
+
+class InitialScreeningConfirmationRequest(BaseModel):
+    result: str
+    comment: str | None = None
+
+    @field_validator("result")
+    @classmethod
+    def validate_result(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if normalized not in {"passed", "rejected"}:
+            raise ValueError("初筛确认结果只能是 passed 或 rejected")
+        return normalized
+
+
 class RecruitApplicationImportIssue(BaseModel):
     row_number: int
     student_name: str | None = None
@@ -495,6 +607,7 @@ class RecruitmentOptionsResponse(BaseModel):
     material_status_options: list[SelectOption]
     application_status_options: list[SelectOption]
     intended_field_options: list[SelectOption]
+    advisor_options: list[SelectOption]
     reviewer_options: list[SelectOption]
     graduation_school_options: list[SelectOption]
 

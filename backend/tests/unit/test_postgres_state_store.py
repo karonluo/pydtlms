@@ -345,6 +345,48 @@ def test_list_registered_portal_students_page_filters_by_multiple_advisor_names(
     assert count_params == [["刘亚", "何琳"]]
 
 
+def test_list_registered_portal_students_page_filters_by_recruitment_application_status(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[{"total": 1}],
+        fetchall_results=[[
+            {
+                "id": 12,
+                "full_name": "王五",
+                "phone_number": "13800003333",
+                "email": "wangwu@example.com",
+                "id_number": "320000199901011235",
+                "account_status": "启用",
+                "selected_plan_name": "2026博士招生",
+                "selected_team_name": "智能制造联合团队",
+                "selected_advisor_name": "刘亚",
+                "created_at": "2026-04-01 10:00:00",
+                "submitted_at": "2026-04-20 10:00:00",
+                "recruitment_application_id": 35,
+                "recruitment_application_business_key": "RECRUIT-20260420-0035",
+                "application_status": "initial_screening_confirmation",
+                "applied_at": "2026-04-20 10:00:00",
+            }
+        ]],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    items, total = store.list_registered_portal_students_page(
+        recruitment_application_status="待初筛确认",
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 1
+    assert items[0]["recruitment_application_status"] == "待初筛确认"
+    count_sql, count_params = cursor.executed[0]
+    assert "latest_application.application_status" in count_sql
+    assert count_params == [["待初筛确认", "initial_screening_confirmation"]]
+
+
 def test_sync_recruitment_application_status_falls_back_to_db_portal_student_id(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor(fetchone_results=[(7,)])

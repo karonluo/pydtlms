@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
+from app.schemas.portal import PortalImpersonationLaunchResponse
 from app.schemas.student import (
     CenterListResponse,
     CenterRecord,
@@ -16,6 +17,7 @@ from app.schemas.student import (
     RegisteredPortalStudentExportRequest,
     RegisteredPortalStudentEmailRequest,
     RegisteredPortalStudentListResponse,
+    RegisteredPortalStudentRollbackStageRequest,
     StudentLifecycleBoard,
     StudentManagementResponse,
     StudentOptionsResponse,
@@ -27,6 +29,7 @@ from app.schemas.system import BulkActionResponse, BulkDeleteRequest
 from app.services.dashboard_service import (
     activate_registered_portal_student,
     create_registered_portal_student_export_job,
+    create_portal_impersonation_launch,
     create_center,
     create_student,
     deactivate_registered_portal_student,
@@ -43,6 +46,7 @@ from app.services.dashboard_service import (
     get_student_management_list,
     get_student_options,
     get_student_stats,
+    rollback_registered_portal_student_stage,
     reset_registered_portal_student_password,
     send_registered_portal_student_email,
     update_center,
@@ -82,6 +86,8 @@ def student_management_list(
 def registered_portal_student_list(
     keyword: str | None = Query(default=None),
     application_form_status: str | None = Query(default=None),
+    recruitment_application_status: str | None = Query(default=None),
+    show_all_background_assessed: bool = Query(default=False),
     advisor_names: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
@@ -90,9 +96,12 @@ def registered_portal_student_list(
     return get_registered_portal_student_list(
         keyword=keyword,
         application_form_status=application_form_status,
+        recruitment_application_status=recruitment_application_status,
+        show_all_background_assessed=show_all_background_assessed,
         advisor_names=_normalize_multi_value_filter(advisor_names),
         page=page,
         page_size=page_size,
+        principal=principal,
     )
 
 
@@ -105,8 +114,13 @@ def export_registered_portal_student_records(
         content = export_registered_portal_students(
             payload.ids,
             keyword=payload.keyword,
+            plan_id=payload.plan_id,
             application_form_status=payload.application_form_status,
+            recruitment_application_status=payload.recruitment_application_status,
+            show_all_background_assessed=payload.show_all_background_assessed,
             advisor_names=payload.advisor_names,
+            export_scope=payload.export_scope,
+            principal=principal,
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
@@ -220,9 +234,44 @@ def send_registered_portal_student_email_record(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@router.post("/portal-registrations/{student_id}/rollback-stage", response_model=RegisteredPortalStudentActionResponse)
+def rollback_registered_portal_student_stage_record(
+    student_id: int,
+    payload: RegisteredPortalStudentRollbackStageRequest,
+    principal: Principal = Depends(require_permissions("students:write")),
+) -> RegisteredPortalStudentActionResponse:
+    try:
+        return rollback_registered_portal_student_stage(student_id, payload, principal=principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.post("/portal-registrations/{student_id}/impersonate", response_model=PortalImpersonationLaunchResponse)
+def impersonate_registered_portal_student_record(
+    student_id: int,
+    principal: Principal = Depends(require_permissions("students:write")),
+) -> PortalImpersonationLaunchResponse:
+    try:
+        return create_portal_impersonation_launch(student_id, principal)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
 @router.get("/options", response_model=StudentOptionsResponse)
 def student_options(principal: Principal = Depends(require_permissions("students:read"))) -> StudentOptionsResponse:
-    return get_student_options()
+    return get_student_options(principal=principal)
 
 
 @router.get("/management/stats", response_model=StudentStats)

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { clearPortalToken, getPortalProfile } from '../api/portal'
 import { useAuthStore } from '../stores/auth'
+import { hasGrantedPermission, resolveAccessibleRoutePath, resolveFirstAccessibleMenuPath } from './menuAccess'
 
 import AppLayout from '../layouts/AppLayout.vue'
 
@@ -34,30 +35,33 @@ const router = createRouter({
       component: AppLayout,
       children: [
         { path: '', redirect: '/portal' },
-        { path: 'dashboard', component: DashboardView, meta: { title: '经营总览' } },
-        { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划' } },
+        { path: 'dashboard', component: DashboardView, meta: { title: '经营总览', requiredPermission: 'dashboard:read' } },
+        { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划', section: 'plans', requiredPermission: 'recruitment_plan:read' } },
+        { path: 'recruitment/registered-students', component: StudentsView, meta: { title: '注册学生管理', section: 'portal-registrations', requiredPermission: 'recruitment_registered_students:read' } },
+        { path: 'recruitment/advisor-screening', component: RecruitmentWorkbenchView, meta: { title: '导师初筛', section: 'advisor-screening', requiredPermission: 'recruitment_advisor_screening:read' } },
+        { path: 'recruitment/initial-screening-confirmation', component: RecruitmentWorkbenchView, meta: { title: '初筛确认', section: 'initial-screening-confirmation', requiredPermission: 'recruitment_initial_screening_confirmation:read' } },
         { path: 'students', redirect: '/students/records' },
-        { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records' } },
-        { path: 'students/portal-registrations', component: StudentsView, meta: { title: '注册学生', section: 'portal-registrations' } },
-        { path: 'students/centers', component: StudentsView, meta: { title: '研究中心管理', section: 'centers' } },
+        { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records', requiredPermission: 'students:read' } },
+        { path: 'students/portal-registrations', redirect: '/recruitment/registered-students' },
+        { path: 'students/centers', component: StudentsView, meta: { title: '研究中心管理', section: 'centers', requiredPermission: 'students:read' } },
         { path: 'training', redirect: '/training/plans' },
-        { path: 'training/plans', component: TrainingView, meta: { title: '培养方案管理', section: 'plans' } },
-        { path: 'training/reports', component: TrainingView, meta: { title: '科研报告管理', section: 'reports' } },
-        { path: 'training/outbound', component: TrainingView, meta: { title: '外出研修管理', section: 'outbound' } },
+        { path: 'training/plans', component: TrainingView, meta: { title: '培养方案管理', section: 'plans', requiredPermission: 'training:read' } },
+        { path: 'training/reports', component: TrainingView, meta: { title: '科研报告管理', section: 'reports', requiredPermission: 'training:read' } },
+        { path: 'training/outbound', component: TrainingView, meta: { title: '外出研修管理', section: 'outbound', requiredPermission: 'training:read' } },
         { path: 'degree', redirect: '/degree/theses' },
-        { path: 'degree/theses', component: DegreeView, meta: { title: '论文主档管理', section: 'theses' } },
-        { path: 'degree/reviews', component: DegreeView, meta: { title: '盲审意见管理', section: 'reviews' } },
-        { path: 'workflow/tasks', component: WorkflowCenterView, meta: { title: '审批中心' } },
+        { path: 'degree/theses', component: DegreeView, meta: { title: '论文主档管理', section: 'theses', requiredPermission: 'degree:read' } },
+        { path: 'degree/reviews', component: DegreeView, meta: { title: '盲审意见管理', section: 'reviews', requiredPermission: 'degree:read' } },
+        { path: 'workflow/tasks', component: WorkflowCenterView, meta: { title: '审批中心', requiredPermission: 'workflow_center_menu:read' } },
         { path: 'system', redirect: '/system/users' },
-        { path: 'system/users', component: SystemView, meta: { title: '系统用户管理', section: 'users' } },
-        { path: 'system/roles', component: SystemView, meta: { title: '角色权限管理', section: 'roles' } },
-        { path: 'system/dict-types', component: DictView, meta: { title: '字典类型管理', section: 'dict-types' } },
-        { path: 'system/dict-data', component: DictView, meta: { title: '字典数据管理', section: 'dict-data' } },
-        { path: 'system/audit', component: SystemView, meta: { title: '审计策略管理', section: 'audit' } },
-        { path: 'system/integrations', component: SystemView, meta: { title: '集成链路管理', section: 'integrations' } },
-        { path: 'system/operation-logs', component: SystemView, meta: { title: '操作日志查询', section: 'operation-logs' } },
-        { path: 'system/notification-logs', component: SystemView, meta: { title: '通知发送日志', section: 'notification-logs' } },
-        { path: 'system/sync-logs', component: SystemView, meta: { title: '同步日志查询', section: 'sync-logs' } },
+        { path: 'system/users', component: SystemView, meta: { title: '系统用户管理', section: 'users', requiredPermission: 'system:read' } },
+        { path: 'system/roles', component: SystemView, meta: { title: '角色权限管理', section: 'roles', requiredPermission: 'system:read' } },
+        { path: 'system/dict-types', component: DictView, meta: { title: '字典类型管理', section: 'dict-types', requiredPermission: 'system:read' } },
+        { path: 'system/dict-data', component: DictView, meta: { title: '字典数据管理', section: 'dict-data', requiredPermission: 'system:read' } },
+        { path: 'system/audit', component: SystemView, meta: { title: '审计策略管理', section: 'audit', requiredPermission: 'audit:read' } },
+        { path: 'system/integrations', component: SystemView, meta: { title: '集成链路管理', section: 'integrations', requiredPermission: 'system:read' } },
+        { path: 'system/operation-logs', component: SystemView, meta: { title: '操作日志查询', section: 'operation-logs', requiredPermission: 'audit:read' } },
+        { path: 'system/notification-logs', component: SystemView, meta: { title: '通知发送日志', section: 'notification-logs', requiredPermission: 'audit:read' } },
+        { path: 'system/sync-logs', component: SystemView, meta: { title: '同步日志查询', section: 'sync-logs', requiredPermission: 'audit:read' } },
         { path: 'profile', component: ProfileView, meta: { title: '个人空间' } },
       ],
     },
@@ -72,13 +76,14 @@ router.beforeEach(async (to) => {
   const authStore = useAuthStore()
   const hasAccessToken = Boolean(localStorage.getItem('dtlms-access-token'))
   const hasPortalToken = Boolean(localStorage.getItem('dtlms-portal-access-token'))
+  const hasPortalImpersonationCode = typeof to.query.impersonation_code === 'string' && to.query.impersonation_code.trim().length > 0
 
   if (to.meta.portalProtected || to.path === '/portal') {
     if (!hasPortalToken) {
       if (to.meta.portalProtected) {
         return { path: '/portal' }
       }
-    } else {
+    } else if (!hasPortalImpersonationCode) {
       try {
         await getPortalProfile()
         if (to.path === '/portal') {
@@ -119,7 +124,12 @@ router.beforeEach(async (to) => {
 
   if (to.path === '/login' && authStore.isAuthenticated) {
     const queryRedirect = typeof to.query.redirect === 'string' ? to.query.redirect : ''
-    return authStore.consumeRedirectTarget() || queryRedirect || '/dashboard'
+    return resolveAccessibleRoutePath(authStore.consumeRedirectTarget() || queryRedirect, authStore.permissions)
+  }
+
+  const requiredPermission = typeof to.meta.requiredPermission === 'string' ? to.meta.requiredPermission : ''
+  if (requiredPermission && !hasGrantedPermission(authStore.permissions, requiredPermission)) {
+    return { path: resolveFirstAccessibleMenuPath(authStore.permissions) }
   }
 
   return true

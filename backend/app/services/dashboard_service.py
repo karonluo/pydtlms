@@ -1,12 +1,18 @@
 from typing import Any
 
 from app.schemas.auth import UserProfile, UserProfileUpdate
-from app.schemas.dashboard import DashboardOverview, DashboardUndergraduateSchoolRankingResponse, DashboardUndergraduateSchoolStudentListResponse
+from app.schemas.dashboard import (
+    DashboardOverview,
+    DashboardUndergraduateSchoolGroupDistributionResponse,
+    DashboardUndergraduateSchoolRankingResponse,
+    DashboardUndergraduateSchoolStudentListResponse,
+)
 from app.schemas.portal import (
     PortalApplicationDraftUpsert,
     PortalApplicationSubmissionResponse,
     PortalApplicationUpsert,
     PortalLoginRequest,
+    PortalImpersonationLaunchResponse,
     PortalPasswordChangeRequest,
     PortalPlanListResponse,
     PortalProfileOptionsResponse,
@@ -86,6 +92,19 @@ def get_dashboard_undergraduate_school_rankings(limit: int = 20) -> DashboardUnd
     return DashboardUndergraduateSchoolRankingResponse(items=store.get_dashboard_undergraduate_school_rankings(limit=limit))
 
 
+def get_dashboard_undergraduate_school_group_distribution() -> DashboardUndergraduateSchoolGroupDistributionResponse:
+    return store.get_dashboard_undergraduate_school_group_distribution()
+
+
+def get_dashboard_undergraduate_school_group_students(
+    *,
+    dict_type: str,
+    school_name: str | None = None,
+    bucket: str | None = None,
+) -> DashboardUndergraduateSchoolStudentListResponse:
+    return store.get_dashboard_undergraduate_school_group_students(dict_type=dict_type, school_name=school_name, bucket=bucket)
+
+
 def get_dashboard_undergraduate_school_students(school_name: str) -> DashboardUndergraduateSchoolStudentListResponse:
     return store.get_dashboard_undergraduate_school_students(school_name)
 
@@ -124,16 +143,22 @@ def get_student_management_list(
 def get_registered_portal_student_list(
     keyword: str | None = None,
     application_form_status: str | None = None,
+    recruitment_application_status: str | None = None,
+    show_all_background_assessed: bool = False,
     advisor_names: list[str] | None = None,
     page: int = 1,
     page_size: int = 10,
+    principal=None,
 ) -> RegisteredPortalStudentListResponse:
     return store.get_registered_portal_students(
         keyword=keyword,
         application_form_status=application_form_status,
+        recruitment_application_status=recruitment_application_status,
+        show_all_background_assessed=show_all_background_assessed,
         advisor_names=advisor_names,
         page=page,
         page_size=page_size,
+        principal=principal,
     )
 
 
@@ -141,14 +166,24 @@ def export_registered_portal_students(
     student_ids: list[int] | None = None,
     *,
     keyword: str | None = None,
+    plan_id: int | None = None,
     application_form_status: str | None = None,
+    recruitment_application_status: str | None = None,
+    show_all_background_assessed: bool = False,
     advisor_names: list[str] | None = None,
+    export_scope: str | None = None,
+    principal=None,
 ) -> bytes:
     return store.export_registered_portal_students(
         student_ids or [],
         keyword=keyword,
+        plan_id=plan_id,
         application_form_status=application_form_status,
+        recruitment_application_status=recruitment_application_status,
+        show_all_background_assessed=show_all_background_assessed,
         advisor_names=advisor_names,
+        export_scope=export_scope,
+        principal=principal,
     )
 
 
@@ -184,8 +219,12 @@ def send_registered_portal_student_email(student_id: int, payload: RegisteredPor
     return store.send_registered_portal_student_email(student_id, payload)
 
 
-def get_student_options() -> StudentOptionsResponse:
-    return store.get_student_options()
+def rollback_registered_portal_student_stage(student_id: int, payload, principal) -> RegisteredPortalStudentActionResponse:
+    return store.rollback_registered_portal_student_stage(student_id, payload, principal=principal)
+
+
+def get_student_options(*, principal=None) -> StudentOptionsResponse:
+    return store.get_student_options(principal=principal)
 
 
 def get_center_list(
@@ -261,10 +300,22 @@ def get_recruitment_application_list(
     keyword: str | None = None,
     plan_id: int | None = None,
     status: str | None = None,
+    portal_student_only: bool = False,
+    advisor_names: list[str] | None = None,
+    principal: Principal | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> RecruitApplicationListResponse:
-    return store.get_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status, page=page, page_size=page_size)
+    return store.get_recruitment_applications(
+        keyword=keyword,
+        plan_id=plan_id,
+        status=status,
+        portal_student_only=portal_student_only,
+        advisor_names=advisor_names,
+        principal=principal,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def get_recruitment_application_detail(application_id: int):
@@ -283,6 +334,14 @@ def update_recruitment_application(application_id: int, payload):
     return store.update_recruitment_application(application_id, payload)
 
 
+def submit_advisor_screening_batch(payload, principal: Principal):
+    return store.submit_advisor_screening_batch(payload, principal=principal)
+
+
+def confirm_initial_screening(application_id: int, payload, principal: Principal):
+    return store.confirm_initial_screening(application_id, payload, principal=principal)
+
+
 def delete_recruitment_application(application_id: int) -> None:
     store.delete_recruitment_application(application_id)
 
@@ -291,8 +350,22 @@ def import_recruitment_applications(plan_id: int, rows: list[dict[str, Any]], pr
     return store.import_recruitment_applications(plan_id=plan_id, rows=rows, principal=principal)
 
 
-def export_recruitment_applications(keyword: str | None = None, plan_id: int | None = None, status: str | None = None) -> bytes:
-    return store.export_recruitment_applications(keyword=keyword, plan_id=plan_id, status=status)
+def export_recruitment_applications(
+    keyword: str | None = None,
+    plan_id: int | None = None,
+    status: str | None = None,
+    portal_student_only: bool = False,
+    advisor_names: list[str] | None = None,
+    principal: Principal | None = None,
+) -> bytes:
+    return store.export_recruitment_applications(
+        keyword=keyword,
+        plan_id=plan_id,
+        status=status,
+        portal_student_only=portal_student_only,
+        advisor_names=advisor_names,
+        principal=principal,
+    )
 
 
 def export_recruitment_application_blank_template() -> bytes:
@@ -333,6 +406,14 @@ def validate_portal_registration_email_code(email: str, verification_code: str) 
 
 def clear_portal_registration_email_code(email: str) -> None:
     store.clear_portal_registration_email_code(email)
+
+
+def create_portal_impersonation_launch(student_id: int, principal: Principal) -> PortalImpersonationLaunchResponse:
+    return store.create_portal_impersonation_launch(student_id, principal)
+
+
+def consume_portal_impersonation_code(impersonation_code: str) -> PortalSessionResponse:
+    return store.consume_portal_impersonation_code(impersonation_code)
 
 
 def register_portal_student(payload: PortalRegistrationRequest) -> PortalRegistrationResponse:

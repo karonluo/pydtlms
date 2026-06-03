@@ -34,9 +34,28 @@ class DashboardUndergraduateSchoolRankingResponse(BaseModel):
     items: list[DashboardUndergraduateSchoolRankingItem]
 
 
+class DashboardUndergraduateSchoolGroupItem(BaseModel):
+    school_name: str
+    student_count: int
+    percentage: float
+
+
+class DashboardUndergraduateSchoolGroupDistribution(BaseModel):
+    group_name: str
+    dict_type: str
+    total: int
+    items: list[DashboardUndergraduateSchoolGroupItem]
+
+
+class DashboardUndergraduateSchoolGroupDistributionResponse(BaseModel):
+    total_applications: int
+    groups: list[DashboardUndergraduateSchoolGroupDistribution]
+
+
 class DashboardUndergraduateSchoolStudentItem(BaseModel):
     recruitment_application_id: int
     student_name: str
+    school_name: str | None = None
     candidate_no: str | None = None
     registered_at: str | None = None
     phone_number: str | None = None

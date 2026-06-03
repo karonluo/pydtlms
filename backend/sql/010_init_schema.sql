@@ -396,6 +396,22 @@ CREATE TABLE IF NOT EXISTS dtlms_recruitment_applications (
     supplementary_profile TEXT,
     intended_field_id BIGINT REFERENCES dtlms_research_fields(id),
     application_status VARCHAR(32) NOT NULL DEFAULT 'submitted',
+    advisor_screening_status VARCHAR(32) DEFAULT 'pending',
+    advisor_screening_round VARCHAR(32) DEFAULT 'first_choice',
+    first_choice_screening_batch_id BIGINT,
+    second_choice_screening_batch_id BIGINT,
+    first_choice_screening_submitted_at TIMESTAMPTZ,
+    second_choice_screening_submitted_at TIMESTAMPTZ,
+    first_choice_screening_score NUMERIC(5, 2),
+    second_choice_screening_score NUMERIC(5, 2),
+    initial_screening_status VARCHAR(32) DEFAULT 'pending',
+    initial_screening_result VARCHAR(32),
+    initial_screening_confirmed_at TIMESTAMPTZ,
+    initial_screening_confirmer_username VARCHAR(64),
+    initial_screening_confirmer_name VARCHAR(128),
+    initial_screening_notification_status VARCHAR(32) DEFAULT 'pending',
+    initial_screening_notification_sent_at TIMESTAMPTZ,
+    next_stage_name VARCHAR(64),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -552,6 +568,21 @@ CREATE TABLE IF NOT EXISTS dtlms_qualification_reviews (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS dtlms_qualification_review_logs (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id),
+    reviewer_user_id BIGINT,
+    reviewer_username VARCHAR(64) NOT NULL,
+    reviewer_name VARCHAR(128),
+    reviewer_role_code VARCHAR(64),
+    action VARCHAR(32) NOT NULL,
+    action_label VARCHAR(64) NOT NULL,
+    review_comment TEXT,
+    reviewed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS dtlms_background_assessments (
     id BIGSERIAL PRIMARY KEY,
     application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id),
@@ -565,6 +596,80 @@ CREATE TABLE IF NOT EXISTS dtlms_background_assessments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (application_id, evaluator_username)
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_advisor_screening_batches (
+    id BIGSERIAL PRIMARY KEY,
+    advisor_user_id BIGINT,
+    advisor_username VARCHAR(64) NOT NULL,
+    advisor_name VARCHAR(128),
+    advisor_role_code VARCHAR(64) NOT NULL DEFAULT 'advisor',
+    screening_round VARCHAR(32) NOT NULL,
+    signature_base64 TEXT NOT NULL,
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_advisor_screening_batches_round
+        CHECK (screening_round IN ('first_choice', 'second_choice'))
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_advisor_screening_items (
+    id BIGSERIAL PRIMARY KEY,
+    batch_id BIGINT NOT NULL REFERENCES dtlms_advisor_screening_batches(id) ON DELETE CASCADE,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id),
+    business_key VARCHAR(64) NOT NULL,
+    candidate_no VARCHAR(64) NOT NULL,
+    screening_round VARCHAR(32) NOT NULL,
+    advisor_score NUMERIC(5, 2) NOT NULL,
+    is_passed BOOLEAN NOT NULL,
+    screening_status VARCHAR(32) NOT NULL DEFAULT 'submitted',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_advisor_screening_items_round
+        CHECK (screening_round IN ('first_choice', 'second_choice')),
+    CONSTRAINT chk_advisor_screening_items_score_range
+        CHECK (advisor_score >= 0 AND advisor_score <= 100),
+    CONSTRAINT uq_advisor_screening_items_application_round UNIQUE (application_id, screening_round),
+    CONSTRAINT uq_advisor_screening_items_candidate_round UNIQUE (candidate_no, screening_round)
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_initial_screening_confirmations (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id),
+    business_key VARCHAR(64) NOT NULL,
+    candidate_no VARCHAR(64) NOT NULL,
+    confirmer_user_id BIGINT,
+    confirmer_username VARCHAR(64) NOT NULL,
+    confirmer_name VARCHAR(128),
+    confirmer_role_code VARCHAR(64) NOT NULL,
+    confirmation_result VARCHAR(32) NOT NULL,
+    confirmation_comment TEXT,
+    confirmed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_initial_screening_confirmations_result
+        CHECK (confirmation_result IN ('passed', 'rejected')),
+    CONSTRAINT uq_initial_screening_confirmations_application UNIQUE (application_id)
+);
+
+CREATE TABLE IF NOT EXISTS dtlms_initial_screening_notifications (
+    id BIGSERIAL PRIMARY KEY,
+    application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id),
+    business_key VARCHAR(64) NOT NULL,
+    notification_channel VARCHAR(32) NOT NULL,
+    notification_event VARCHAR(64) NOT NULL,
+    notification_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    recipient_address VARCHAR(255),
+    recipient_user_id BIGINT,
+    recipient_username VARCHAR(64),
+    payload_json JSONB,
+    sent_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_initial_screening_notifications_channel
+        CHECK (notification_channel IN ('email', 'site_message')),
+    CONSTRAINT chk_initial_screening_notifications_status
+        CHECK (notification_status IN ('pending', 'sent', 'failed'))
 );
 
 CREATE TABLE IF NOT EXISTS dtlms_reviewer_assignments (
@@ -759,8 +864,19 @@ CREATE INDEX IF NOT EXISTS idx_portal_application_achievement_application ON dtl
 CREATE INDEX IF NOT EXISTS idx_portal_application_attachment_owner ON dtlms_portal_application_attachments(application_id, owner_type, owner_id);
 CREATE INDEX IF NOT EXISTS idx_interview_schedule_time ON dtlms_interview_schedules(starts_at, ends_at);
 CREATE INDEX IF NOT EXISTS idx_admission_decision_status ON dtlms_admission_decisions(decision_status);
+CREATE INDEX IF NOT EXISTS idx_qualification_review_logs_application ON dtlms_qualification_review_logs(application_id, reviewed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_qualification_review_logs_reviewer ON dtlms_qualification_review_logs(reviewer_username, reviewed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_background_assessment_application ON dtlms_background_assessments(application_id, assessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_background_assessment_result ON dtlms_background_assessments(assessment_result);
+CREATE INDEX IF NOT EXISTS idx_advisor_screening_batches_advisor_round ON dtlms_advisor_screening_batches(advisor_username, screening_round, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_advisor_screening_items_application ON dtlms_advisor_screening_items(application_id, screening_round, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_advisor_screening_items_batch ON dtlms_advisor_screening_items(batch_id);
+CREATE INDEX IF NOT EXISTS idx_advisor_screening_items_business_key ON dtlms_advisor_screening_items(business_key);
+CREATE INDEX IF NOT EXISTS idx_initial_screening_confirmations_application ON dtlms_initial_screening_confirmations(application_id, confirmed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_initial_screening_notifications_application ON dtlms_initial_screening_notifications(application_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_initial_screening_notifications_status ON dtlms_initial_screening_notifications(notification_status, notification_channel);
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_advisor_screening_status ON dtlms_recruitment_applications(advisor_screening_status, advisor_screening_round);
+CREATE INDEX IF NOT EXISTS idx_recruitment_applications_initial_screening_status ON dtlms_recruitment_applications(initial_screening_status, initial_screening_result);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_module_time ON dtlms_operation_logs(module_name, created_at);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_entity ON dtlms_operation_logs(entity_name, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_source_target ON dtlms_data_sync_logs(source_system, target_system, created_at);

@@ -1,4 +1,5 @@
 import type { PagedResponse, PaginationParams, SelectOption } from './common'
+import type { RegisteredPortalStudentExportJobCreateResponse, RegisteredPortalStudentExportRequest } from './students'
 import type {
   PortalAchievementRecordItem,
   PortalApplicantProfileData,
@@ -36,6 +37,16 @@ export type BackgroundAssessmentRecord = {
   assessment_result: string
   assessment_comment?: string | null
   assessed_at?: string | null
+}
+
+export type QualificationReviewHistoryRecord = {
+  reviewer_username: string
+  reviewer_name?: string | null
+  reviewer_role_code?: string | null
+  action: string
+  action_label: string
+  review_comment?: string | null
+  reviewed_at?: string | null
 }
 
 
@@ -97,6 +108,22 @@ export type RecruitApplicationRecord = {
   supplementary_profile?: string | null
   material_status: string
   application_status: string
+  advisor_screening_status?: string | null
+  advisor_screening_round?: string | null
+  first_choice_screening_batch_id?: number | null
+  second_choice_screening_batch_id?: number | null
+  first_choice_screening_submitted_at?: string | null
+  second_choice_screening_submitted_at?: string | null
+  first_choice_screening_score?: number | null
+  second_choice_screening_score?: number | null
+  initial_screening_status?: string | null
+  initial_screening_result?: string | null
+  initial_screening_confirmed_at?: string | null
+  initial_screening_confirmer_username?: string | null
+  initial_screening_confirmer_name?: string | null
+  initial_screening_notification_status?: string | null
+  initial_screening_notification_sent_at?: string | null
+  next_stage_name?: string | null
   reviewer_name?: string | null
   final_score?: number | null
   background_assessments?: BackgroundAssessmentRecord[]
@@ -128,9 +155,19 @@ export type RecruitPortalApplicationDetail = {
   id_number?: string | null
   application_status: string
   material_status: string
+  advisor_screening_status?: string | null
+  advisor_screening_round?: string | null
+  advisor_screening_submitted_at?: string | null
+  advisor_signature_base64?: string | null
+  first_choice_screening_score?: number | null
+  second_choice_screening_score?: number | null
+  initial_screening_status?: string | null
+  initial_screening_result?: string | null
+  next_stage_name?: string | null
   reviewer_name?: string | null
   submitted_at?: string | null
   background_assessments?: BackgroundAssessmentRecord[]
+  qualification_review_history?: QualificationReviewHistoryRecord[]
   profile?: PortalApplicantProfileData | null
   source_channel?: string | null
   source_channel_other?: string | null
@@ -164,6 +201,32 @@ export type RecruitApplicationImportResult = {
   plan_id: number
   imported_business_keys: string[]
   issues: RecruitApplicationImportIssue[]
+}
+
+
+export type AdvisorScreeningSubmitItem = {
+  application_id: number
+  advisor_score: number
+}
+
+
+export type AdvisorScreeningBatchSubmitRequest = {
+  signature_base64: string
+  items: AdvisorScreeningSubmitItem[]
+}
+
+
+export type AdvisorScreeningBatchSubmitResponse = {
+  batch_id: number
+  screening_round: string
+  submitted_count: number
+  applications: RecruitApplicationRecord[]
+}
+
+
+export type InitialScreeningConfirmationRequest = {
+  result: 'passed' | 'rejected'
+  comment?: string | null
 }
 
 
@@ -208,6 +271,7 @@ export type RecruitmentOptions = {
   material_status_options: SelectOption[]
   application_status_options: SelectOption[]
   intended_field_options: SelectOption[]
+  advisor_options: SelectOption[]
   reviewer_options: SelectOption[]
   graduation_school_options: SelectOption[]
 }
@@ -248,7 +312,7 @@ export function deleteRecruitmentPlan(id: number) {
 }
 
 
-export function listRecruitmentApplications(params?: PaginationParams & { keyword?: string; status?: string; plan_id?: number }) {
+export function listRecruitmentApplications(params?: PaginationParams & { keyword?: string; status?: string; plan_id?: number; portal_student_only?: boolean; advisor_names?: string }) {
   return http.get<RecruitApplicationListResponse>('/recruitment/applications', { params })
 }
 
@@ -278,6 +342,16 @@ export function deleteRecruitmentApplication(id: number) {
 }
 
 
+export function submitAdvisorScreeningBatch(payload: AdvisorScreeningBatchSubmitRequest) {
+  return http.post<AdvisorScreeningBatchSubmitResponse>('/recruitment/applications/advisor-screening:submit', payload)
+}
+
+
+export function confirmInitialScreening(applicationId: number, payload: InitialScreeningConfirmationRequest) {
+  return http.post<RecruitApplicationRecord>(`/recruitment/applications/${applicationId}/initial-screening-confirmation`, payload)
+}
+
+
 export function importRecruitmentApplications(planId: number, file: File) {
   const formData = new FormData()
   formData.append('plan_id', String(planId))
@@ -290,11 +364,16 @@ export function importRecruitmentApplications(planId: number, file: File) {
 }
 
 
-export function exportRecruitmentApplications(params?: { keyword?: string; status?: string; plan_id?: number }) {
+export function exportRecruitmentApplications(params?: { keyword?: string; status?: string; plan_id?: number; portal_student_only?: boolean; advisor_names?: string }) {
   return http.get<Blob>('/recruitment/applications/export', {
     params,
     responseType: 'blob',
   })
+}
+
+
+export function createAdvisorScreeningExportJob(payload: RegisteredPortalStudentExportRequest) {
+  return http.post<RegisteredPortalStudentExportJobCreateResponse>('/recruitment/advisor-screening/export-jobs', payload)
 }
 
 

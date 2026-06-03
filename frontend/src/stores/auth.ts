@@ -88,6 +88,7 @@ export const useAuthStore = defineStore('auth', () => {
   const username = ref('')
   const fullName = ref('')
   const roleName = ref('')
+  const roles = ref<string[]>([])
   const permissions = ref<string[]>([])
   const profile = ref<UserProfile | null>(null)
   const sessionState = ref<SessionState>('idle')
@@ -103,6 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
   function applyPrincipal(principal: Principal) {
     username.value = principal.username
     fullName.value = principal.full_name || principal.username
+    roles.value = [...principal.roles]
     roleName.value = principal.roles.includes('platform_admin') ? '平台管理员' : principal.roles.join(' / ') || '未分配角色'
     permissions.value = principal.permissions
   }
@@ -133,6 +135,7 @@ export const useAuthStore = defineStore('auth', () => {
     username.value = ''
     fullName.value = ''
     roleName.value = ''
+    roles.value = []
     permissions.value = []
     profile.value = null
     sessionState.value = 'idle'
@@ -259,6 +262,7 @@ export const useAuthStore = defineStore('auth', () => {
     username,
     fullName,
     roleName,
+    roles,
     permissions,
     profile,
     initials,

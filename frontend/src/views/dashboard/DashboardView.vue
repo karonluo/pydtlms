@@ -8,7 +8,7 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { BarChart, LineChart } from 'echarts/charts'
+import { BarChart, PieChart, type BarSeriesOption, type PieSeriesOption } from 'echarts/charts'
 import {
   GridComponent,
   LegendComponent,
@@ -23,8 +23,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import {
   getDashboardOverview,
+  getDashboardUndergraduateSchoolGroupDistribution,
+  getDashboardUndergraduateSchoolGroupStudents,
   getDashboardUndergraduateSchoolRankings,
   getDashboardUndergraduateSchoolStudents,
+  type DashboardUndergraduateSchoolGroupDistribution,
+  type DashboardUndergraduateSchoolGroupDistributionResponse,
   type DashboardOverview,
   type DashboardUndergraduateSchoolRankingItem,
   type DashboardUndergraduateSchoolStudentItem,
@@ -34,31 +38,34 @@ import { getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDet
 import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
 import KpiCard from '../../components/dashboard/KpiCard.vue'
 
-use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+use([BarChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 type DashboardChartOption = ComposeOption<
-  GridComponentOption | LegendComponentOption | TooltipComponentOption
+  BarSeriesOption | PieSeriesOption | GridComponentOption | LegendComponentOption | TooltipComponentOption
 >
 
-type StageNode = {
-  step: string
-  title: string
-  subtitle: string
-  bullets: string[]
-  tone: string
+type SchoolGroupDisplayItem = {
+  school_name: string
+  student_count: number
+  percentage: number
+  bucket?: 'other'
 }
 
-const chartRef = ref<HTMLDivElement>()
+type SchoolStudentDialogSource =
+  | { type: 'school'; schoolName: string }
+  | { type: 'group'; title: string; dictType: string; schoolName?: string; bucket?: 'other' }
+
 const schoolRankingChartRef = ref<HTMLDivElement>()
 const loading = ref(false)
-const flowchartLaneRef = ref<HTMLDivElement>()
-const flowScrollState = ref({ left: 0, width: 0, scrollWidth: 0 })
 const overview = ref<DashboardOverview | null>(null)
+const schoolGroupDistribution = ref<DashboardUndergraduateSchoolGroupDistributionResponse>({ total_applications: 0, groups: [] })
 const schoolRankings = ref<DashboardUndergraduateSchoolRankingItem[]>([])
 const schoolStudentDialogVisible = ref(false)
 const schoolStudentListLoading = ref(false)
 const selectedSchoolName = ref('')
 const selectedSchoolStudents = ref<DashboardUndergraduateSchoolStudentItem[]>([])
+const selectedSchoolStudentFilter = ref('')
+const selectedSchoolDialogSource = ref<SchoolStudentDialogSource | null>(null)
 const portalApplicationDetailVisible = ref(false)
 const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
 const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
@@ -67,17 +74,11 @@ const portalWorkflowActionSubmitting = ref(false)
 const portalWorkflowCommentDialogVisible = ref(false)
 const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
 const portalWorkflowComment = ref('')
-let chart: ECharts | undefined
+const schoolGroupPieChartRefs = ref<Record<string, HTMLDivElement | null>>({})
 let schoolRankingChart: ECharts | undefined
+let schoolGroupPieCharts: Record<string, ECharts | undefined> = {}
 
-const lifecycleStages: StageNode[] = [
-  { step: '01', title: '招生准备', subtitle: '招生管理', bullets: ['维护招生计划', '核验报名材料', '组织资格初筛'], tone: 'ocean' },
-  { step: '02', title: '入学录取', subtitle: '招生管理', bullets: ['安排面试评审', '生成拟录取名单', '同步新生基础数据'], tone: 'sky' },
-  { step: '03', title: '导师建立', subtitle: '学生管理', bullets: ['确认导师关系', '记录团队归属', '建立培养台账'], tone: 'teal' },
-  { step: '04', title: '培养执行', subtitle: '培养管理', bullets: ['下发培养方案', '提交科研报告', '处理外出研修申请'], tone: 'amber' },
-  { step: '05', title: '学位收口', subtitle: '学位管理', bullets: ['论文查重与盲审', '安排预答辩', '形成授位结论'], tone: 'coral' },
-  { step: '06', title: '毕业归档', subtitle: '系统治理', bullets: ['归档日志留痕', '同步外部系统', '保留业务证据链'], tone: 'violet' },
-]
+const schoolGroupPalette = ['#2e9bea', '#36b59a', '#e4a53d', '#e47857', '#8d72d9', '#4675bb', '#60c4a4', '#f0b45a', '#d86666', '#7a8796']
 
 const iconMap: Record<string, unknown> = {
   学生总量: UserFilled,
@@ -119,59 +120,40 @@ const summaryCards = computed(() => {
   }))
 })
 
-const alertItems = computed(() => overview.value?.alerts || [])
-
-const canScrollFlowLeft = computed(() => flowScrollState.value.left > 8)
-const canScrollFlowRight = computed(() => {
-  const { left, width, scrollWidth } = flowScrollState.value
-  return left + width < scrollWidth - 8
+const selectedSchoolStudentStats = computed(() => {
+  const counter = new Map<string, number>()
+  selectedSchoolStudents.value.forEach((item) => {
+    const schoolName = String(item.school_name || '').trim() || '未记录学校'
+    counter.set(schoolName, (counter.get(schoolName) || 0) + 1)
+  })
+  return Array.from(counter.entries())
+    .map(([school_name, student_count]) => ({ school_name, student_count }))
+    .sort((left, right) => right.student_count - left.student_count || left.school_name.localeCompare(right.school_name, 'zh-Hans-CN'))
 })
 
-function updateFlowScrollState() {
-  const lane = flowchartLaneRef.value
-  if (!lane) {
-    flowScrollState.value = { left: 0, width: 0, scrollWidth: 0 }
-    return
+const isSchoolStudentFiltered = computed(() => !!selectedSchoolStudentFilter.value)
+const filteredSelectedSchoolStudents = computed(() => {
+  const activeFilter = selectedSchoolStudentFilter.value.trim()
+  if (!activeFilter) {
+    return selectedSchoolStudents.value
   }
-  flowScrollState.value = {
-    left: lane.scrollLeft,
-    width: lane.clientWidth,
-    scrollWidth: lane.scrollWidth,
-  }
-}
-
-function scrollFlowchart(direction: number) {
-  const lane = flowchartLaneRef.value
-  if (!lane) {
-    return
-  }
-  const nodes = Array.from(lane.querySelectorAll('.flow-node'))
-  if (!nodes.length) {
-    return
-  }
-  const currentLeft = lane.scrollLeft
-  if (direction > 0) {
-    const nextNode = nodes.find((node) => (node as HTMLElement).offsetLeft > currentLeft + 12) as HTMLElement | undefined
-    lane.scrollTo({ left: nextNode ? nextNode.offsetLeft : lane.scrollWidth, behavior: 'smooth' })
-    return
-  }
-  const previousNode = [...nodes].reverse().find((node) => (node as HTMLElement).offsetLeft < currentLeft - 12) as HTMLElement | undefined
-  lane.scrollTo({ left: previousNode ? previousNode.offsetLeft : 0, behavior: 'smooth' })
-}
+  return selectedSchoolStudents.value.filter((item) => (String(item.school_name || '').trim() || '未记录学校') === activeFilter)
+})
 
 async function loadOverview() {
   loading.value = true
   try {
-    const [{ data: overviewData }, { data: rankingData }] = await Promise.all([
+    const [{ data: overviewData }, { data: rankingData }, { data: groupDistributionData }] = await Promise.all([
       getDashboardOverview(),
       getDashboardUndergraduateSchoolRankings(20),
+      getDashboardUndergraduateSchoolGroupDistribution(),
     ])
     overview.value = overviewData
     schoolRankings.value = rankingData.items
+    schoolGroupDistribution.value = groupDistributionData
     await nextTick()
-    renderChart()
+    renderSchoolGroupPieCharts()
     renderSchoolRankingChart()
-    updateFlowScrollState()
   } catch {
     ElMessage.error('驾驶舱数据加载失败')
   } finally {
@@ -179,54 +161,128 @@ async function loadOverview() {
   }
 }
 
-function renderChart() {
-  if (!chartRef.value || !overview.value) {
-    return
-  }
+function setSchoolGroupPieChartRef(dictType: string, element: unknown) {
+  schoolGroupPieChartRefs.value[dictType] = element instanceof HTMLDivElement ? element : null
+}
 
-  const bars = [
-    overview.value.recruitment_metrics[0]?.value || '0',
-    overview.value.lifecycle_coverage[0]?.value || '0',
-    overview.value.training_metrics[0]?.value || '0',
-    overview.value.training_metrics[1]?.value || '0',
-    overview.value.degree_metrics[0]?.value || '0',
-    overview.value.workflow_metrics[0]?.value || '0',
-  ].map((value) => Number(value))
-
-  chart?.dispose()
-  chart = init(chartRef.value)
-  const option: DashboardChartOption = {
-    color: ['#27a3ea', '#4675bb'],
-    tooltip: { trigger: 'axis' },
-    legend: { bottom: 0 },
-    grid: { left: 16, right: 16, top: 24, bottom: 44, containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: ['招生计划', '学生规模', '培养方案', '报告待审', '论文总量', '流程待办'],
-      axisLine: { lineStyle: { color: '#d2deef' } },
-      axisTick: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      splitLine: { lineStyle: { color: '#eaf1fb' } },
-    },
-    series: [
-      {
-        name: '当前规模',
-        type: 'bar',
-        barWidth: 18,
-        data: bars,
-        itemStyle: { borderRadius: [10, 10, 0, 0] },
-      },
-      {
-        name: '目标线',
-        type: 'line',
-        smooth: true,
-        data: bars.map((value) => Math.max(value, 1)),
-      },
-    ],
+function formatRate(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0%'
   }
-  chart.setOption(option)
+  return `${value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, '')}%`
+}
+
+function schoolGroupShareOfAll(total: number) {
+  const applications = schoolGroupDistribution.value.total_applications
+  if (!applications) {
+    return '0%'
+  }
+  return formatRate((total * 100) / applications)
+}
+
+function getSchoolGroupDisplayItems(group: DashboardUndergraduateSchoolGroupDistribution): SchoolGroupDisplayItem[] {
+  const positiveItems = group.items.filter((item) => item.student_count > 0)
+  if (group.dict_type === 'system_211_university' || group.dict_type === 'system_985_university') {
+    const topItems = positiveItems.slice(0, 5)
+    const otherCount = positiveItems.slice(5).reduce((sum, item) => sum + item.student_count, 0)
+    if (otherCount <= 0) {
+      return topItems
+    }
+    return [
+      ...topItems,
+      {
+        school_name: '其他',
+        student_count: otherCount,
+        percentage: group.total ? Number(((otherCount * 100) / group.total).toFixed(2)) : 0,
+        bucket: 'other',
+      },
+    ]
+  }
+  return positiveItems
+}
+
+function schoolGroupLegendDotStyle(index: number) {
+  return { backgroundColor: schoolGroupPalette[index % schoolGroupPalette.length] }
+}
+
+function formatSchoolGroupPieLabel(name: string) {
+  const normalizedName = String(name || '').trim()
+  if (normalizedName.length <= 7) {
+    return normalizedName
+  }
+  return `${normalizedName.slice(0, 7)}\n${normalizedName.slice(7)}`
+}
+
+function renderSchoolGroupPieCharts() {
+  Object.values(schoolGroupPieCharts).forEach((pieChart) => pieChart?.dispose())
+  schoolGroupPieCharts = {}
+
+  schoolGroupDistribution.value.groups.forEach((group) => {
+    const chartElement = schoolGroupPieChartRefs.value[group.dict_type]
+    const visibleItems = getSchoolGroupDisplayItems(group)
+    if (!chartElement || !visibleItems.length) {
+      return
+    }
+
+    const pieChart = init(chartElement)
+    schoolGroupPieCharts[group.dict_type] = pieChart
+    const option: DashboardChartOption = {
+      color: schoolGroupPalette,
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          const value = Number(params?.value || 0)
+          const rate = typeof params?.data?.percentage === 'number' ? formatRate(params.data.percentage) : `${params?.percent || 0}%`
+          return `${params?.name || ''}<br/>报名学生 ${value} 名<br/>占本组 ${rate}`
+        },
+      },
+      series: [
+        {
+          name: group.group_name,
+          type: 'pie',
+          radius: '50%',
+          center: ['50%', '48%'],
+          avoidLabelOverlap: true,
+          minAngle: 4,
+          cursor: 'pointer',
+          data: visibleItems.map((item) => ({
+            name: item.school_name,
+            value: item.student_count,
+            percentage: item.percentage,
+            schoolName: item.bucket === 'other' ? undefined : item.school_name,
+            bucket: item.bucket,
+          })),
+          label: {
+            formatter: (params: any) => {
+              const percent = typeof params?.data?.percentage === 'number' ? formatRate(params.data.percentage) : `${params?.percent || 0}%`
+              return `${formatSchoolGroupPieLabel(String(params?.name || ''))}\n${params?.value || 0}人 ${percent}`
+            },
+            color: '#24415f',
+            fontSize: 10,
+            lineHeight: 13,
+          },
+          labelLine: {
+            length: 8,
+            length2: 6,
+          },
+          labelLayout: {
+            hideOverlap: false,
+          },
+        },
+      ],
+    }
+    pieChart.setOption(option)
+    pieChart.on('click', (params: any) => {
+      const data = params?.data || {}
+      const item: SchoolGroupDisplayItem = {
+        school_name: String(params?.name || ''),
+        student_count: Number(params?.value || 0),
+        percentage: typeof data.percentage === 'number' ? data.percentage : 0,
+        bucket: data.bucket === 'other' ? 'other' : undefined,
+      }
+      void openSchoolGroupStudentDialog(group, item)
+    })
+  })
 }
 
 function renderSchoolRankingChart() {
@@ -289,6 +345,8 @@ function renderSchoolRankingChart() {
 
 async function openSchoolStudentDialog(schoolName: string) {
   selectedSchoolName.value = schoolName
+  selectedSchoolStudentFilter.value = ''
+  selectedSchoolDialogSource.value = { type: 'school', schoolName }
   schoolStudentDialogVisible.value = true
   schoolStudentListLoading.value = true
   try {
@@ -300,6 +358,70 @@ async function openSchoolStudentDialog(schoolName: string) {
   } finally {
     schoolStudentListLoading.value = false
   }
+}
+
+async function openSchoolGroupStudentDialog(group: DashboardUndergraduateSchoolGroupDistribution, item: SchoolGroupDisplayItem) {
+  const title = item.bucket === 'other' ? `${group.group_name}其他院校` : item.school_name
+  selectedSchoolName.value = title
+  selectedSchoolStudentFilter.value = ''
+  selectedSchoolDialogSource.value = {
+    type: 'group',
+    title,
+    dictType: group.dict_type,
+    schoolName: item.bucket === 'other' ? undefined : item.school_name,
+    bucket: item.bucket,
+  }
+  schoolStudentDialogVisible.value = true
+  schoolStudentListLoading.value = true
+  try {
+    const { data } = await getDashboardUndergraduateSchoolGroupStudents({
+      dict_type: group.dict_type,
+      school_name: item.bucket === 'other' ? undefined : item.school_name,
+      bucket: item.bucket,
+    })
+    selectedSchoolStudents.value = data.items
+  } catch {
+    selectedSchoolStudents.value = []
+    ElMessage.error('加载重点院校报名学生清单失败')
+  } finally {
+    schoolStudentListLoading.value = false
+  }
+}
+
+async function reloadSelectedSchoolStudents() {
+  const source = selectedSchoolDialogSource.value
+  if (!source) {
+    return
+  }
+  selectedSchoolStudentFilter.value = ''
+  if (source.type === 'school') {
+    await openSchoolStudentDialog(source.schoolName)
+    return
+  }
+  selectedSchoolName.value = source.title
+  schoolStudentDialogVisible.value = true
+  schoolStudentListLoading.value = true
+  try {
+    const { data } = await getDashboardUndergraduateSchoolGroupStudents({
+      dict_type: source.dictType,
+      school_name: source.schoolName,
+      bucket: source.bucket,
+    })
+    selectedSchoolStudents.value = data.items
+  } catch {
+    selectedSchoolStudents.value = []
+    ElMessage.error('刷新重点院校报名学生清单失败')
+  } finally {
+    schoolStudentListLoading.value = false
+  }
+}
+
+function applySchoolStudentFilter(schoolName: string) {
+  selectedSchoolStudentFilter.value = schoolName
+}
+
+function resetSchoolStudentFilter() {
+  selectedSchoolStudentFilter.value = ''
 }
 
 async function openPortalApplicationDetail(row: DashboardUndergraduateSchoolStudentItem) {
@@ -363,8 +485,8 @@ async function submitPortalWorkflowCommentDialog() {
     portalViewingWorkflowTask.value = null
     ElMessage.success(`${currentAction.label}已完成`)
     await loadOverview()
-    if (selectedSchoolName.value) {
-      await openSchoolStudentDialog(selectedSchoolName.value)
+    if (selectedSchoolDialogSource.value) {
+      await reloadSelectedSchoolStudents()
     }
   } catch {
     ElMessage.error(`${currentAction.label}失败`)
@@ -391,10 +513,15 @@ watch(() => portalApplicationDetailVisible.value, (visible) => {
   }
 })
 
+watch(() => schoolStudentDialogVisible.value, (visible) => {
+  if (!visible) {
+    selectedSchoolStudentFilter.value = ''
+  }
+})
+
 function handleResize() {
-  chart?.resize()
   schoolRankingChart?.resize()
-  updateFlowScrollState()
+  Object.values(schoolGroupPieCharts).forEach((pieChart) => pieChart?.resize())
 }
 
 onMounted(() => {
@@ -404,8 +531,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  chart?.dispose()
   schoolRankingChart?.dispose()
+  Object.values(schoolGroupPieCharts).forEach((pieChart) => pieChart?.dispose())
 })
 </script>
 
@@ -424,63 +551,6 @@ onBeforeUnmount(() => {
     <section class="page-card dashboard-panel full-span">
       <div class="page-heading">
         <div>
-          <h2>端到端业务流程图</h2>
-          <p>从招生准备到毕业归档，按业务顺序展示关键动作，并在节点上直接标记参与角色。</p>
-        </div>
-      </div>
-
-      <div class="flowchart-shell">
-        <div class="flowchart-header">
-          <div>
-            <span class="flowchart-kicker">主链路</span>
-            <h3>招生 → 入学 → 导师关系 → 培养执行 → 学位审核 → 毕业归档</h3>
-          </div>
-          <p>用于给管理人员快速判断当前业务主线位置，也可作为新用户培训时的操作导航。</p>
-        </div>
-
-        <div class="flowchart-lane-wrap">
-          <button
-            type="button"
-            class="flowchart-nav flowchart-nav--left"
-            :class="{ 'is-disabled': !canScrollFlowLeft }"
-            :disabled="!canScrollFlowLeft"
-            @click="scrollFlowchart(-1)"
-          >
-            <span aria-hidden="true">‹</span>
-          </button>
-
-          <div ref="flowchartLaneRef" class="flowchart-lane" @scroll="updateFlowScrollState">
-            <template v-for="(node, index) in lifecycleStages" :key="node.step">
-              <article class="flow-node" :class="`is-${node.tone}`">
-                <div class="flow-node__top">
-                  <span class="flow-node__step">{{ node.step }}</span>
-                  <span class="flow-node__subtitle">{{ node.subtitle }}</span>
-                </div>
-                <h4>{{ node.title }}</h4>
-                <ul class="flow-node__actions">
-                  <li v-for="action in node.bullets" :key="action">{{ action }}</li>
-                </ul>
-              </article>
-              <div v-if="index < lifecycleStages.length - 1" class="flow-arrow" aria-hidden="true"><span></span></div>
-            </template>
-          </div>
-
-          <button
-            type="button"
-            class="flowchart-nav flowchart-nav--right"
-            :class="{ 'is-disabled': !canScrollFlowRight }"
-            :disabled="!canScrollFlowRight"
-            @click="scrollFlowchart(1)"
-          >
-            <span aria-hidden="true">›</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section class="page-card dashboard-panel full-span">
-      <div class="page-heading">
-        <div>
           <h2>本科院校报名人数前二十</h2>
           <p>按最新报名申请统计本科院校来源分布。点击柱状图可查看该院校学生清单，并继续打开完整报名信息。</p>
         </div>
@@ -491,48 +561,87 @@ onBeforeUnmount(() => {
           <strong>统计口径：门户注册学生的最新报名申请</strong>
           <!-- <span>展示前二十名本科学校。若同一学生存在多次申请，仅按最新一条报名申请计入排名。</span> -->
         </div>
+        <div class="school-group-card">
+          <div class="school-group-card__header">
+            <div>
+              <span class="school-group-card__kicker">重点院校报名分布</span>
+              <h3>C9、211、985 院校报名占比</h3>
+            </div>
+            <div class="school-group-card__total">
+              <span>本科院校有效报名</span>
+              <strong>{{ schoolGroupDistribution.total_applications }}</strong>
+            </div>
+          </div>
+          <div class="school-group-grid">
+            <article v-for="group in schoolGroupDistribution.groups" :key="group.dict_type" class="school-group-panel">
+              <div class="school-group-panel__head">
+                <div>
+                  <h4>{{ group.group_name }}</h4>
+                  <span>占有效报名 {{ schoolGroupShareOfAll(group.total) }}</span>
+                </div>
+                <strong>{{ group.total }}<small>人</small></strong>
+              </div>
+              <div v-if="group.total" :ref="(element) => setSchoolGroupPieChartRef(group.dict_type, element)" class="school-group-pie"></div>
+              <ul v-if="group.total" class="school-group-legend">
+                <li v-for="(item, index) in getSchoolGroupDisplayItems(group)" :key="item.school_name">
+                  <span class="school-group-legend__dot" :style="schoolGroupLegendDotStyle(index)"></span>
+                  <span class="school-group-legend__name">{{ item.school_name }}</span>
+                  <strong>{{ item.student_count }}人</strong>
+                  <span>{{ formatRate(item.percentage) }}</span>
+                </li>
+              </ul>
+              <div v-else class="school-group-empty">暂无匹配报名数据</div>
+            </article>
+          </div>
+        </div>
         <div v-if="schoolRankings.length" ref="schoolRankingChartRef" class="chart-panel school-ranking-chart"></div>
         <div v-else class="dashboard-empty">当前暂无可展示的本科院校报名数据。</div>
       </div>
     </section>
 
-    <section class="page-card dashboard-panel chart-span">
-      <div class="page-heading">
-        <div>
-          <h2>经营总览趋势</h2>
-          <p>基于真实接口数据汇总招生、学生、培养、学位与流程待办规模。</p>
-        </div>
-      </div>
-      <div ref="chartRef" class="chart-panel"></div>
-    </section>
-
-    <section class="page-card dashboard-panel alert-span">
-      <div class="page-heading">
-        <div>
-          <h2>预警事项</h2>
-          <p>优先展示需要管理人员介入的异常和待办。</p>
-        </div>
-      </div>
-      <ul class="alert-list">
-        <li v-for="alert in alertItems" :key="alert.title">
-          <span class="alert-level">{{ alert.level }}</span>
-          <div>
-            <strong>{{ alert.title }}</strong>
-            <p>{{ alert.owner }} · {{ alert.due_text }}</p>
-          </div>
-        </li>
-      </ul>
-    </section>
-
     <el-dialog v-model="schoolStudentDialogVisible" :title="`${selectedSchoolName || '本科院校'}报名学生清单`" width="960px" destroy-on-close>
-      <div class="school-student-summary">共 {{ selectedSchoolStudents.length }} 名学生</div>
-      <el-table :data="selectedSchoolStudents" v-loading="schoolStudentListLoading" border stripe>
+      <div class="school-student-summary">
+        <div class="school-student-summary__total">
+          <strong>共 {{ filteredSelectedSchoolStudents.length }} 名学生</strong>
+          <span v-if="isSchoolStudentFiltered">当前筛选：{{ selectedSchoolStudentFilter }}</span>
+          <span v-if="isSchoolStudentFiltered">原始共 {{ selectedSchoolStudents.length }} 名</span>
+          <span>涉及 {{ selectedSchoolStudentStats.length }} 所学校</span>
+        </div>
+        <ul v-if="selectedSchoolStudentStats.length" class="school-student-summary__schools">
+          <li v-for="item in selectedSchoolStudentStats" :key="item.school_name">
+            <button
+              type="button"
+              class="school-student-summary__chip"
+              :class="{ 'is-active': selectedSchoolStudentFilter === item.school_name }"
+              @click="applySchoolStudentFilter(item.school_name)"
+            >
+              <span>{{ item.school_name }}</span>
+              <strong>{{ item.student_count }}人</strong>
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              class="school-student-summary__chip school-student-summary__chip--reset"
+              :class="{ 'is-disabled': !isSchoolStudentFiltered }"
+              :disabled="!isSchoolStudentFiltered"
+              @click="resetSchoolStudentFilter"
+            >
+              <span>重置</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+      <el-table :data="filteredSelectedSchoolStudents" v-loading="schoolStudentListLoading" border stripe>
         <el-table-column label="学生名称" min-width="160">
           <template #default="scope">
             <el-button link type="primary" @click="openPortalApplicationDetail(scope.row)">
               {{ scope.row.student_name || '未命名学生' }}
             </el-button>
           </template>
+        </el-table-column>
+        <el-table-column prop="school_name" label="学校" min-width="180" show-overflow-tooltip>
+          <template #default="scope">{{ scope.row.school_name || '未记录' }}</template>
         </el-table-column>
         <el-table-column prop="candidate_no" label="报名号" min-width="140">
           <template #default="scope">{{ scope.row.candidate_no || '未生成' }}</template>
@@ -600,268 +709,6 @@ onBeforeUnmount(() => {
   grid-column: 1 / -1;
 }
 
-.chart-span {
-  grid-column: 1 / span 2;
-}
-
-.alert-span {
-  grid-column: 3 / span 1;
-}
-
-.flowchart-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-
-.flowchart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 20px;
-  padding: 22px 24px;
-  border-radius: 24px;
-  border: 1px solid rgba(34, 166, 238, 0.18);
-  background:
-    radial-gradient(circle at top left, rgba(34, 166, 238, 0.18), transparent 32%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(240, 248, 255, 0.92));
-}
-
-.flowchart-kicker {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(53, 108, 184, 0.1);
-  color: var(--brand-strong);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.flowchart-header h3 {
-  margin: 12px 0 0;
-  font-family: var(--title-font);
-  font-size: 24px;
-  line-height: 1.35;
-}
-
-.flowchart-header p {
-  margin: 0;
-  color: var(--text-subtle);
-  max-width: 360px;
-  line-height: 1.7;
-}
-
-.flowchart-lane-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.flowchart-lane {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  overflow-x: auto;
-  padding-bottom: 6px;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.flowchart-lane::-webkit-scrollbar {
-  display: none;
-}
-
-.flowchart-nav {
-  position: absolute;
-  top: 50%;
-  z-index: 2;
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(53, 108, 184, 0.18);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--brand-strong);
-  box-shadow: 0 12px 24px rgba(24, 56, 87, 0.12);
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
-}
-
-.flowchart-nav span {
-  font-size: 28px;
-  line-height: 1;
-  transform: translateY(-1px);
-}
-
-.flowchart-nav:hover:not(.is-disabled) {
-  opacity: 0.92;
-  background: #ffffff;
-  transform: translateY(-50%) scale(1.04);
-}
-
-.flowchart-nav.is-disabled {
-  opacity: 0.22;
-  cursor: default;
-  box-shadow: none;
-}
-
-.flowchart-lane-wrap:hover .flowchart-nav,
-.flowchart-lane-wrap:focus-within .flowchart-nav {
-  opacity: 0.56;
-  pointer-events: auto;
-}
-
-.flowchart-lane-wrap:hover .flowchart-nav.is-disabled,
-.flowchart-lane-wrap:focus-within .flowchart-nav.is-disabled {
-  opacity: 0.22;
-}
-
-.flowchart-nav--left {
-  left: -12px;
-}
-
-.flowchart-nav--right {
-  right: -12px;
-}
-
-.flow-node {
-  position: relative;
-  flex: 0 0 250px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-  border: 1px solid var(--flow-accent-soft);
-  background: linear-gradient(180deg, var(--flow-bg-top), var(--flow-bg-bottom));
-  box-shadow: 0 18px 40px rgba(24, 56, 87, 0.08);
-}
-
-.flow-node::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 100%;
-  height: 5px;
-  background: var(--flow-accent);
-}
-
-.flow-node.is-ocean {
-  --flow-bg-top: #f0f8ff;
-  --flow-bg-bottom: #e4f2ff;
-  --flow-accent: #2e9bea;
-  --flow-accent-soft: rgba(46, 155, 234, 0.24);
-}
-
-.flow-node.is-sky {
-  --flow-bg-top: #f3f9ff;
-  --flow-bg-bottom: #eaf4ff;
-  --flow-accent: #5ba9f2;
-  --flow-accent-soft: rgba(91, 169, 242, 0.24);
-}
-
-.flow-node.is-teal {
-  --flow-bg-top: #effbf8;
-  --flow-bg-bottom: #e2f7f1;
-  --flow-accent: #36b59a;
-  --flow-accent-soft: rgba(54, 181, 154, 0.24);
-}
-
-.flow-node.is-amber {
-  --flow-bg-top: #fffaf0;
-  --flow-bg-bottom: #fff1d8;
-  --flow-accent: #e4a53d;
-  --flow-accent-soft: rgba(228, 165, 61, 0.24);
-}
-
-.flow-node.is-coral {
-  --flow-bg-top: #fff6f2;
-  --flow-bg-bottom: #ffe8e1;
-  --flow-accent: #e47857;
-  --flow-accent-soft: rgba(228, 120, 87, 0.24);
-}
-
-.flow-node.is-violet {
-  --flow-bg-top: #f7f3ff;
-  --flow-bg-bottom: #ece3ff;
-  --flow-accent: #8d72d9;
-  --flow-accent-soft: rgba(141, 114, 217, 0.24);
-}
-
-.flow-node__top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.flow-node__step {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--flow-accent);
-  font-weight: 800;
-  font-size: 15px;
-}
-
-.flow-node__subtitle {
-  color: var(--text-subtle);
-  font-size: 13px;
-  text-align: right;
-}
-
-.flow-node h4 {
-  margin: 0;
-  font-family: var(--title-font);
-  font-size: 20px;
-}
-
-.flow-node__actions {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--text-main);
-  line-height: 1.8;
-}
-
-.flow-arrow {
-  width: 58px;
-  flex: 0 0 58px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.flow-arrow span {
-  position: relative;
-  display: inline-block;
-  width: 38px;
-  height: 2px;
-  background: rgba(70, 117, 187, 0.72);
-}
-
-.flow-arrow span::after {
-  content: '';
-  position: absolute;
-  top: -4px;
-  right: 0;
-  width: 10px;
-  height: 10px;
-  border-top: 2px solid rgba(70, 117, 187, 0.72);
-  border-right: 2px solid rgba(70, 117, 187, 0.72);
-  transform: rotate(45deg);
-}
-
 .chart-panel {
   height: 350px;
 }
@@ -891,6 +738,166 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 
+.school-group-card {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid rgba(53, 108, 184, 0.14);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.94));
+  box-shadow: 0 14px 32px rgba(24, 56, 87, 0.08);
+}
+
+.school-group-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.school-group-card__kicker {
+  color: var(--brand-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.school-group-card__header h3 {
+  margin: 6px 0 0;
+  font-family: var(--title-font);
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.school-group-card__total {
+  min-width: 150px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: rgba(46, 155, 234, 0.1);
+  text-align: right;
+}
+
+.school-group-card__total span {
+  display: block;
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+
+.school-group-card__total strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--brand-strong);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.school-group-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.school-group-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 360px;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(53, 108, 184, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.school-group-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.school-group-panel__head h4 {
+  margin: 0;
+  color: var(--text-main);
+  font-size: 18px;
+}
+
+.school-group-panel__head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+
+.school-group-panel__head strong {
+  color: var(--brand-strong);
+  font-size: 28px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.school-group-panel__head small {
+  margin-left: 2px;
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.school-group-pie {
+  height: 320px;
+  min-width: 0;
+}
+
+.school-group-legend {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.school-group-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(245, 248, 255, 0.72);
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+
+.school-group-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.school-group-legend__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-main);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.school-group-legend strong {
+  color: var(--text-main);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.school-group-empty {
+  display: grid;
+  min-height: 300px;
+  place-items: center;
+  color: var(--text-subtle);
+  border: 1px dashed rgba(53, 108, 184, 0.18);
+  border-radius: 16px;
+  background: rgba(247, 251, 255, 0.72);
+}
+
 .school-ranking-chart {
   height: 460px;
 }
@@ -907,8 +914,85 @@ onBeforeUnmount(() => {
 }
 
 .school-student-summary {
+  display: grid;
+  gap: 10px;
   margin-bottom: 12px;
   color: var(--text-subtle);
+}
+
+.school-student-summary__total {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.school-student-summary__total strong {
+  color: var(--text-main);
+}
+
+.school-student-summary__schools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 96px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.school-student-summary__schools li {
+  list-style: none;
+}
+
+.school-student-summary__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid rgba(53, 108, 184, 0.14);
+  border-radius: 999px;
+  background: rgba(245, 248, 255, 0.86);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.school-student-summary__chip:hover:not(:disabled) {
+  border-color: rgba(53, 108, 184, 0.32);
+  background: rgba(233, 241, 255, 0.96);
+}
+
+.school-student-summary__chip.is-active {
+  border-color: rgba(46, 155, 234, 0.42);
+  background: rgba(223, 238, 255, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(46, 155, 234, 0.12);
+}
+
+.school-student-summary__chip--reset {
+  background: rgba(249, 250, 251, 0.96);
+}
+
+.school-student-summary__chip--reset.is-disabled,
+.school-student-summary__chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.school-student-summary__chip span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-main);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.school-student-summary__chip strong {
+  color: var(--brand-strong);
+  white-space: nowrap;
 }
 
 .workflow-comment-dialog {
@@ -963,6 +1047,10 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .school-group-grid {
+    grid-template-columns: 1fr;
+  }
+
   .chart-span,
   .alert-span {
     grid-column: 1 / -1;
@@ -976,6 +1064,15 @@ onBeforeUnmount(() => {
 
   .school-ranking-summary {
     flex-direction: column;
+  }
+
+  .school-group-card__header {
+    flex-direction: column;
+  }
+
+  .school-group-card__total {
+    width: 100%;
+    text-align: left;
   }
 }
 </style>

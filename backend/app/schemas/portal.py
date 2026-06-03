@@ -163,6 +163,11 @@ def _validate_portal_family_rules(items: Sequence["PortalFamilyMemberItem"], req
         raise ValueError("父母信息至少填写一方")
 
 
+def _validate_portal_family_member_phone_rules(items: Sequence["PortalFamilyMemberItem"]) -> None:
+    for index, item in enumerate(items, start=1):
+        validate_phone_number(item.contact_phone or "", f"家庭成员{index}联系电话")
+
+
 def _achievement_item_has_content(item: "PortalAchievementRecordItem") -> bool:
     return bool(
         _first_non_empty(
@@ -575,6 +580,11 @@ class PortalEducationExperienceItem(BaseModel):
     graduation_certificate_attachment_url: str | None = None
     graduation_certificate_attachment_name: str | None = None
 
+    @field_validator("verifier_phone")
+    @classmethod
+    def validate_verifier_phone_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value, "教育经历证明人手机")
+
 
 class PortalPracticeExperienceItem(BaseModel):
     start_month: str | None = None
@@ -584,6 +594,11 @@ class PortalPracticeExperienceItem(BaseModel):
     responsibility_text: str | None = None
     verifier_name: str | None = None
     verifier_phone: str | None = None
+
+    @field_validator("verifier_phone")
+    @classmethod
+    def validate_verifier_phone_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value, "实践经历证明人手机")
 
 
 class PortalEnglishProficiencyItem(BaseModel):
@@ -599,6 +614,11 @@ class PortalFamilyMemberItem(BaseModel):
     employer_name: str | None = None
     job_title: str | None = None
     contact_phone: str | None = None
+
+    @field_validator("contact_phone")
+    @classmethod
+    def validate_contact_phone_field(cls, value: str | None) -> str | None:
+        return validate_optional_phone_number(value, "家庭成员联系电话")
 
 
 class PortalAchievementRecordItem(BaseModel):
@@ -651,6 +671,7 @@ class PortalWorkflowProgressSummary(BaseModel):
     application_form_status: str
     recruitment_application_status: str | None = None
     result_label: str | None = None
+    review_comment: str | None = None
     stages: list[PortalWorkflowStageItem] = Field(default_factory=list)
 
 
@@ -894,6 +915,16 @@ class PortalSessionResponse(BaseModel):
     student: PortalStudentRecord
 
 
+class PortalImpersonationLaunchResponse(BaseModel):
+    message: str
+    launch_url: str
+    expires_in_seconds: int
+
+
+class PortalImpersonationExchangeRequest(BaseModel):
+    impersonation_code: str
+
+
 class PortalPlanRecord(BaseModel):
     id: int
     plan_name: str
@@ -1055,6 +1086,7 @@ class PortalApplicationUpsert(BaseModel):
         _validate_portal_practice_rules(self.practice_experiences)
         _validate_portal_english_rules(self.english_proficiencies, require_at_least_one=True)
         _validate_portal_family_rules(self.family_members, require_at_least_one_parent=True)
+        _validate_portal_family_member_phone_rules(self.family_members)
         _validate_portal_achievement_rules(self.achievement_records)
         _validate_portal_personal_statement_rules(self.personal_statement, require_complete=True)
         _validate_portal_basic_profile_rules(
@@ -1194,6 +1226,7 @@ class PortalApplicationDraftUpsert(BaseModel):
         _validate_portal_practice_rules(self.practice_experiences)
         _validate_portal_english_rules(self.english_proficiencies, require_at_least_one=True)
         _validate_portal_family_rules(self.family_members, require_at_least_one_parent=True)
+        _validate_portal_family_member_phone_rules(self.family_members)
         _validate_portal_achievement_rules(self.achievement_records)
         _validate_portal_personal_statement_rules(self.personal_statement, require_complete=True)
         _validate_portal_basic_profile_rules(

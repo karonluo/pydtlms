@@ -40,6 +40,13 @@ class RuntimeManagementStoreSystemMixin:
             result="failed",
         )
 
+    def _validate_role_permissions_for_sync(self, permissions: list[str]) -> list[str]:
+        normalized_permissions = self._validate_permissions(permissions)
+        missing_permissions = self._postgres_store.missing_permission_codes(normalized_permissions)
+        if missing_permissions:
+            raise ValueError(f"Permissions not configured in database: {', '.join(missing_permissions)}")
+        return normalized_permissions
+
     def _cache_ttl(self, base_seconds: int, *, with_jitter: bool = True) -> int:
         if not with_jitter or CACHE_TTL_JITTER_SECONDS <= 0:
             return max(1, int(base_seconds))
@@ -503,7 +510,7 @@ class RuntimeManagementStoreSystemMixin:
             item = payload.model_dump()
             if self._role_code_exists(item["role_code"]):
                 raise ValueError("Role code already exists")
-            item["permissions"] = self._validate_permissions(item.get("permissions", []))
+            item["permissions"] = self._validate_role_permissions_for_sync(item.get("permissions", []))
             item["id"] = self._next_id("roles")
             self._list("roles").insert(0, item)
             operation_log = self._record_operation("系统治理", "角色", str(item["id"]), "新建角色", f'新建角色 {item["role_name"]}')
@@ -526,7 +533,7 @@ class RuntimeManagementStoreSystemMixin:
             new_values = payload.model_dump()
             if self._role_code_exists(new_values["role_code"], exclude_role_id=role_id):
                 raise ValueError("Role code already exists")
-            new_values["permissions"] = self._validate_permissions(new_values.get("permissions", []))
+            new_values["permissions"] = self._validate_role_permissions_for_sync(new_values.get("permissions", []))
             updated = {**item, **new_values, "id": role_id}
             self._list("roles")[index] = updated
             affected_users: list[dict[str, Any]] = []
@@ -1178,15 +1185,25 @@ class RuntimeManagementStoreSystemMixin:
         )
 
     def get_profile(self, username: str) -> UserProfile:
+        cache_key = self._user_profile_cache_key(username)
         try:
             profile = self._load_json_with_cache(
-                self._user_profile_cache_key(username),
+                cache_key,
                 lambda: self._postgres_store.get_user_profile(username),
                 ttl_seconds=USER_PROFILE_CACHE_TTL_SECONDS,
             )
         except Exception as exc:
             logger.warning("Load profile from PostgreSQL failed for %s: %s", username, exc)
             raise DatabaseUnavailableError("用户资料当前仅允许从数据库或Redis缓存读取，PostgreSQL 查询失败") from exc
+        if not isinstance(profile, dict):
+            try:
+                refreshed_profile = self._postgres_store.get_user_profile(username)
+            except Exception as exc:
+                logger.warning("Refresh profile from PostgreSQL failed for %s: %s", username, exc)
+                raise DatabaseUnavailableError("用户资料当前仅允许从数据库或Redis缓存读取，PostgreSQL 查询失败") from exc
+            if isinstance(refreshed_profile, dict):
+                profile = refreshed_profile
+                self._write_json_cache(cache_key, profile, USER_PROFILE_CACHE_TTL_SECONDS)
         if not isinstance(profile, dict):
             raise KeyError(username)
         self.state.setdefault("profiles", {})[username] = dict(profile)

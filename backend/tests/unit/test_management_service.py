@@ -1,19 +1,27 @@
 from datetime import datetime
 from io import BytesIO
+from types import SimpleNamespace
 
 from openpyxl import load_workbook
 import pytest
 
 from app.schemas.auth import UserProfileUpdate
 from app.schemas.portal import PortalStudentRecord
-from app.schemas.recruitment import RecruitApplicationRecord, RecruitPlanUpsert
+from app.schemas.recruitment import (
+    AdvisorScreeningBatchSubmitRequest,
+    AdvisorScreeningSubmitItem,
+    InitialScreeningConfirmationRequest,
+    RecruitApplicationRecord,
+    RecruitPlanUpsert,
+)
 from app.schemas.system import RoleUpsert, SystemUserUpsert
 from app.schemas.student import CenterUpsert
-from app.schemas.student import CenterListResponse
+from app.schemas.student import RegisteredPortalStudentRollbackStageRequest
 from app.core.exceptions import DatabaseUnavailableError
 from app.services.management_service import LazyRuntimeManagementStore, RuntimeManagementStore
-from app.services.management_service_shared import PASSWORD_CONTEXT
+from app.services.management_service_shared import CACHE_NULL_SENTINEL_KEY, PASSWORD_CONTEXT
 from app.services.management_service_students import RuntimeManagementStoreStudentsMixin
+from app.services.email_service import NotificationEmailService
 from app.services.recruitment_excel_service import build_registered_portal_students_template
 from app.services.runtime_seed_data import build_runtime_seed_state
 
@@ -41,11 +49,16 @@ class FakePostgresStateStore:
         self.portal_application_submissions: list[dict] = []
         self.updated_recruitment_applications: list[dict] = []
         self.background_assessments: list[dict] = []
+        self.advisor_screening_batches: list[dict] = []
+        self.initial_screening_confirmations: list[dict] = []
+        self.initial_screening_notifications: list[dict] = []
+        self.rollback_recruitment_applications: list[dict] = []
         self.saved_states: list[dict] = []
         self.synced_workflow_tasks: list[dict] = []
         self.synced_roles: list[dict] = []
         self.synced_operation_logs: list[dict] = []
         self.workflow_task_snapshot: dict | None = None
+        self.recruitment_application_rows: list[dict] | None = None
         self.dict_options_map: dict[str, list[dict]] = {}
         self.system_user_rows: dict[int, dict] = {}
         self.role_rows: list[dict] | None = None
@@ -54,6 +67,7 @@ class FakePostgresStateStore:
         self.audit_policy_rows: list[dict] | None = None
         self.integration_rows: list[dict] | None = None
         self.system_stats_snapshot: dict[str, int] | None = None
+        self.missing_permission_codes_result: list[str] = []
 
     def load_state(self) -> dict | None:
         return build_runtime_seed_state()
@@ -100,6 +114,10 @@ class FakePostgresStateStore:
             str(row.get("role_code") or "") == str(role_code) and (excluded is None or int(row.get("id") or 0) != excluded)
             for row in self.role_rows
         )
+
+    def missing_permission_codes(self, permission_codes: list[str]) -> list[str]:
+        configured_codes = {str(code) for code in permission_codes}
+        return [code for code in self.missing_permission_codes_result if code in configured_codes]
 
     def get_audit_policy_by_id(self, policy_id: int):
         if self.audit_policy_rows is None:
@@ -179,6 +197,54 @@ class FakePostgresStateStore:
     def get_recruitment_application_detail(self, application_id):
         del application_id
         return None
+
+    def list_recruitment_applications_page(self, *, keyword=None, plan_id=None, status=None, advisor_name=None, advisor_names=None, page=1, page_size=10):
+        rows = [] if self.recruitment_application_rows is None else [dict(item) for item in self.recruitment_application_rows]
+        if plan_id is not None:
+            rows = [item for item in rows if int(item.get("plan_id") or 0) == int(plan_id)]
+        if status:
+            statuses = {segment.strip() for segment in str(status).split(",") if segment.strip()}
+            rows = [item for item in rows if str(item.get("application_status") or "") in statuses]
+        if advisor_name:
+            normalized_advisor_name = str(advisor_name)
+            rows = [
+                item
+                for item in rows
+                if (
+                    str(item.get("advisor_screening_round") or "") == "second_choice"
+                    and str(item.get("second_choice") or "") == normalized_advisor_name
+                )
+                or (
+                    str(item.get("advisor_screening_round") or "") != "second_choice"
+                    and str(item.get("first_choice") or item.get("intended_advisor_name") or "") == normalized_advisor_name
+                )
+            ]
+        normalized_advisor_names = {str(item).strip() for item in (advisor_names or []) if str(item).strip()}
+        if normalized_advisor_names:
+            rows = [
+                item
+                for item in rows
+                if (
+                    str(item.get("advisor_screening_round") or "") == "second_choice"
+                    and str(item.get("second_choice") or "") in normalized_advisor_names
+                )
+                or (
+                    str(item.get("advisor_screening_round") or "") != "second_choice"
+                    and str(item.get("first_choice") or item.get("intended_advisor_name") or "") in normalized_advisor_names
+                )
+            ]
+        if keyword:
+            normalized_keyword = str(keyword)
+            rows = [
+                item
+                for item in rows
+                if normalized_keyword in str(item.get("business_key") or "")
+                or normalized_keyword in str(item.get("student_name") or "")
+            ]
+        total = len(rows)
+        start = max(int(page) - 1, 0) * int(page_size)
+        end = start + int(page_size)
+        return rows[start:end], total
 
     def save_state(self, state) -> None:
         self.saved_states.append(state)
@@ -261,8 +327,100 @@ class FakePostgresStateStore:
         self.updated_recruitment_applications.append({"application_id": normalized_application_id, "payload": dict(application_payload)})
         self.synced_workflow_tasks.append({"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters})
 
+    def sync_advisor_screening_batch(
+        self,
+        batch_payload,
+        application_payloads,
+        workflow_task_payloads,
+        operation_logs,
+        *,
+        counters=None,
+    ):
+        batch_id = len(self.advisor_screening_batches) + 1
+        self.advisor_screening_batches.append(
+            {
+                "id": batch_id,
+                "batch_payload": dict(batch_payload),
+                "application_payloads": [dict(item) for item in application_payloads],
+                "workflow_task_payloads": [dict(item) for item in workflow_task_payloads],
+                "operation_logs": [None if item is None else dict(item) for item in operation_logs],
+                "counters": counters,
+            }
+        )
+        for application_payload in application_payloads:
+            self.updated_recruitment_applications.append(
+                {"application_id": int(application_payload["id"]), "payload": dict(application_payload)}
+            )
+        for workflow_task_payload, operation_log in zip(workflow_task_payloads, operation_logs):
+            self.synced_workflow_tasks.append(
+                {"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters}
+            )
+        return batch_id
+
+    def sync_initial_screening_confirmation(
+        self,
+        confirmation_payload,
+        application_payload,
+        workflow_task_payload,
+        notification_payloads,
+        operation_log=None,
+        *,
+        counters=None,
+    ) -> None:
+        self.initial_screening_confirmations.append(
+            {
+                "confirmation_payload": dict(confirmation_payload),
+                "application_payload": dict(application_payload),
+                "workflow_task_payload": dict(workflow_task_payload),
+                "operation_log": None if operation_log is None else dict(operation_log),
+                "counters": counters,
+            }
+        )
+        self.initial_screening_notifications.extend(dict(item) for item in notification_payloads)
+        self.updated_recruitment_applications.append(
+            {"application_id": int(application_payload["id"]), "payload": dict(application_payload)}
+        )
+        self.synced_workflow_tasks.append(
+            {"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters}
+        )
+
     def sync_workflow_task(self, task_payload, operation_log=None, *, counters=None) -> None:
         self.synced_workflow_tasks.append({"task_payload": dict(task_payload), "operation_log": operation_log, "counters": counters})
+
+    def rollback_recruitment_application_stage(
+        self,
+        application_payload,
+        workflow_task_payload,
+        *,
+        clear_background_assessments=False,
+        clear_initial_screening_confirmation=False,
+        operation_log=None,
+        counters=None,
+    ) -> None:
+        application_id = int(application_payload["id"])
+        self.rollback_recruitment_applications.append(
+            {
+                "application_payload": dict(application_payload),
+                "workflow_task_payload": dict(workflow_task_payload),
+                "clear_background_assessments": bool(clear_background_assessments),
+                "clear_initial_screening_confirmation": bool(clear_initial_screening_confirmation),
+                "operation_log": None if operation_log is None else dict(operation_log),
+                "counters": counters,
+            }
+        )
+        if clear_background_assessments:
+            self.background_assessments = [item for item in self.background_assessments if int(item.get("application_id") or 0) != application_id]
+        if clear_initial_screening_confirmation:
+            self.initial_screening_confirmations = [
+                item
+                for item in self.initial_screening_confirmations
+                if int(item.get("application_payload", {}).get("id") or item.get("confirmation_payload", {}).get("application_id") or 0) != application_id
+            ]
+            self.initial_screening_notifications = [
+                item for item in self.initial_screening_notifications if int(item.get("application_id") or 0) != application_id
+            ]
+        self.updated_recruitment_applications.append({"application_id": application_id, "payload": dict(application_payload)})
+        self.synced_workflow_tasks.append({"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters})
 
     def sync_role(self, role_payload, operation_log=None, *, counters=None) -> None:
         current_roles = [] if self.role_rows is None else [dict(item) for item in self.role_rows]
@@ -297,9 +455,46 @@ class FakePostgresStateStore:
     def sync_operation_log(self, operation_log, *, counters=None) -> None:
         self.synced_operation_logs.append({"operation_log": operation_log, "counters": counters})
 
+    def _workflow_task_rows(self) -> list[dict]:
+        rows_by_id: dict[int, dict] = {}
+        if self.workflow_task_snapshot is not None:
+            rows_by_id[int(self.workflow_task_snapshot["id"])] = dict(self.workflow_task_snapshot)
+        for item in self.portal_application_submissions:
+            workflow_task = item.get("workflow_task")
+            if isinstance(workflow_task, dict) and workflow_task.get("id") is not None:
+                rows_by_id[int(workflow_task["id"])] = dict(workflow_task)
+        for item in self.synced_workflow_tasks:
+            task_payload = item.get("task_payload")
+            if isinstance(task_payload, dict) and task_payload.get("id") is not None:
+                rows_by_id[int(task_payload["id"])] = dict(task_payload)
+        return [rows_by_id[key] for key in sorted(rows_by_id.keys())]
+
+    def list_workflow_tasks_page(self, *, status=None, module=None, keyword=None, page=1, page_size=10):
+        filtered = self._workflow_task_rows()
+        if status:
+            filtered = [item for item in filtered if str(item.get("status") or "") == str(status)]
+        if module:
+            filtered = [item for item in filtered if str(item.get("business_module") or "") == str(module)]
+        if keyword:
+            normalized_keyword = str(keyword)
+            filtered = [
+                item
+                for item in filtered
+                if normalized_keyword in str(item.get("business_key") or "")
+                or normalized_keyword in str(item.get("title") or "")
+                or normalized_keyword in str(item.get("applicant_name") or "")
+            ]
+        total = len(filtered)
+        start = max(int(page) - 1, 0) * int(page_size)
+        end = start + int(page_size)
+        return [dict(item) for item in filtered[start:end]], total
+
     def get_workflow_task_snapshot(self, task_id):
-        del task_id
-        return self.workflow_task_snapshot
+        normalized_task_id = int(task_id)
+        for item in self._workflow_task_rows():
+            if int(item.get("id") or 0) == normalized_task_id:
+                return dict(item)
+        return None
 
     def sync_user_profile(self, profile) -> None:
         self.saved_states.append({"profile": profile})
@@ -396,6 +591,7 @@ class FakeNotificationEmailService:
         self.portal_password_reset_calls: list[dict] = []
         self.portal_admin_password_reset_calls: list[dict] = []
         self.recruitment_status_calls: list[dict] = []
+        self.recruitment_stage_rollback_calls: list[dict] = []
         self.custom_message_calls: list[dict] = []
         self.is_enabled = True
 
@@ -417,6 +613,9 @@ class FakeNotificationEmailService:
     def send_recruitment_status_update(self, **payload) -> None:
         self.recruitment_status_calls.append(payload)
 
+    def send_recruitment_stage_rollback(self, **payload) -> None:
+        self.recruitment_stage_rollback_calls.append(payload)
+
     def send_message(self, *, to_email: str, subject: str, text_body: str) -> None:
         self.custom_message_calls.append({"to_email": to_email, "subject": subject, "text_body": text_body})
 
@@ -437,6 +636,29 @@ class FakeNotificationEmailService:
                 "text_body": f"验证码：{verification_code}",
             }
         )
+
+
+def test_recruitment_reject_email_text_contains_review_comment() -> None:
+    captured_messages: list[dict] = []
+
+    class CaptureEmailService(NotificationEmailService):
+        def send_message(self, **payload) -> None:  # type: ignore[override]
+            captured_messages.append(payload)
+
+    service = CaptureEmailService()
+    service.send_recruitment_status_update(
+        student_name="测试学生",
+        email="student@example.com",
+        business_key="SH202606020001",
+        application_status="报名终止",
+        plan_name="2026 秋季博士招生",
+        review_comment="科研背景与项目方向匹配不足",
+    )
+
+    assert captured_messages
+    text_body = captured_messages[0]["text_body"]
+    assert "当前状态：报名终止" in text_body
+    assert "原因：科研背景与项目方向匹配不足" in text_body
 
 
 class FakeCacheClient:
@@ -571,6 +793,64 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
         },
         signed_agreement=True,
     )
+
+
+def _advance_recruitment_application_to_advisor_screening(store, task_id: int) -> None:
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "资料审核通过",
+        principal={
+            "username": "academy.admin",
+            "full_name": "书院管理员",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "第一位书院管理员通过",
+        principal={
+            "username": "reviewer.a",
+            "full_name": "评估人甲",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "第二位书院管理员通过",
+        principal={
+            "username": "reviewer.b",
+            "full_name": "评估人乙",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+
+def _sync_recruitment_application_rows_from_state(store, fake_postgres: FakePostgresStateStore) -> None:
+    fake_postgres.recruitment_application_rows = [
+        {
+            "id": int(item.get("id") or 0),
+            "plan_id": item.get("plan_id"),
+            "business_key": item.get("business_key"),
+            "student_name": item.get("student_name"),
+            "graduation_school": item.get("graduation_school"),
+            "highest_degree": item.get("highest_degree"),
+            "intended_field": item.get("intended_field"),
+            "material_status": item.get("material_status"),
+            "application_status": item.get("application_status"),
+            "first_choice": item.get("first_choice"),
+            "second_choice": item.get("second_choice"),
+            "intended_advisor_name": item.get("intended_advisor_name"),
+            "advisor_screening_round": item.get("advisor_screening_round"),
+            "advisor_screening_status": item.get("advisor_screening_status"),
+        }
+        for item in store.state["recruitment_applications"]
+    ]
 
 
 def test_lazy_store_does_not_create_instance_until_attribute_access(monkeypatch) -> None:
@@ -767,6 +1047,12 @@ def test_get_recruitment_portal_application_detail_maps_only_student_filled_sect
         "id_number": "32000019990101123X",
         "application_status": "报名已提交",
         "material_status": "待审核",
+        "advisor_screening_status": "submitted",
+        "advisor_screening_round": "first_choice",
+        "advisor_screening_submitted_at": "2026-05-30 01:38:19",
+        "advisor_signature_base64": "data:image/png;base64,TEST_SIGNATURE",
+        "first_choice_screening_score": 88.0,
+        "next_stage_name": "入营面试",
         "reviewer_name": "admin",
         "final_score": 92.5,
         "applied_at": "2026-05-08 10:20:30",
@@ -815,6 +1101,9 @@ def test_get_recruitment_portal_application_detail_maps_only_student_filled_sect
     assert detail.profile.emergency_contact_name == "李四"
     assert detail.english_proficiencies[0].exam_name == "IELTS"
     assert detail.achievement_records[0].award_name == "挑战杯"
+    assert detail.advisor_screening_status == "已通过"
+    assert detail.advisor_screening_submitted_at == "2026-05-30 01:38:19"
+    assert detail.advisor_signature_base64 == "data:image/png;base64,TEST_SIGNATURE"
     assert detail.personal_statement.supporting_material_attachment_url == "/api/v1/portal/attachments/materials.zip"
     assert not hasattr(detail, "self_evaluation")
 
@@ -878,6 +1167,275 @@ def test_get_student_options_registered_portal_advisor_filter_includes_disabled_
     assert "刘亚" in values
     assert "袁野" in values
     assert any(label == "袁野（停用）" for label in labels)
+
+
+def test_get_student_options_registered_portal_advisor_filter_scopes_advisor_self(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.system_user_rows[901] = {
+        "id": 901,
+        "username": "liu.ya",
+        "full_name": "刘亚",
+        "role_code": "advisor",
+        "department_name": "智能制造学院",
+        "account_status": "启用",
+    }
+    fake_postgres.system_user_rows[902] = {
+        "id": 902,
+        "username": "yuan.ye",
+        "full_name": "袁野",
+        "role_code": "advisor",
+        "department_name": "工业软件学院",
+        "account_status": "启用",
+    }
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    monkeypatch.setattr(store, "get_centers", lambda *args, **kwargs: CenterListResponse(items=[], total=0, page=1, page_size=1000))
+    options = store.get_student_options(principal={"username": "liu.ya", "full_name": "刘亚", "roles": ["advisor"]})
+
+    assert [item.value for item in options.registered_portal_advisor_filter_options] == ["刘亚"]
+
+
+def test_get_registered_portal_students_scopes_advisor_to_self(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    captured: dict[str, Any] = {}
+
+    def fake_list_registered_portal_students_page(**kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    fake_postgres.list_registered_portal_students_page = fake_list_registered_portal_students_page
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    response = store.get_registered_portal_students(
+        advisor_names=["袁野", "刘亚"],
+        page=1,
+        page_size=20,
+        principal={"username": "liu.ya", "full_name": "刘亚", "roles": ["advisor"]},
+    )
+
+    assert response.total == 0
+    assert captured["advisor_names"] == ["刘亚"]
+
+
+def test_get_student_options_includes_registered_portal_application_status_options(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.dict_options_map["recruitment_application_status"] = [
+        {"label": "报名已提交", "value": "报名已提交"},
+        {"label": "待初筛确认", "value": "待初筛确认"},
+        {"label": "材料评分中", "value": "材料评分中"},
+    ]
+    fake_postgres.system_user_rows[901] = {
+        "id": 901,
+        "username": "liu.ya",
+        "full_name": "刘亚",
+        "role_code": "advisor",
+        "department_name": "智能制造学院",
+        "account_status": "启用",
+    }
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state["recruitment_applications"] = [
+        {"id": 1, "application_status": "待背景评估"},
+        {"id": 2, "application_status": "待导师初筛-第一志愿"},
+    ]
+    monkeypatch.setattr(store, "get_centers", lambda *args, **kwargs: CenterListResponse(items=[], total=0, page=1, page_size=1000))
+    options = store.get_student_options()
+
+    assert any(item.value == "待初筛确认" for item in options.registered_portal_application_status_options)
+    assert any(item.value == "待背景评估" for item in options.registered_portal_application_status_options)
+    assert any(item.value == "待导师初筛-第一志愿" for item in options.registered_portal_application_status_options)
+    assert all(item.value != "材料评分中" for item in options.registered_portal_application_status_options)
+
+
+def test_get_recruitment_options_advisor_filter_uses_only_advisor_role_users(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state["system_users"] = [
+        {"id": 11, "username": "liu.ya", "full_name": "刘亚", "role_code": "advisor", "account_status": "启用"},
+        {"id": 12, "username": "wang.qing", "full_name": "王青", "role_code": "advisor", "account_status": "启用"},
+        {"id": 13, "username": "center.manager", "full_name": "具身智能中心", "role_code": "academy_admin", "account_status": "启用"},
+    ]
+    store.state["recruitment_applications"] = [
+        {"id": 1, "first_choice": "刘亚", "second_choice": "具身智能中心", "intended_advisor_name": "研究中心A"},
+        {"id": 2, "first_choice": "王青", "second_choice": "研究中心B", "intended_advisor_name": "王青"},
+    ]
+
+    options = store.get_recruitment_options()
+
+    assert [item.value for item in options.advisor_options] == ["刘亚", "王青"]
+    assert all(item.value not in {"具身智能中心", "研究中心A", "研究中心B"} for item in options.advisor_options)
+
+
+def test_get_recruitment_applications_scopes_advisor_screening_to_current_advisor(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.recruitment_application_rows = [
+        {
+            "id": 201,
+            "plan_id": 5,
+            "business_key": "SH20270511",
+            "student_name": "待初筛学生甲",
+            "graduation_school": "上海大学",
+            "highest_degree": "硕士",
+            "intended_field": "具身智能",
+            "material_status": "通过",
+            "application_status": "待中心考核",
+            "first_choice": "陈恺",
+            "second_choice": None,
+            "intended_advisor_name": "陈恺",
+            "advisor_screening_round": "first_choice",
+            "advisor_screening_status": "pending",
+        },
+        {
+            "id": 202,
+            "plan_id": 5,
+            "business_key": "SH20270512",
+            "student_name": "待初筛学生乙",
+            "graduation_school": "复旦大学",
+            "highest_degree": "硕士",
+            "intended_field": "通用智能",
+            "material_status": "通过",
+            "application_status": "待中心考核",
+            "first_choice": "其他导师",
+            "second_choice": None,
+            "intended_advisor_name": "其他导师",
+            "advisor_screening_round": "first_choice",
+            "advisor_screening_status": "pending",
+        },
+    ]
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    response = store.get_recruitment_applications(
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        plan_id=5,
+        principal={"username": "chenkai", "full_name": "陈恺", "roles": ["advisor"]},
+        page=1,
+        page_size=20,
+    )
+
+    assert response.total == 1
+    assert [item.business_key for item in response.items] == ["SH20270511"]
+
+
+def test_get_recruitment_applications_filters_multiple_advisors(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.recruitment_application_rows = [
+        {
+            "id": 301,
+            "plan_id": 5,
+            "business_key": "SH20270521",
+            "student_name": "待初筛学生甲",
+            "graduation_school": "上海大学",
+            "highest_degree": "硕士",
+            "intended_field": "具身智能",
+            "material_status": "通过",
+            "application_status": "待初筛确认",
+            "first_choice": "陈恺",
+            "second_choice": None,
+            "intended_advisor_name": "陈恺",
+            "advisor_screening_round": "first_choice",
+            "advisor_screening_status": "submitted",
+        },
+        {
+            "id": 302,
+            "plan_id": 5,
+            "business_key": "SH20270522",
+            "student_name": "待初筛学生乙",
+            "graduation_school": "复旦大学",
+            "highest_degree": "硕士",
+            "intended_field": "通用智能",
+            "material_status": "通过",
+            "application_status": "待初筛确认",
+            "first_choice": "其他导师",
+            "second_choice": "王青",
+            "intended_advisor_name": "其他导师",
+            "advisor_screening_round": "second_choice",
+            "advisor_screening_status": "submitted",
+        },
+        {
+            "id": 303,
+            "plan_id": 5,
+            "business_key": "SH20270523",
+            "student_name": "待初筛学生丙",
+            "graduation_school": "浙江大学",
+            "highest_degree": "硕士",
+            "intended_field": "机器人",
+            "material_status": "通过",
+            "application_status": "待初筛确认",
+            "first_choice": "刘亚",
+            "second_choice": None,
+            "intended_advisor_name": "刘亚",
+            "advisor_screening_round": "first_choice",
+            "advisor_screening_status": "submitted",
+        },
+    ]
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    response = store.get_recruitment_applications(
+        status="待初筛确认",
+        plan_id=5,
+        advisor_names=["陈恺", "王青"],
+        principal={"username": "admin", "full_name": "管理员", "roles": ["AILABMGT"]},
+        page=1,
+        page_size=20,
+    )
+
+    assert response.total == 2
+    assert {item.business_key for item in response.items} == {"SH20270521", "SH20270522"}
+
+
+def test_resolve_registered_portal_student_export_ids_scopes_explicit_ids_for_advisor(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state["portal_students"] = [
+        {"id": 11, "selected_advisor_name": "刘亚"},
+        {"id": 12, "selected_advisor_name": "袁野"},
+    ]
+
+    scoped_ids = store._resolve_registered_portal_student_export_ids(
+        [11, 12],
+        keyword=None,
+        application_form_status=None,
+        recruitment_application_status=None,
+        advisor_names=None,
+        principal={"username": "liu.ya", "full_name": "刘亚", "roles": ["advisor"]},
+    )
+
+    assert scoped_ids == [11]
+
+
+def test_resolve_registered_portal_student_export_ids_passes_recruitment_status_filter(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_get_registered_portal_students(**kwargs):
+        captured_kwargs.update(kwargs)
+        return SimpleNamespace(items=[SimpleNamespace(id=21)])
+
+    monkeypatch.setattr(store, "get_registered_portal_students", fake_get_registered_portal_students)
+
+    resolved_ids = store._resolve_registered_portal_student_export_ids(
+        [],
+        keyword="待导出",
+        application_form_status="已填写报名",
+        recruitment_application_status="待初筛确认",
+        advisor_names=["陈恺"],
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    assert resolved_ids == [21]
+    assert captured_kwargs["recruitment_application_status"] == "待初筛确认"
 
 
 def test_create_recruitment_plan_keeps_internal_defaults_while_returning_trimmed_record(monkeypatch) -> None:
@@ -969,6 +1527,7 @@ def test_get_workflow_task_detail_allows_custom_role_with_matching_permissions(m
     )
 
     task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == application.business_key)
+    fake_postgres.workflow_task_snapshot = dict(next(item for item in store.state["workflow_tasks"] if item["id"] == task_id))
     detail = store.get_workflow_task_detail(
         task_id,
         {
@@ -979,7 +1538,7 @@ def test_get_workflow_task_detail_allows_custom_role_with_matching_permissions(m
         },
     )
 
-    assert [item.label for item in detail["task"].available_actions] == ["资格通过", "审核不通过"]
+    assert [item.label for item in detail["task"].available_actions] == ["审核通过", "审核不通过"]
 
 
 def test_get_workflow_task_detail_hides_background_assessment_actions_after_same_reviewer_completed(monkeypatch) -> None:
@@ -1031,6 +1590,44 @@ def test_get_workflow_task_detail_hides_background_assessment_actions_after_same
     assert detail["task"].available_actions == []
 
 
+def test_get_workflow_task_detail_hides_background_assessment_actions_for_advisor(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.workflow_task_snapshot = {
+        "id": 89,
+        "workflow_name": "招生申请审批",
+        "business_module": "招生管理",
+        "business_key": "SH20270389",
+        "title": "报名审核任务",
+        "applicant_name": "李四",
+        "current_handler": "书院管理员",
+        "current_node": "背景评估",
+        "priority": "高",
+        "status": "处理中",
+        "created_at": "2026-05-27 09:00:00",
+        "due_at": "2026-05-29 18:00:00",
+        "flow_code": "recruitment_application",
+        "node_key": "background_assessment",
+        "entity_id": 35,
+        "candidate_groups": ["AILABMGT"],
+        "history": [],
+    }
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    detail = store.get_workflow_task_detail(
+        89,
+        {
+            "username": "liu.ya",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    assert detail["task"].current_node == "背景评估"
+    assert detail["task"].available_actions == []
+
+
 def test_get_workflow_tasks_allows_custom_role_with_matching_permissions(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -1040,6 +1637,8 @@ def test_get_workflow_tasks_allows_custom_role_with_matching_permissions(monkeyp
         _build_recruitment_application_payload(),
         principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
     )
+    task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == application.business_key)
+    fake_postgres.workflow_task_snapshot = dict(next(item for item in store.state["workflow_tasks"] if item["id"] == task_id))
 
     response = store.get_workflow_tasks(
         module="招生管理",
@@ -1053,7 +1652,7 @@ def test_get_workflow_tasks_allows_custom_role_with_matching_permissions(monkeyp
     )
 
     assert len(response.items) == 1
-    assert [item.label for item in response.items[0].available_actions] == ["资格通过", "审核不通过"]
+    assert [item.label for item in response.items[0].available_actions] == ["审核通过", "审核不通过"]
 
 
 def test_get_principal_context_expands_read_permission_from_workflow_write(monkeypatch) -> None:
@@ -1087,6 +1686,32 @@ def test_get_principal_context_expands_read_permission_from_workflow_write(monke
     assert "workflow:write" in principal["permissions"]
     assert "workflow:read" in principal["permissions"]
     assert "recruitment:read" in principal["permissions"]
+
+
+def test_runtime_seed_advisor_and_academy_manager_include_recruitment_permissions(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+
+    advisor_principal = store.get_principal_context("liu.ya")
+    academy_manager_principal = store.get_principal_context("qin.rao")
+
+    assert advisor_principal["roles"] == ["advisor"]
+    assert "recruitment:read" in advisor_principal["permissions"]
+    assert "recruitment:write" in advisor_principal["permissions"]
+    assert "recruitment_plan:read" in advisor_principal["permissions"]
+    assert "recruitment_registered_students:read" in advisor_principal["permissions"]
+    assert "recruitment_advisor_screening:read" in advisor_principal["permissions"]
+    assert "workflow:write" in advisor_principal["permissions"]
+
+    assert academy_manager_principal["roles"] == ["AILABMGT"]
+    assert "recruitment:read" in academy_manager_principal["permissions"]
+    assert "recruitment:write" in academy_manager_principal["permissions"]
+    assert "recruitment_plan:read" in academy_manager_principal["permissions"]
+    assert "recruitment_registered_students:read" in academy_manager_principal["permissions"]
+    assert "recruitment_initial_screening_confirmation:read" in academy_manager_principal["permissions"]
+    assert "workflow:write" in academy_manager_principal["permissions"]
 
 
 def test_update_profile_without_bound_system_user_still_persists_operation_log(monkeypatch) -> None:
@@ -1250,7 +1875,50 @@ def test_execute_workflow_action_sends_recruitment_pass_email(monkeypatch) -> No
     assert fake_mailer.recruitment_status_calls == []
 
 
-def test_execute_workflow_action_background_assessment_two_passes_advances_to_center_assessment(monkeypatch) -> None:
+
+
+def test_execute_workflow_action_background_assessment_rejects_advisor_even_with_write_permissions(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload(),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "资料审核通过",
+        principal={
+            "username": "academy.admin",
+            "full_name": "书院管理员",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    with pytest.raises(PermissionError, match="当前账号无权执行该流程活动"):
+        store.execute_workflow_action(
+            task_id,
+            "approve",
+            "导师越权评估",
+            principal={
+                "username": "liu.ya",
+                "full_name": "刘亚",
+                "roles": ["advisor"],
+                "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+            },
+        )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert current_task["node_key"] == "background_assessment"
+    assert current_application["application_status"] == "待背景评估"
+    assert fake_postgres.list_background_assessments(application.id) == []
+def test_execute_workflow_action_background_assessment_two_passes_advances_to_advisor_screening(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     fake_mailer = FakeNotificationEmailService()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -1267,7 +1935,12 @@ def test_execute_workflow_action_background_assessment_two_passes_advances_to_ce
         task_id,
         "approve",
         "资料审核通过",
-        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+        principal={
+            "username": "academy.admin",
+            "full_name": "书院管理员",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
     )
 
     current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
@@ -1279,7 +1952,12 @@ def test_execute_workflow_action_background_assessment_two_passes_advances_to_ce
         task_id,
         "approve",
         "第一位书院管理员通过",
-        principal={"username": "reviewer.a", "full_name": "评估人甲", "roles": ["platform_admin"]},
+        principal={
+            "username": "reviewer.a",
+            "full_name": "评估人甲",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
     )
 
     mid_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
@@ -1292,15 +1970,22 @@ def test_execute_workflow_action_background_assessment_two_passes_advances_to_ce
         task_id,
         "approve",
         "第二位书院管理员通过",
-        principal={"username": "reviewer.b", "full_name": "评估人乙", "roles": ["platform_admin"]},
+        principal={
+            "username": "reviewer.b",
+            "full_name": "评估人乙",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
     )
 
     completed_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
     completed_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
-    assert completed_task["node_key"] == "center_assessment"
-    assert completed_application["application_status"] == "待中心考核"
+    assert completed_task["node_key"] == "advisor_screening"
+    assert completed_application["application_status"] == "待导师初筛-第一志愿"
+    assert completed_application["advisor_screening_status"] == "pending"
+    assert completed_application["advisor_screening_round"] == "first_choice"
     assert len(fake_postgres.list_background_assessments(application.id)) == 2
-    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "待中心考核"
+    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "待导师初筛-第一志愿"
 
 
 def test_execute_workflow_action_background_assessment_two_rejects_terminates_application(monkeypatch) -> None:
@@ -1320,20 +2005,20 @@ def test_execute_workflow_action_background_assessment_two_rejects_terminates_ap
         task_id,
         "approve",
         "资料审核通过",
-        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+        principal={"username": "academy.admin", "full_name": "书院管理员", "roles": ["academy_admin"]},
     )
 
     store.execute_workflow_action(
         task_id,
         "reject",
         "第一位书院管理员不通过",
-        principal={"username": "reviewer.a", "full_name": "评估人甲", "roles": ["platform_admin"]},
+        principal={"username": "reviewer.a", "full_name": "评估人甲", "roles": ["academy_admin"]},
     )
     store.execute_workflow_action(
         task_id,
         "reject",
         "第二位书院管理员不通过",
-        principal={"username": "reviewer.b", "full_name": "评估人乙", "roles": ["platform_admin"]},
+        principal={"username": "reviewer.b", "full_name": "评估人乙", "roles": ["academy_admin"]},
     )
 
     completed_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
@@ -1342,6 +2027,709 @@ def test_execute_workflow_action_background_assessment_two_rejects_terminates_ap
     assert completed_task["status"] == "已驳回"
     assert completed_application["application_status"] == "报名终止"
     assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "报名终止"
+    assert fake_mailer.recruitment_status_calls[-1]["review_comment"] == "第二位书院管理员不通过"
+
+
+def test_submit_advisor_screening_batch_first_choice_pass_moves_to_confirmation(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "screening-pass@example.com",
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+
+    response = store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[
+                {
+                    "application_id": application.id,
+                    "advisor_score": 91,
+                }
+            ],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert response.batch_id == 1
+    assert response.screening_round == "first_choice"
+    assert response.submitted_count == 1
+    assert current_task["node_key"] == "initial_screening_confirmation"
+    assert current_application["application_status"] == "待初筛确认"
+    assert current_application["initial_screening_status"] == "pending"
+    assert current_application["first_choice_screening_score"] == pytest.approx(91)
+    assert current_task["latest_comment"] == "导师初筛自动通过，分数 91.00，系统按 80 分阈值自动判定"
+    assert len(fake_postgres.advisor_screening_batches) == 1
+    assert fake_postgres.advisor_screening_batches[0]["batch_payload"]["advisor_name"] == "刘亚"
+    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "待导师初筛-第一志愿"
+
+
+def test_portal_workflow_progress_summary_uses_scoring_based_screening_copy(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    summary = store._build_portal_workflow_progress_summary("2026-05-28 09:00:00", "待导师初筛-第一志愿")
+
+    current_stage = next(item for item in summary.stages if item.key == "initial_screening")
+    assert current_stage.description == "等待初筛完成"
+
+
+def test_portal_workflow_progress_summary_marks_background_and_later_terminated_stages(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    summary = store._build_portal_workflow_progress_summary(
+        "2026-05-28 09:00:00",
+        "报名终止",
+        background_assessments=[
+            {"assessment_result": "通过"},
+            {"assessment_result": "不通过"},
+        ],
+    )
+
+    terminated_stage_keys = ["background_review", "initial_screening", "camp_interview", "result_publish", "pre_admission"]
+    terminated_stages = {item.key: item for item in summary.stages if item.key in terminated_stage_keys}
+
+    assert summary.result_label == "终止"
+    assert set(terminated_stages) == set(terminated_stage_keys)
+    assert all(item.status == "terminated" for item in terminated_stages.values())
+    assert all(item.description == "终止" for item in terminated_stages.values())
+
+
+def test_portal_workflow_progress_summary_keeps_background_review_completed_when_initial_screening_failed(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    summary = store._build_portal_workflow_progress_summary(
+        "2026-05-28 09:00:00",
+        "报名终止",
+        advisor_screening_status="rejected",
+        initial_screening_result="rejected",
+        background_assessments=[
+            {"assessment_result": "通过"},
+            {"assessment_result": "通过"},
+        ],
+    )
+
+    stage_by_key = {item.key: item for item in summary.stages}
+
+    assert stage_by_key["background_review"].status == "completed"
+    assert stage_by_key["initial_screening"].status == "terminated"
+    assert stage_by_key["initial_screening"].description == "终止"
+    assert stage_by_key["camp_interview"].status == "terminated"
+    assert stage_by_key["result_publish"].status == "terminated"
+    assert stage_by_key["pre_admission"].status == "terminated"
+
+
+def test_confirm_initial_screening_pass_moves_to_camp_interview(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "confirmation-pass@example.com",
+                "portal_student_id": 88,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[
+                {
+                    "application_id": application.id,
+                    "advisor_score": 95,
+                }
+            ],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    result = store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="passed", comment="进入入营面试"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert result.application_status == "入营面试"
+    assert current_task["node_key"] == "camp_interview"
+    assert current_application["initial_screening_result"] == "passed"
+    assert current_application["next_stage_name"] == "入营面试"
+    assert len(fake_postgres.initial_screening_confirmations) == 1
+    assert len(fake_postgres.initial_screening_notifications) == 2
+    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "入营面试"
+
+
+def test_confirm_initial_screening_reject_email_contains_review_comment(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "confirmation-reject@example.com",
+                "portal_student_id": 88,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 95}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="rejected", comment="科研背景与项目方向匹配不足"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "报名终止"
+    assert fake_mailer.recruitment_status_calls[-1]["review_comment"] == "科研背景与项目方向匹配不足"
+
+
+def test_rollback_registered_portal_student_stage_moves_confirmation_back_to_advisor_screening(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 88,
+            "full_name": "回退学生",
+            "email": "rollback-stage@example.com",
+            "account_status": "启用",
+            "phone_number": "13800008888",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rollback-stage@example.com",
+                "portal_student_id": 88,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 92}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    response = store.rollback_registered_portal_student_stage(
+        88,
+        RegisteredPortalStudentRollbackStageRequest(target_stage="advisor_screening_first", comment="补充复核"),
+        principal={"username": "admin", "full_name": "平台管理员", "roles": ["platform_admin"]},
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert response.message == "已退回至导师初筛-第一志愿"
+    assert response.email_sent is True
+    assert current_task["node_key"] == "advisor_screening"
+    assert current_application["application_status"] == "待导师初筛-第一志愿"
+    assert current_application["advisor_screening_status"] == "pending"
+    assert current_application["first_choice_screening_score"] is None
+    assert current_application["initial_screening_status"] is None
+    assert fake_postgres.rollback_recruitment_applications[-1]["clear_initial_screening_confirmation"] is True
+    assert fake_mailer.recruitment_stage_rollback_calls[-1]["target_stage_label"] == "导师初筛-第一志愿"
+
+
+def test_rollback_registered_portal_student_stage_moves_camp_interview_back_to_qualification_review(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 89,
+            "full_name": "退回资格学生",
+            "email": "rollback-qualification@example.com",
+            "account_status": "启用",
+            "phone_number": "13800008889",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rollback-qualification@example.com",
+                "portal_student_id": 89,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[AdvisorScreeningSubmitItem(application_id=application.id, advisor_score=94)],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="passed", comment="进入入营面试"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    response = store.rollback_registered_portal_student_stage(
+        89,
+        RegisteredPortalStudentRollbackStageRequest(target_stage="qualification_review", comment="重新核验材料"),
+        principal={"username": "admin", "full_name": "平台管理员", "roles": ["platform_admin"]},
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    rollback_payload = fake_postgres.rollback_recruitment_applications[-1]
+    assert response.message == "已退回至资格审核"
+    assert current_task["node_key"] == "qualification_review"
+    assert current_task["latest_comment"] == "重新核验材料"
+    assert current_application["application_status"] == "报名已提交"
+    assert current_application["advisor_screening_status"] is None
+    assert current_application["advisor_screening_round"] is None
+    assert current_application["first_choice_screening_score"] is None
+    assert current_application["second_choice_screening_score"] is None
+    assert current_application["initial_screening_status"] is None
+    assert current_application["initial_screening_result"] is None
+    assert rollback_payload["clear_background_assessments"] is True
+    assert rollback_payload["clear_initial_screening_confirmation"] is True
+    assert fake_postgres.background_assessments == []
+    assert fake_postgres.initial_screening_confirmations == []
+    assert fake_postgres.initial_screening_notifications == []
+    assert fake_mailer.recruitment_stage_rollback_calls[-1]["target_stage_label"] == "资格审核"
+
+
+def test_rollback_registered_portal_student_stage_rejects_forward_stage(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 90,
+            "full_name": "禁止前进学生",
+            "email": "rollback-forward@example.com",
+            "account_status": "启用",
+            "phone_number": "13800008890",
+        },
+    )
+    store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={"email": "rollback-forward@example.com", "portal_student_id": 90}
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    with pytest.raises(ValueError, match="仅可退回到当前环节或更前的环节"):
+        store.rollback_registered_portal_student_stage(
+            90,
+            RegisteredPortalStudentRollbackStageRequest(target_stage="background_assessment"),
+            principal={"username": "admin", "full_name": "平台管理员", "roles": ["platform_admin"]},
+        )
+
+
+def test_rollback_registered_portal_student_stage_does_not_fallback_to_full_save(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 91,
+            "full_name": "持久化失败学生",
+            "email": "rollback-persist-fail@example.com",
+            "account_status": "启用",
+            "phone_number": "13800008891",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rollback-persist-fail@example.com",
+                "portal_student_id": 91,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+
+    def fail_rollback_persist(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    def fail_full_save() -> None:
+        raise AssertionError("full save should not be used as rollback fallback")
+
+    fake_postgres.rollback_recruitment_application_stage = fail_rollback_persist
+    monkeypatch.setattr(store, "_save", fail_full_save)
+
+    with pytest.raises(RuntimeError, match="退回环节持久化失败"):
+        store.rollback_registered_portal_student_stage(
+            91,
+            RegisteredPortalStudentRollbackStageRequest(target_stage="qualification_review", comment="重新核验材料"),
+            principal={"username": "admin", "full_name": "平台管理员", "roles": ["platform_admin"]},
+        )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert current_task["node_key"] == "advisor_screening"
+    assert current_application["application_status"] == "待导师初筛-第一志愿"
+    assert current_application["advisor_screening_status"] == "pending"
+
+
+def test_rollback_registered_portal_student_stage_rejects_non_platform_admin(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+
+    with pytest.raises(PermissionError, match="仅平台管理员可退回注册学生报名环节"):
+        store.rollback_registered_portal_student_stage(
+            88,
+            RegisteredPortalStudentRollbackStageRequest(target_stage="background_assessment"),
+            principal={
+                "username": "academy.admin",
+                "full_name": "书院管理员",
+                "roles": ["academy_admin"],
+                "permissions": ["students:write"],
+            },
+        )
+
+
+def test_submit_advisor_screening_batch_below_threshold_moves_to_second_choice(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "screening-threshold@example.com",
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+
+    response = store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[
+                {
+                    "application_id": application.id,
+                    "advisor_score": 79,
+                }
+            ],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert response.screening_round == "first_choice"
+    assert current_task["node_key"] == "advisor_screening"
+    assert current_application["application_status"] == "待导师初筛-第二志愿"
+    assert current_application["advisor_screening_status"] == "pending"
+    assert current_application["advisor_screening_round"] == "second_choice"
+    assert current_application["first_choice_screening_score"] == pytest.approx(79)
+    assert fake_postgres.advisor_screening_batches[0]["application_payloads"][0]["is_passed"] is False
+
+
+def test_end_to_end_screening_flow_passes_across_student_advisor_and_academy_manager(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+    advisor_principal = store.get_principal_context("liu.ya")
+    academy_manager_principal = store.get_principal_context("qin.rao")
+
+    registration = store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800007701",
+            email="screening-pass-e2e@example.com",
+            full_name="初筛通过联调学生",
+            id_number="320000199909099918",
+            password="Secret123!",
+        )
+    )
+    submission = store.submit_portal_application(
+        registration.student.id,
+        _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
+    )
+
+    task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == submission.application_business_key)
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    _sync_recruitment_application_rows_from_state(store, fake_postgres)
+
+    advisor_list = store.get_recruitment_applications(
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        plan_id=available_plan.id,
+        principal=advisor_principal,
+        page=1,
+        page_size=20,
+    )
+
+    assert advisor_list.total == 1
+    assert advisor_list.items[0].business_key == submission.application_business_key
+
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,advisorpass",
+            items=[{"application_id": advisor_list.items[0].id, "advisor_score": 92}],
+        ),
+        principal=advisor_principal,
+    )
+    _sync_recruitment_application_rows_from_state(store, fake_postgres)
+
+    academy_list = store.get_recruitment_applications(
+        status="待初筛确认",
+        plan_id=available_plan.id,
+        principal=academy_manager_principal,
+        page=1,
+        page_size=20,
+    )
+
+    assert academy_list.total == 1
+    assert academy_list.items[0].business_key == submission.application_business_key
+
+    store.confirm_initial_screening(
+        academy_list.items[0].id,
+        InitialScreeningConfirmationRequest(result="passed", comment="联调通过，进入入营面试"),
+        principal=academy_manager_principal,
+    )
+
+    portal_student = store.get_portal_student(registration.student.id)
+    workflow_progress = portal_student.workflow_progress
+    assert portal_student.recruitment_application_status == "入营面试"
+    assert workflow_progress is not None
+    stage_by_key = {item.key: item for item in workflow_progress.stages}
+    assert stage_by_key["initial_screening"].status == "completed"
+    assert stage_by_key["camp_interview"].status == "current"
+    assert stage_by_key["camp_interview"].description == "初筛已通过，当前进入入营面试环节"
+    assert len(fake_postgres.advisor_screening_batches) == 1
+    assert len(fake_postgres.initial_screening_confirmations) == 1
+
+
+def test_end_to_end_screening_flow_rejection_updates_second_choice_and_student_progress(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+    first_advisor_principal = store.get_principal_context("liu.ya")
+    second_advisor_principal = {
+        "username": "advisor.wang",
+        "full_name": "王青",
+        "roles": ["advisor"],
+        "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+    }
+
+    registration = store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800007702",
+            email="screening-reject-e2e@example.com",
+            full_name="初筛终止联调学生",
+            id_number="320000199909099934",
+            password="Secret123!",
+        )
+    )
+    payload = _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name)
+    payload = payload.model_copy(
+        update={
+            "preferences": [
+                payload.preferences[0].model_copy(update={"advisor_name": "刘亚", "advisor_user_id": 11, "is_optional": False}),
+                payload.preferences[0].model_copy(
+                    update={"preference_order": 2, "advisor_name": "王青", "advisor_user_id": 12, "is_optional": True}
+                ),
+            ],
+            "selected_advisor_user_id": 11,
+            "selected_advisor_name": "刘亚",
+        }
+    )
+    submission = store.submit_portal_application(registration.student.id, payload)
+
+    task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == submission.application_business_key)
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    _sync_recruitment_application_rows_from_state(store, fake_postgres)
+
+    first_advisor_list = store.get_recruitment_applications(
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        plan_id=available_plan.id,
+        principal=first_advisor_principal,
+        page=1,
+        page_size=20,
+    )
+    assert first_advisor_list.total == 1
+
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,advisorrejectfirst",
+            items=[{"application_id": first_advisor_list.items[0].id, "advisor_score": 79}],
+        ),
+        principal=first_advisor_principal,
+    )
+    _sync_recruitment_application_rows_from_state(store, fake_postgres)
+
+    second_advisor_list = store.get_recruitment_applications(
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        plan_id=available_plan.id,
+        principal=second_advisor_principal,
+        page=1,
+        page_size=20,
+    )
+    assert second_advisor_list.total == 1
+    assert second_advisor_list.items[0].business_key == submission.application_business_key
+
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,advisorrejectsecond",
+            items=[{"application_id": second_advisor_list.items[0].id, "advisor_score": 60}],
+        ),
+        principal=second_advisor_principal,
+    )
+
+    portal_student = store.get_portal_student(registration.student.id)
+    workflow_progress = portal_student.workflow_progress
+    assert portal_student.recruitment_application_status == "报名终止"
+    assert workflow_progress is not None
+    assert workflow_progress.result_label == "终止"
+    stage_by_key = {item.key: item for item in workflow_progress.stages}
+    assert stage_by_key["background_review"].status == "completed"
+    assert stage_by_key["initial_screening"].status == "terminated"
+    assert stage_by_key["camp_interview"].status == "terminated"
+    assert len(fake_postgres.advisor_screening_batches) == 2
 
 
 def test_execute_workflow_action_rejects_role_without_workflow_permissions(monkeypatch) -> None:
@@ -1401,7 +2789,7 @@ def test_execute_workflow_action_qualification_approve_enters_background_assessm
         approve_task_id,
         "approve",
         None,
-        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+        principal={"username": "academy.admin", "full_name": "书院管理员", "roles": ["academy_admin"]},
     )
 
     approved_application = next(item for item in store.state["recruitment_applications"] if item["business_key"] == application.application_business_key)
@@ -1419,7 +2807,7 @@ def test_execute_workflow_action_qualification_approve_enters_background_assessm
         reject_task_id,
         "reject",
         "材料信息不足",
-        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+        principal={"username": "academy.admin", "full_name": "书院管理员", "roles": ["academy_admin"]},
     )
 
     assert fake_mailer.recruitment_status_calls[-1] == {
@@ -1428,6 +2816,7 @@ def test_execute_workflow_action_qualification_approve_enters_background_assessm
         "business_key": rejected_application.business_key,
         "application_status": "驳回重填",
         "plan_name": "2026 秋季博士招生",
+        "review_comment": "材料信息不足",
     }
 
 
@@ -3622,6 +5011,46 @@ def test_get_profile_uses_redis_cache_and_update_profile_refreshes_cache(monkeyp
     assert third.full_name == "缓存已刷新"
 
 
+def test_get_profile_recovers_from_cached_null_when_postgres_has_profile(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_cache = FakeCacheClient()
+    expected_profile = {
+        "username": "cache.null.user",
+        "full_name": "空缓存恢复用户",
+        "role_name": "平台管理员",
+        "department_name": "研究生院",
+        "introduction": None,
+        "phone_number": "13800008888",
+        "email": "recover@example.com",
+        "theme_color": "#0f4cbd",
+    }
+    call_count = {"value": 0}
+
+    def fake_get_user_profile(username: str):
+        call_count["value"] += 1
+        return dict(expected_profile) if username == expected_profile["username"] else None
+
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.get_cache_client", lambda: fake_cache)
+
+    store = RuntimeManagementStore()
+    fake_postgres.get_user_profile = fake_get_user_profile
+    store._write_json_cache(
+        store._user_profile_cache_key(expected_profile["username"]),
+        {CACHE_NULL_SENTINEL_KEY: True},
+        60,
+        with_jitter=False,
+    )
+
+    profile = store.get_profile(expected_profile["username"])
+    cache_hit, cached_payload = store._read_json_cache(store._user_profile_cache_key(expected_profile["username"]))
+
+    assert profile.full_name == expected_profile["full_name"]
+    assert call_count["value"] == 1
+    assert cache_hit is True
+    assert cached_payload == expected_profile
+
+
 def test_authenticate_system_user_uses_cached_postgres_user_context(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     fake_cache = FakeCacheClient()
@@ -3769,6 +5198,26 @@ def test_update_role_uses_postgres_row_when_runtime_role_missing(monkeypatch) ->
 
     assert updated.role_name == "平台治理管理员"
     assert fake_postgres.synced_roles[-1]["role_payload"]["id"] == role_id
+
+
+def test_update_role_rejects_permissions_missing_in_database(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.missing_permission_codes_result = ["recruitment_plan:read"]
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    target_role = next(item for item in store.state["roles"] if str(item.get("role_code") or "") == "AILABMGT")
+
+    with pytest.raises(ValueError, match="Permissions not configured in database: recruitment_plan:read"):
+        store.update_role(
+            int(target_role["id"]),
+            RoleUpsert(
+                role_code=str(target_role["role_code"]),
+                role_name=str(target_role["role_name"]),
+                scope_name=str(target_role.get("scope_name") or "招生管理"),
+                permissions=["dashboard:read", "recruitment_plan:read"],
+            ),
+        )
 
 
 def test_update_audit_policy_uses_postgres_row_when_runtime_policy_missing(monkeypatch) -> None:

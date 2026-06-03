@@ -301,6 +301,10 @@ function validateEducationRules(items?: PortalEducationExperienceItem[] | null) 
     if (!trimText(item.verifier_phone)) {
       missingFields.push('证明人手机')
     }
+    const verifierPhoneMessage = getPhoneValidationMessage(item.verifier_phone || '', true, `教育经历${index + 1}证明人手机`)
+    if (verifierPhoneMessage) {
+      return verifierPhoneMessage
+    }
     if (!isHighSchoolStage(stage)) {
       if (!trimText(item.major_name)) {
         missingFields.push('就读专业')
@@ -408,6 +412,10 @@ function validatePracticeRules(items?: PortalPracticeExperienceItem[] | null) {
     if (!trimText(item.verifier_phone)) {
       missingFields.push('证明人手机')
     }
+    const verifierPhoneMessage = getPhoneValidationMessage(item.verifier_phone || '', true, `实践经历${index + 1}证明人手机`)
+    if (verifierPhoneMessage) {
+      return verifierPhoneMessage
+    }
     if (missingFields.length) {
       return `实践经历${index + 1}一旦新增，以下字段必填：${missingFields.join('、')}`
     }
@@ -494,6 +502,16 @@ function hasCompletedParentFamilyMember(items?: PortalFamilyMemberItem[] | null)
 function validateFamilyRules(items?: PortalFamilyMemberItem[] | null) {
   if (!hasCompletedParentFamilyMember(items)) {
     return '父母信息至少填写一方'
+  }
+
+  for (const [index, item] of (items || []).entries()) {
+    if (!trimText(item.contact_phone)) {
+      return `家庭成员${index + 1}联系电话不能为空`
+    }
+    const phoneValidationMessage = getPhoneValidationMessage(item.contact_phone || '', true, `家庭成员${index + 1}联系电话`)
+    if (phoneValidationMessage) {
+      return phoneValidationMessage
+    }
   }
 
   return ''

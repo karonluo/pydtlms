@@ -71,17 +71,34 @@ export type RegisteredPortalStudentActionResponse = {
 }
 
 
+export type RegisteredPortalStudentImpersonationLaunchResponse = {
+  message: string
+  launch_url: string
+  expires_in_seconds: number
+}
+
+
 export type RegisteredPortalStudentEmailRequest = {
   subject: string
   content: string
 }
 
 
+export type RegisteredPortalStudentRollbackStageRequest = {
+  target_stage: string
+  comment?: string
+}
+
+
 export type RegisteredPortalStudentExportRequest = {
   ids?: number[]
   keyword?: string
+  plan_id?: number
   application_form_status?: string
+  recruitment_application_status?: string
+  show_all_background_assessed?: boolean
   advisor_names?: string[]
+  export_scope?: string
 }
 
 
@@ -150,6 +167,7 @@ export type StudentOptions = {
   degree_options: SelectOption[]
   advisor_options: SelectOption[]
   registered_portal_advisor_filter_options: SelectOption[]
+  registered_portal_application_status_options: SelectOption[]
   center_options: SelectOption[]
   political_status_options: SelectOption[]
   center_advisor_map: CenterAdvisorMapItem[]
@@ -180,7 +198,7 @@ export function getStudentOptions() {
 }
 
 
-export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string; advisor_names?: string }) {
+export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string; recruitment_application_status?: string; show_all_background_assessed?: boolean; advisor_names?: string }) {
   return http.get<RegisteredPortalStudentListResponse>('/students/portal-registrations', { params })
 }
 
@@ -227,6 +245,16 @@ export function resetRegisteredPortalStudentPassword(id: number) {
 
 export function sendRegisteredPortalStudentEmail(id: number, payload: RegisteredPortalStudentEmailRequest) {
   return http.post<RegisteredPortalStudentActionResponse>(`/students/portal-registrations/${id}/send-email`, payload)
+}
+
+
+export function rollbackRegisteredPortalStudentStage(id: number, payload: RegisteredPortalStudentRollbackStageRequest) {
+  return http.post<RegisteredPortalStudentActionResponse>(`/students/portal-registrations/${id}/rollback-stage`, payload)
+}
+
+
+export function impersonateRegisteredPortalStudent(id: number) {
+  return http.post<RegisteredPortalStudentImpersonationLaunchResponse>(`/students/portal-registrations/${id}/impersonate`)
 }
 
 

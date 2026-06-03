@@ -15,6 +15,22 @@ class RuntimeManagementStoreStudentsMixin:
     _registered_portal_export_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="registered-portal-export")
     _registered_portal_export_jobs: dict[str, dict[str, Any]] = {}
     _registered_portal_export_jobs_lock = RLock()
+    _ADVISOR_SCREENING_EXPORT_STATUSES = {
+        "待导师初筛",
+        "待导师初筛-第一志愿",
+        "待导师初筛-第二志愿",
+        "待中心考核",
+        "待中心考核-第一志愿",
+        "待中心考核-第二志愿",
+    }
+    _REGISTERED_PORTAL_ROLLBACK_STAGE_CONFIG: dict[str, dict[str, Any]] = {
+        "qualification_review": {"label": "资格审核", "node_key": "qualification_review", "application_status": "报名已提交", "rank": 1},
+        "background_assessment": {"label": "背景评估", "node_key": "background_assessment", "application_status": "待背景评估", "rank": 2},
+        "advisor_screening_first": {"label": "导师初筛-第一志愿", "node_key": "advisor_screening", "application_status": "待导师初筛-第一志愿", "rank": 3},
+        "advisor_screening_second": {"label": "导师初筛-第二志愿", "node_key": "advisor_screening", "application_status": "待导师初筛-第二志愿", "rank": 4},
+        "initial_screening_confirmation": {"label": "初筛确认", "node_key": "initial_screening_confirmation", "application_status": "待初筛确认", "rank": 5},
+        "camp_interview": {"label": "入营面试", "node_key": "camp_interview", "application_status": "入营面试", "rank": 6},
+    }
 
     @staticmethod
     def _registered_portal_export_timestamp() -> str:
@@ -23,6 +39,87 @@ class RuntimeManagementStoreStudentsMixin:
     @staticmethod
     def _registered_portal_export_job_file_name() -> str:
         return f"注册学生导出_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+
+    @staticmethod
+    def _principal_field_value(principal: Principal | dict[str, Any] | None, field_name: str) -> Any:
+        if principal is None:
+            return None
+        if isinstance(principal, dict):
+            return principal.get(field_name)
+        return getattr(principal, field_name, None)
+
+    @classmethod
+    def _principal_role_codes(cls, principal: Principal | dict[str, Any] | None) -> set[str]:
+        raw_roles = cls._principal_field_value(principal, "roles") or []
+        return {str(item).strip() for item in raw_roles if str(item).strip()}
+
+    @classmethod
+    def _registered_portal_scope_advisor_name(cls, principal: Principal | dict[str, Any] | None) -> str | None:
+        role_codes = cls._principal_role_codes(principal)
+        if "advisor" not in role_codes or role_codes.intersection({"platform_admin", "AILABMGT", "academy_admin"}):
+            return None
+        full_name = str(cls._principal_field_value(principal, "full_name") or "").strip()
+        if full_name:
+            return full_name
+        username = str(cls._principal_field_value(principal, "username") or "").strip()
+        return username or None
+
+    @classmethod
+    def _resolve_registered_portal_advisor_filter(
+        cls,
+        advisor_names: list[str] | None,
+        principal: Principal | dict[str, Any] | None,
+    ) -> tuple[list[str], bool]:
+        normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
+        scoped_advisor_name = cls._registered_portal_scope_advisor_name(principal)
+        if not scoped_advisor_name:
+            return normalized_advisor_names, False
+        if normalized_advisor_names:
+            if scoped_advisor_name not in normalized_advisor_names:
+                return [], True
+            return [scoped_advisor_name], False
+        return [scoped_advisor_name], False
+
+    def _filter_registered_portal_student_ids_by_scope(
+        self,
+        student_ids: list[int],
+        principal: Principal | dict[str, Any] | None,
+    ) -> list[int]:
+        scoped_advisor_name = self._registered_portal_scope_advisor_name(principal)
+        if not scoped_advisor_name:
+            return student_ids
+        allowed_student_ids = {
+            int(item.get("id") or 0)
+            for item in self._list("portal_students")
+            if str(item.get("selected_advisor_name") or "").strip() == scoped_advisor_name
+        }
+        return [student_id for student_id in student_ids if student_id in allowed_student_ids]
+
+    @classmethod
+    def _build_registered_portal_principal_snapshot(cls, principal: Principal | dict[str, Any]) -> dict[str, Any]:
+        return {
+            "username": str(cls._principal_field_value(principal, "username") or ""),
+            "full_name": str(cls._principal_field_value(principal, "full_name") or ""),
+            "roles": sorted(cls._principal_role_codes(principal)),
+            "permissions": [str(item) for item in (cls._principal_field_value(principal, "permissions") or [])],
+        }
+
+    @classmethod
+    def _registered_portal_background_assessment_filter_username(
+        cls,
+        principal: Principal | dict[str, Any] | None,
+        *,
+        show_all_background_assessed: bool,
+    ) -> str | None:
+        if show_all_background_assessed:
+            return None
+        role_codes = cls._principal_role_codes(principal)
+        if not role_codes.intersection({"AILABMGT", "academy_admin"}):
+            return None
+        if "platform_admin" in role_codes:
+            return None
+        username = str(cls._principal_field_value(principal, "username") or "").strip()
+        return username or None
 
     @staticmethod
     def _build_registered_portal_export_job_record(job: dict[str, Any]) -> RegisteredPortalStudentExportJobRecord:
@@ -52,8 +149,12 @@ class RuntimeManagementStoreStudentsMixin:
             content = self.export_registered_portal_students(
                 list(job.get("student_ids") or []),
                 keyword=job.get("keyword"),
+                plan_id=job.get("plan_id"),
                 application_form_status=job.get("application_form_status"),
+                recruitment_application_status=job.get("recruitment_application_status"),
                 advisor_names=list(job.get("advisor_names") or []),
+                export_scope=job.get("export_scope"),
+                principal=job.get("principal_snapshot"),
             )
             temp_dir = Path(tempfile.gettempdir()) / "pydtlms-export-jobs"
             temp_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +187,7 @@ class RuntimeManagementStoreStudentsMixin:
         payload: RegisteredPortalStudentExportRequest,
         *,
         principal: Principal,
-    ) -> RegisteredPortalStudentExportJobCreateResponse:
+) -> RegisteredPortalStudentExportJobCreateResponse:
         job_id = uuid4().hex
         job = {
             "job_id": job_id,
@@ -103,8 +204,12 @@ class RuntimeManagementStoreStudentsMixin:
             "is_read": True,
             "student_ids": list(payload.ids),
             "keyword": payload.keyword,
+            "plan_id": payload.plan_id,
             "application_form_status": payload.application_form_status,
+            "recruitment_application_status": payload.recruitment_application_status,
             "advisor_names": list(payload.advisor_names),
+            "export_scope": payload.export_scope,
+            "principal_snapshot": self._build_registered_portal_principal_snapshot(principal),
         }
         with self._registered_portal_export_jobs_lock:
             self._registered_portal_export_jobs[job_id] = job
@@ -112,6 +217,268 @@ class RuntimeManagementStoreStudentsMixin:
         return RegisteredPortalStudentExportJobCreateResponse(
             message="开始导出，请等待完成",
             job=self._build_registered_portal_export_job_record(job),
+        )
+
+    @classmethod
+    def _registered_portal_rollback_stage_config(cls, stage_key: str) -> dict[str, Any]:
+        config = cls._REGISTERED_PORTAL_ROLLBACK_STAGE_CONFIG.get(str(stage_key).strip())
+        if config is None:
+            raise ValueError("不支持退回到所选环节")
+        return config
+
+    @classmethod
+    def _registered_portal_rollback_stage_label(cls, stage_key: str) -> str:
+        return str(cls._registered_portal_rollback_stage_config(stage_key)["label"])
+
+    def _infer_registered_portal_current_stage(
+        self,
+        application: dict[str, Any],
+        workflow_task: dict[str, Any] | None,
+    ) -> str:
+        task_node_key = str((workflow_task or {}).get("node_key") or "").strip()
+        application_status = str(application.get("application_status") or "").strip()
+        advisor_round = str(application.get("advisor_screening_round") or "").strip()
+        first_choice_score = application.get("first_choice_screening_score")
+        second_choice_score = application.get("second_choice_screening_score")
+
+        if task_node_key == "qualification_review":
+            return "qualification_review"
+        if task_node_key == "background_assessment":
+            return "background_assessment"
+        if task_node_key == "advisor_screening":
+            return "advisor_screening_second" if application_status == "待导师初筛-第二志愿" or advisor_round == "second_choice" else "advisor_screening_first"
+        if task_node_key == "initial_screening_confirmation":
+            return "initial_screening_confirmation"
+        if task_node_key == "camp_interview":
+            return "camp_interview"
+
+        if application_status in {"报名已提交", "驳回重填"}:
+            return "qualification_review"
+        if application_status == "待背景评估":
+            return "background_assessment"
+        if application_status == "待导师初筛-第一志愿":
+            return "advisor_screening_first"
+        if application_status == "待导师初筛-第二志愿":
+            return "advisor_screening_second"
+        if application_status == "待初筛确认":
+            return "initial_screening_confirmation"
+        if application_status == "入营面试":
+            return "camp_interview"
+        if application_status == "报名终止":
+            if str(application.get("initial_screening_status") or "").strip() == "confirmed" or application.get("initial_screening_result") is not None:
+                return "initial_screening_confirmation"
+            if second_choice_score is not None or advisor_round == "second_choice":
+                return "advisor_screening_second"
+            if first_choice_score is not None or str(application.get("advisor_screening_status") or "").strip() in {"submitted", "passed", "rejected"}:
+                return "advisor_screening_first"
+            try:
+                if self._postgres_store.list_background_assessments(int(application.get("id") or 0)):
+                    return "background_assessment"
+            except Exception:
+                pass
+            return "qualification_review"
+        raise ValueError("当前报名申请环节不支持退回")
+
+    def _build_registered_portal_rollback_application(
+        self,
+        application: dict[str, Any],
+        target_stage: str,
+    ) -> tuple[dict[str, Any], dict[str, bool]]:
+        updated = dict(application)
+        cleanup_flags = {
+            "clear_background_assessments": False,
+            "clear_initial_screening_confirmation": False,
+        }
+        updated["next_stage_name"] = None
+
+        def clear_initial_confirmation_fields() -> None:
+            updated["initial_screening_status"] = None
+            updated["initial_screening_result"] = None
+            updated["initial_screening_confirmed_at"] = None
+            updated["initial_screening_confirmer_username"] = None
+            updated["initial_screening_confirmer_name"] = None
+            updated["initial_screening_notification_status"] = None
+            updated["initial_screening_notification_sent_at"] = None
+
+        if target_stage == "qualification_review":
+            updated["application_status"] = "报名已提交"
+            updated["advisor_screening_status"] = None
+            updated["advisor_screening_round"] = None
+            updated["first_choice_screening_batch_id"] = None
+            updated["second_choice_screening_batch_id"] = None
+            updated["first_choice_screening_submitted_at"] = None
+            updated["second_choice_screening_submitted_at"] = None
+            updated["first_choice_screening_score"] = None
+            updated["second_choice_screening_score"] = None
+            clear_initial_confirmation_fields()
+            cleanup_flags["clear_background_assessments"] = True
+            cleanup_flags["clear_initial_screening_confirmation"] = True
+            return updated, cleanup_flags
+
+        if target_stage == "background_assessment":
+            updated["application_status"] = "待背景评估"
+            updated["advisor_screening_status"] = None
+            updated["advisor_screening_round"] = None
+            updated["first_choice_screening_batch_id"] = None
+            updated["second_choice_screening_batch_id"] = None
+            updated["first_choice_screening_submitted_at"] = None
+            updated["second_choice_screening_submitted_at"] = None
+            updated["first_choice_screening_score"] = None
+            updated["second_choice_screening_score"] = None
+            clear_initial_confirmation_fields()
+            cleanup_flags["clear_background_assessments"] = True
+            cleanup_flags["clear_initial_screening_confirmation"] = True
+            return updated, cleanup_flags
+
+        if target_stage == "advisor_screening_first":
+            updated["application_status"] = "待导师初筛-第一志愿"
+            updated["advisor_screening_status"] = "pending"
+            updated["advisor_screening_round"] = "first_choice"
+            updated["first_choice_screening_batch_id"] = None
+            updated["second_choice_screening_batch_id"] = None
+            updated["first_choice_screening_submitted_at"] = None
+            updated["second_choice_screening_submitted_at"] = None
+            updated["first_choice_screening_score"] = None
+            updated["second_choice_screening_score"] = None
+            clear_initial_confirmation_fields()
+            cleanup_flags["clear_initial_screening_confirmation"] = True
+            return updated, cleanup_flags
+
+        if target_stage == "advisor_screening_second":
+            updated["application_status"] = "待导师初筛-第二志愿"
+            updated["advisor_screening_status"] = "pending"
+            updated["advisor_screening_round"] = "second_choice"
+            updated["second_choice_screening_batch_id"] = None
+            updated["second_choice_screening_submitted_at"] = None
+            updated["second_choice_screening_score"] = None
+            clear_initial_confirmation_fields()
+            cleanup_flags["clear_initial_screening_confirmation"] = True
+            return updated, cleanup_flags
+
+        if target_stage == "initial_screening_confirmation":
+            screening_round = str(updated.get("advisor_screening_round") or "").strip()
+            updated["application_status"] = "待初筛确认"
+            updated["advisor_screening_status"] = "submitted"
+            updated["advisor_screening_round"] = screening_round or "first_choice"
+            updated["initial_screening_status"] = "pending"
+            updated["initial_screening_result"] = None
+            updated["initial_screening_confirmed_at"] = None
+            updated["initial_screening_confirmer_username"] = None
+            updated["initial_screening_confirmer_name"] = None
+            updated["initial_screening_notification_status"] = "pending"
+            updated["initial_screening_notification_sent_at"] = None
+            cleanup_flags["clear_initial_screening_confirmation"] = True
+            return updated, cleanup_flags
+
+        if target_stage == "camp_interview":
+            updated["application_status"] = "入营面试"
+            updated["initial_screening_status"] = "confirmed"
+            updated["initial_screening_result"] = "passed"
+            updated["next_stage_name"] = "入营面试"
+            return updated, cleanup_flags
+
+        raise ValueError("不支持退回到所选环节")
+
+    def rollback_registered_portal_student_stage(
+        self,
+        student_id: int,
+        payload: RegisteredPortalStudentRollbackStageRequest,
+        *,
+        principal: Principal | dict[str, Any] | None = None,
+    ) -> RegisteredPortalStudentActionResponse:
+        principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": []})
+        if "platform_admin" not in {str(item).strip() for item in principal_summary.get("roles", []) if str(item).strip()}:
+            raise PermissionError("仅平台管理员可退回注册学生报名环节")
+
+        with self._lock:
+            _, student = self._find_required("portal_students", student_id)
+            application = self._get_latest_registered_portal_application_item(student_id)
+            if application is None:
+                raise ValueError("当前注册学生尚未生成报名申请")
+            if not str(application.get("business_key") or "").strip():
+                raise ValueError("当前报名申请缺少业务编号，无法执行退回")
+
+            workflow_located = self._workflow_task_index_by_business_key(str(application.get("business_key") or ""))
+            current_task = dict(workflow_located[1]) if workflow_located else None
+            current_stage = self._infer_registered_portal_current_stage(application, current_task)
+            current_rank = int(self._registered_portal_rollback_stage_config(current_stage)["rank"])
+            target_stage = str(payload.target_stage or "").strip()
+            target_config = self._registered_portal_rollback_stage_config(target_stage)
+            target_rank = int(target_config["rank"])
+            if target_rank > current_rank:
+                raise ValueError("仅可退回到当前环节或更前的环节")
+
+            updated_application, cleanup_flags = self._build_registered_portal_rollback_application(application, target_stage)
+            updated_application["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            updated_task, _ = self._sync_managed_workflow_task(
+                "recruitment_application",
+                updated_application,
+                existing_task=current_task,
+            )
+            if updated_task.get("node_key"):
+                updated_task["due_at"] = self._workflow_due_at("recruitment_application", str(updated_task["node_key"]))
+            rollback_label = str(target_config["label"])
+            rollback_comment = str(payload.comment or "").strip() or f"平台管理员退回至{rollback_label}"
+            previous_node_label = str((current_task or {}).get("current_node") or self._registered_portal_rollback_stage_label(current_stage))
+            updated_task["latest_comment"] = rollback_comment
+            updated_task.setdefault("history", []).append(
+                {
+                    "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "operator_username": principal_summary["username"],
+                    "operator_full_name": principal_summary["full_name"],
+                    "action": "rollback_stage",
+                    "action_label": f"退回至{rollback_label}",
+                    "from_node": previous_node_label,
+                    "to_node": str(updated_task.get("current_node") or rollback_label),
+                    "result_status": str(updated_task.get("status") or "处理中"),
+                    "comment": rollback_comment,
+                }
+            )
+            self._ensure_workflow_engine_metadata(updated_task)
+
+            operation_log = self._record_operation(
+                "学生管理",
+                "注册学生",
+                str(student_id),
+                "退回环节",
+                f'将 {updated_application.get("student_name") or student.get("full_name") or ""} 的报名申请退回至 {rollback_label}',
+                operator_username=principal_summary["username"],
+            )
+            try:
+                self._postgres_store.rollback_recruitment_application_stage(
+                    updated_application,
+                    updated_task,
+                    clear_background_assessments=cleanup_flags["clear_background_assessments"],
+                    clear_initial_screening_confirmation=cleanup_flags["clear_initial_screening_confirmation"],
+                    operation_log=operation_log,
+                    counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+                )
+            except Exception as exc:
+                logger.exception("Persist registered portal rollback failed")
+                raise RuntimeError("退回环节持久化失败，请稍后重试或联系管理员") from exc
+
+            application_index, _ = self._find_required("recruitment_applications", int(application["id"]))
+            self._list("recruitment_applications")[application_index] = updated_application
+            if workflow_located:
+                self._list("workflow_tasks")[workflow_located[0]] = updated_task
+            else:
+                self._list("workflow_tasks").insert(0, updated_task)
+
+        email_sent = bool(self._email_service.enabled() and str(updated_application.get("email") or "").strip())
+        if str(updated_application.get("email") or "").strip():
+            self._email_service.send_recruitment_stage_rollback(
+                student_name=str(updated_application.get("student_name") or student.get("full_name") or ""),
+                email=str(updated_application.get("email") or ""),
+                business_key=str(updated_application.get("business_key") or ""),
+                target_stage_label=rollback_label,
+                plan_name=str(updated_application.get("plan_name") or "").strip() or None,
+            )
+
+        return RegisteredPortalStudentActionResponse(
+            message=f"已退回至{rollback_label}",
+            account_status=self._normalize_portal_account_status(student.get("account_status")),
+            email_sent=email_sent,
         )
 
     def list_registered_portal_student_export_jobs(
@@ -228,9 +595,23 @@ class RuntimeManagementStoreStudentsMixin:
         student_ids: list[int],
         *,
         keyword: str | None,
+        plan_id: int | None = None,
         application_form_status: str | None,
+        recruitment_application_status: str | None,
+        show_all_background_assessed: bool,
         advisor_names: list[str] | None,
+        export_scope: str | None = None,
+        principal: Principal | dict[str, Any] | None = None,
     ) -> list[int]:
+        if str(export_scope or "").strip() == "advisor_screening":
+            return self._resolve_advisor_screening_portal_student_export_ids(
+                student_ids,
+                keyword=keyword,
+                plan_id=plan_id,
+                advisor_names=advisor_names,
+                principal=principal,
+            )
+
         normalized_ids: list[int] = []
         seen_ids: set[int] = set()
         for raw_id in student_ids:
@@ -240,17 +621,134 @@ class RuntimeManagementStoreStudentsMixin:
             seen_ids.add(student_id)
             normalized_ids.append(student_id)
         if normalized_ids:
-            return normalized_ids
+            return self._filter_registered_portal_student_ids_by_scope(normalized_ids, principal)
 
         total_hint = max(len(self._list("portal_students")), 1)
-        response = self.get_registered_portal_students(
+        try:
+            response = self.get_registered_portal_students(
+                keyword=keyword,
+                application_form_status=application_form_status,
+                recruitment_application_status=recruitment_application_status,
+                show_all_background_assessed=show_all_background_assessed,
+                advisor_names=advisor_names,
+                page=1,
+                page_size=total_hint,
+                principal=principal,
+            )
+            return [item.id for item in response.items]
+        except DatabaseUnavailableError:
+            return self._resolve_registered_portal_student_export_ids_from_state(
+                keyword=keyword,
+                application_form_status=application_form_status,
+                recruitment_application_status=recruitment_application_status,
+                show_all_background_assessed=show_all_background_assessed,
+                advisor_names=advisor_names,
+                principal=principal,
+            )
+
+    def _resolve_registered_portal_student_export_ids_from_state(
+        self,
+        *,
+        keyword: str | None,
+        application_form_status: str | None,
+        recruitment_application_status: str | None,
+        show_all_background_assessed: bool,
+        advisor_names: list[str] | None,
+        principal: Principal | dict[str, Any] | None,
+    ) -> list[int]:
+        effective_advisor_names, force_empty = self._resolve_registered_portal_advisor_filter(advisor_names, principal)
+        if force_empty:
+            return []
+
+        keyword_text = str(keyword or "").strip().lower()
+        plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
+        matched_ids: list[int] = []
+
+        for student in self._list("portal_students"):
+            student_id = int(student.get("id") or 0)
+            if student_id <= 0:
+                continue
+
+            selected_advisor_name = str(student.get("selected_advisor_name") or "").strip()
+            if effective_advisor_names and selected_advisor_name not in effective_advisor_names:
+                continue
+
+            latest_application = self._get_latest_registered_portal_application_item(student_id)
+            application_status, _ = self._registered_portal_application_form_status(
+                student.get("submitted_at"),
+                str(latest_application.get("application_status") or "") if latest_application else None,
+            )
+            normalized_status = str(application_form_status or "").strip()
+            if normalized_status and application_status != normalized_status:
+                continue
+
+            normalized_recruitment_status = str(recruitment_application_status or "").strip()
+            latest_recruitment_status = str(latest_application.get("application_status") or "").strip() if latest_application else ""
+            if normalized_recruitment_status and latest_recruitment_status != normalized_recruitment_status:
+                continue
+
+            if keyword_text:
+                plan_name = plan_name_map.get(int(student.get("selected_plan_id") or 0), "")
+                candidate_no = str(latest_application.get("candidate_no") or "") if latest_application else ""
+                business_key = str(latest_application.get("business_key") or "") if latest_application else ""
+                searchable_values = [
+                    str(student.get("full_name") or ""),
+                    str(student.get("phone_number") or ""),
+                    str(student.get("email") or ""),
+                    str(student.get("id_number") or ""),
+                    plan_name,
+                    selected_advisor_name,
+                    str(student.get("selected_team_name") or ""),
+                    candidate_no,
+                    business_key,
+                ]
+                if not any(keyword_text in value.lower() for value in searchable_values if value):
+                    continue
+
+            matched_ids.append(student_id)
+
+        return matched_ids
+
+    def _resolve_advisor_screening_portal_student_export_ids(
+        self,
+        student_ids: list[int],
+        *,
+        keyword: str | None,
+        plan_id: int | None,
+        advisor_names: list[str] | None,
+        principal: Principal | dict[str, Any] | None,
+    ) -> list[int]:
+        normalized_ids: list[int] = []
+        seen_input_ids: set[int] = set()
+        for raw_id in student_ids:
+            student_id = int(raw_id)
+            if student_id <= 0 or student_id in seen_input_ids:
+                continue
+            seen_input_ids.add(student_id)
+            normalized_ids.append(student_id)
+
+        response = self.get_recruitment_applications(
             keyword=keyword,
-            application_form_status=application_form_status,
+            plan_id=plan_id,
+            status=",".join(sorted(self._ADVISOR_SCREENING_EXPORT_STATUSES)),
             advisor_names=advisor_names,
+            principal=principal,
             page=1,
-            page_size=total_hint,
+            page_size=10000,
         )
-        return [item.id for item in response.items]
+        allowed_student_ids: list[int] = []
+        seen_allowed_ids: set[int] = set()
+        for application in response.items:
+            portal_student_id = int(getattr(application, "portal_student_id", None) or 0)
+            if portal_student_id <= 0 or portal_student_id in seen_allowed_ids:
+                continue
+            seen_allowed_ids.add(portal_student_id)
+            allowed_student_ids.append(portal_student_id)
+
+        if normalized_ids:
+            allowed_set = set(allowed_student_ids)
+            return [student_id for student_id in normalized_ids if student_id in allowed_set]
+        return allowed_student_ids
 
     def _build_registered_portal_student_export_row(
         self,
@@ -647,15 +1145,27 @@ class RuntimeManagementStoreStudentsMixin:
         self,
         keyword: str | None = None,
         application_form_status: str | None = None,
+        recruitment_application_status: str | None = None,
+        show_all_background_assessed: bool = False,
         advisor_names: list[str] | None = None,
         page: int = 1,
         page_size: int = 10,
+        principal: Principal | dict[str, Any] | None = None,
     ) -> RegisteredPortalStudentListResponse:
+        effective_advisor_names, force_empty = self._resolve_registered_portal_advisor_filter(advisor_names, principal)
+        if force_empty:
+            return RegisteredPortalStudentListResponse(items=[], total=0, page=page, page_size=page_size)
+        academy_admin_background_assessment_username = self._registered_portal_background_assessment_filter_username(
+            principal,
+            show_all_background_assessed=show_all_background_assessed,
+        )
         try:
             items, total = self._postgres_store.list_registered_portal_students_page(
                 keyword=keyword,
                 application_form_status=application_form_status,
-                advisor_names=advisor_names,
+                recruitment_application_status=recruitment_application_status,
+                exclude_background_assessed_username=academy_admin_background_assessment_username,
+                advisor_names=effective_advisor_names,
                 page=page,
                 page_size=page_size,
             )
@@ -670,14 +1180,24 @@ class RuntimeManagementStoreStudentsMixin:
         student_ids: list[int],
         *,
         keyword: str | None = None,
+        plan_id: int | None = None,
         application_form_status: str | None = None,
+        recruitment_application_status: str | None = None,
+        show_all_background_assessed: bool = False,
         advisor_names: list[str] | None = None,
+        export_scope: str | None = None,
+        principal: Principal | dict[str, Any] | None = None,
     ) -> bytes:
         normalized_ids = self._resolve_registered_portal_student_export_ids(
             student_ids,
             keyword=keyword,
+            plan_id=plan_id,
             application_form_status=application_form_status,
+            recruitment_application_status=recruitment_application_status,
+            show_all_background_assessed=show_all_background_assessed,
             advisor_names=advisor_names,
+            export_scope=export_scope,
+            principal=principal,
         )
         if not normalized_ids:
             raise ValueError("当前筛选条件下无可导出的注册学生")

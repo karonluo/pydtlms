@@ -886,14 +886,362 @@ class PostgresStateStoreSyncMixin:
                     """
                     UPDATE dtlms_recruitment_applications
                     SET application_status = %s,
+                        advisor_screening_status = COALESCE(%s, advisor_screening_status),
+                        advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                        first_choice_screening_batch_id = COALESCE(%s, first_choice_screening_batch_id),
+                        second_choice_screening_batch_id = COALESCE(%s, second_choice_screening_batch_id),
+                        first_choice_screening_submitted_at = COALESCE(%s, first_choice_screening_submitted_at),
+                        second_choice_screening_submitted_at = COALESCE(%s, second_choice_screening_submitted_at),
+                        first_choice_screening_score = COALESCE(%s, first_choice_screening_score),
+                        second_choice_screening_score = COALESCE(%s, second_choice_screening_score),
+                        initial_screening_status = COALESCE(%s, initial_screening_status),
+                        initial_screening_result = COALESCE(%s, initial_screening_result),
+                        initial_screening_confirmed_at = COALESCE(%s, initial_screening_confirmed_at),
+                        initial_screening_confirmer_username = COALESCE(%s, initial_screening_confirmer_username),
+                        initial_screening_confirmer_name = COALESCE(%s, initial_screening_confirmer_name),
+                        initial_screening_notification_status = COALESCE(%s, initial_screening_notification_status),
+                        initial_screening_notification_sent_at = COALESCE(%s, initial_screening_notification_sent_at),
+                        next_stage_name = COALESCE(%s, next_stage_name),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s AND is_deleted = FALSE
                     """,
                     (
                         self._map_application_status(str(application_payload.get("application_status") or "")),
+                        application_payload.get("advisor_screening_status"),
+                        application_payload.get("advisor_screening_round"),
+                        application_payload.get("first_choice_screening_batch_id"),
+                        application_payload.get("second_choice_screening_batch_id"),
+                        application_payload.get("first_choice_screening_submitted_at"),
+                        application_payload.get("second_choice_screening_submitted_at"),
+                        application_payload.get("first_choice_screening_score"),
+                        application_payload.get("second_choice_screening_score"),
+                        application_payload.get("initial_screening_status"),
+                        application_payload.get("initial_screening_result"),
+                        application_payload.get("initial_screening_confirmed_at"),
+                        application_payload.get("initial_screening_confirmer_username"),
+                        application_payload.get("initial_screening_confirmer_name"),
+                        application_payload.get("initial_screening_notification_status"),
+                        application_payload.get("initial_screening_notification_sent_at"),
+                        application_payload.get("next_stage_name"),
                         int(application_id),
                     ),
                 )
+                self._sync_workflow_task_in_tx(cur, workflow_task_payload)
+                self._sync_operation_log_in_tx(cur, operation_log)
+            conn.commit()
+
+    def sync_recruitment_qualification_review(
+        self,
+        application_id: int,
+        review_payload: dict[str, Any],
+        application_payload: dict[str, Any],
+        workflow_task_payload: dict[str, Any],
+        operation_log: dict[str, Any] | None = None,
+        *,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_qualification_reviews (
+                        application_id, reviewer_username, review_status, review_comment, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        int(application_id),
+                        review_payload.get("reviewer_username"),
+                        review_payload.get("review_status"),
+                        review_payload.get("review_comment"),
+                        review_payload.get("reviewed_at"),
+                        review_payload.get("reviewed_at"),
+                    ),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_qualification_review_logs (
+                        application_id, reviewer_user_id, reviewer_username, reviewer_name,
+                        reviewer_role_code, action, action_label, review_comment, reviewed_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        int(application_id),
+                        review_payload.get("reviewer_user_id"),
+                        review_payload.get("reviewer_username"),
+                        review_payload.get("reviewer_name"),
+                        review_payload.get("reviewer_role_code"),
+                        review_payload.get("action"),
+                        review_payload.get("action_label"),
+                        review_payload.get("review_comment"),
+                        review_payload.get("reviewed_at"),
+                    ),
+                )
+                application_status = self._map_application_status(str(application_payload.get("application_status") or ""))
+                portal_student_id = int(application_payload.get("portal_student_id") or 0)
+                if portal_student_id <= 0:
+                    cur.execute(
+                        "SELECT portal_student_id FROM dtlms_recruitment_applications WHERE id = %s AND is_deleted = FALSE",
+                        (int(application_id),),
+                    )
+                    portal_student_row = cur.fetchone()
+                    portal_student_id = int((portal_student_row or [0])[0] or 0)
+                cur.execute(
+                    """
+                    UPDATE dtlms_recruitment_applications
+                    SET application_status = %s,
+                        advisor_screening_status = COALESCE(%s, advisor_screening_status),
+                        advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                        first_choice_screening_batch_id = COALESCE(%s, first_choice_screening_batch_id),
+                        second_choice_screening_batch_id = COALESCE(%s, second_choice_screening_batch_id),
+                        first_choice_screening_submitted_at = COALESCE(%s, first_choice_screening_submitted_at),
+                        second_choice_screening_submitted_at = COALESCE(%s, second_choice_screening_submitted_at),
+                        first_choice_screening_score = COALESCE(%s, first_choice_screening_score),
+                        second_choice_screening_score = COALESCE(%s, second_choice_screening_score),
+                        initial_screening_status = COALESCE(%s, initial_screening_status),
+                        initial_screening_result = COALESCE(%s, initial_screening_result),
+                        initial_screening_confirmed_at = COALESCE(%s, initial_screening_confirmed_at),
+                        initial_screening_confirmer_username = COALESCE(%s, initial_screening_confirmer_username),
+                        initial_screening_confirmer_name = COALESCE(%s, initial_screening_confirmer_name),
+                        initial_screening_notification_status = COALESCE(%s, initial_screening_notification_status),
+                        initial_screening_notification_sent_at = COALESCE(%s, initial_screening_notification_sent_at),
+                        next_stage_name = COALESCE(%s, next_stage_name),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    """,
+                    (
+                        application_status,
+                        application_payload.get("advisor_screening_status"),
+                        application_payload.get("advisor_screening_round"),
+                        application_payload.get("first_choice_screening_batch_id"),
+                        application_payload.get("second_choice_screening_batch_id"),
+                        application_payload.get("first_choice_screening_submitted_at"),
+                        application_payload.get("second_choice_screening_submitted_at"),
+                        application_payload.get("first_choice_screening_score"),
+                        application_payload.get("second_choice_screening_score"),
+                        application_payload.get("initial_screening_status"),
+                        application_payload.get("initial_screening_result"),
+                        application_payload.get("initial_screening_confirmed_at"),
+                        application_payload.get("initial_screening_confirmer_username"),
+                        application_payload.get("initial_screening_confirmer_name"),
+                        application_payload.get("initial_screening_notification_status"),
+                        application_payload.get("initial_screening_notification_sent_at"),
+                        application_payload.get("next_stage_name"),
+                        int(application_id),
+                    ),
+                )
+                if application_status in {"returned", "rejected"} and portal_student_id > 0:
+                    cur.execute(
+                        """
+                        UPDATE dtlms_portal_students
+                        SET submitted_at = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                        """,
+                        (portal_student_id,),
+                    )
+                self._sync_workflow_task_in_tx(cur, workflow_task_payload)
+                self._sync_operation_log_in_tx(cur, operation_log)
+            conn.commit()
+
+    def sync_advisor_screening_batch(
+        self,
+        batch_payload: dict[str, Any],
+        application_payloads: list[dict[str, Any]],
+        workflow_task_payloads: list[dict[str, Any]],
+        operation_logs: list[dict[str, Any] | None],
+        *,
+        counters: dict[str, int] | None = None,
+    ) -> int:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_advisor_screening_batches (
+                        advisor_user_id, advisor_username, advisor_name, advisor_role_code,
+                        screening_round, signature_base64, submitted_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        batch_payload.get("advisor_user_id"),
+                        batch_payload.get("advisor_username"),
+                        batch_payload.get("advisor_name"),
+                        batch_payload.get("advisor_role_code"),
+                        batch_payload.get("screening_round"),
+                        batch_payload.get("signature_base64"),
+                        batch_payload.get("submitted_at"),
+                    ),
+                )
+                batch_id = int(cur.fetchone()[0])
+
+                for application_payload, workflow_task_payload, operation_log in zip(application_payloads, workflow_task_payloads, operation_logs):
+                    screening_round = str(application_payload.get("screening_round") or batch_payload.get("screening_round") or "first_choice")
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_advisor_screening_items (
+                            batch_id, application_id, business_key, candidate_no, screening_round,
+                            advisor_score, is_passed, screening_status
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (application_id, screening_round) DO UPDATE
+                        SET batch_id = EXCLUDED.batch_id,
+                            business_key = EXCLUDED.business_key,
+                            candidate_no = EXCLUDED.candidate_no,
+                            advisor_score = EXCLUDED.advisor_score,
+                            is_passed = EXCLUDED.is_passed,
+                            screening_status = EXCLUDED.screening_status,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (
+                            batch_id,
+                            int(application_payload["id"]),
+                            application_payload.get("business_key"),
+                            application_payload.get("candidate_no") or application_payload.get("business_key"),
+                            screening_round,
+                            application_payload.get("advisor_score"),
+                            bool(application_payload.get("is_passed")),
+                            application_payload.get("advisor_screening_status") or "submitted",
+                        ),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE dtlms_recruitment_applications
+                        SET application_status = %s,
+                            advisor_screening_status = COALESCE(%s, advisor_screening_status),
+                            advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                            first_choice_screening_batch_id = COALESCE(%s, first_choice_screening_batch_id),
+                            second_choice_screening_batch_id = COALESCE(%s, second_choice_screening_batch_id),
+                            first_choice_screening_submitted_at = COALESCE(%s, first_choice_screening_submitted_at),
+                            second_choice_screening_submitted_at = COALESCE(%s, second_choice_screening_submitted_at),
+                            first_choice_screening_score = COALESCE(%s, first_choice_screening_score),
+                            second_choice_screening_score = COALESCE(%s, second_choice_screening_score),
+                            initial_screening_status = COALESCE(%s, initial_screening_status),
+                            initial_screening_result = COALESCE(%s, initial_screening_result),
+                            next_stage_name = COALESCE(%s, next_stage_name),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s AND is_deleted = FALSE
+                        """,
+                        (
+                            self._map_application_status(str(application_payload.get("application_status") or "")),
+                            application_payload.get("advisor_screening_status"),
+                            application_payload.get("advisor_screening_round"),
+                            application_payload.get("first_choice_screening_batch_id") or (batch_id if screening_round == "first_choice" else None),
+                            application_payload.get("second_choice_screening_batch_id") or (batch_id if screening_round == "second_choice" else None),
+                            application_payload.get("first_choice_screening_submitted_at"),
+                            application_payload.get("second_choice_screening_submitted_at"),
+                            application_payload.get("first_choice_screening_score"),
+                            application_payload.get("second_choice_screening_score"),
+                            application_payload.get("initial_screening_status"),
+                            application_payload.get("initial_screening_result"),
+                            application_payload.get("next_stage_name"),
+                            int(application_payload["id"]),
+                        ),
+                    )
+                    self._sync_workflow_task_in_tx(cur, workflow_task_payload)
+                    self._sync_operation_log_in_tx(cur, operation_log)
+            conn.commit()
+        return batch_id
+
+    def sync_initial_screening_confirmation(
+        self,
+        confirmation_payload: dict[str, Any],
+        application_payload: dict[str, Any],
+        workflow_task_payload: dict[str, Any],
+        notification_payloads: list[dict[str, Any]],
+        operation_log: dict[str, Any] | None = None,
+        *,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_initial_screening_confirmations (
+                        application_id, business_key, candidate_no, confirmer_user_id, confirmer_username,
+                        confirmer_name, confirmer_role_code, confirmation_result, confirmation_comment, confirmed_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (application_id) DO UPDATE
+                    SET business_key = EXCLUDED.business_key,
+                        candidate_no = EXCLUDED.candidate_no,
+                        confirmer_user_id = EXCLUDED.confirmer_user_id,
+                        confirmer_username = EXCLUDED.confirmer_username,
+                        confirmer_name = EXCLUDED.confirmer_name,
+                        confirmer_role_code = EXCLUDED.confirmer_role_code,
+                        confirmation_result = EXCLUDED.confirmation_result,
+                        confirmation_comment = EXCLUDED.confirmation_comment,
+                        confirmed_at = EXCLUDED.confirmed_at,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        int(confirmation_payload["application_id"]),
+                        confirmation_payload.get("business_key"),
+                        confirmation_payload.get("candidate_no"),
+                        confirmation_payload.get("confirmer_user_id"),
+                        confirmation_payload.get("confirmer_username"),
+                        confirmation_payload.get("confirmer_name"),
+                        confirmation_payload.get("confirmer_role_code"),
+                        confirmation_payload.get("confirmation_result"),
+                        confirmation_payload.get("confirmation_comment"),
+                        confirmation_payload.get("confirmed_at"),
+                    ),
+                )
+                cur.execute(
+                    """
+                    UPDATE dtlms_recruitment_applications
+                    SET application_status = %s,
+                        advisor_screening_status = COALESCE(%s, advisor_screening_status),
+                        advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                        initial_screening_status = COALESCE(%s, initial_screening_status),
+                        initial_screening_result = COALESCE(%s, initial_screening_result),
+                        initial_screening_confirmed_at = COALESCE(%s, initial_screening_confirmed_at),
+                        initial_screening_confirmer_username = COALESCE(%s, initial_screening_confirmer_username),
+                        initial_screening_confirmer_name = COALESCE(%s, initial_screening_confirmer_name),
+                        initial_screening_notification_status = COALESCE(%s, initial_screening_notification_status),
+                        next_stage_name = COALESCE(%s, next_stage_name),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    """,
+                    (
+                        self._map_application_status(str(application_payload.get("application_status") or "")),
+                        application_payload.get("advisor_screening_status"),
+                        application_payload.get("advisor_screening_round"),
+                        application_payload.get("initial_screening_status"),
+                        application_payload.get("initial_screening_result"),
+                        application_payload.get("initial_screening_confirmed_at"),
+                        application_payload.get("initial_screening_confirmer_username"),
+                        application_payload.get("initial_screening_confirmer_name"),
+                        application_payload.get("initial_screening_notification_status"),
+                        application_payload.get("next_stage_name"),
+                        int(application_payload["id"]),
+                    ),
+                )
+                for notification_payload in notification_payloads:
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_initial_screening_notifications (
+                            application_id, business_key, notification_channel, notification_event,
+                            notification_status, recipient_address, recipient_user_id, recipient_username,
+                            payload_json, sent_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            int(notification_payload["application_id"]),
+                            notification_payload.get("business_key"),
+                            notification_payload.get("notification_channel"),
+                            notification_payload.get("notification_event"),
+                            notification_payload.get("notification_status"),
+                            notification_payload.get("recipient_address"),
+                            notification_payload.get("recipient_user_id"),
+                            notification_payload.get("recipient_username"),
+                            self._json_payload(notification_payload.get("payload_json")) if notification_payload.get("payload_json") is not None else None,
+                            notification_payload.get("sent_at"),
+                        ),
+                    )
                 self._sync_workflow_task_in_tx(cur, workflow_task_payload)
                 self._sync_operation_log_in_tx(cur, operation_log)
             conn.commit()
@@ -1080,10 +1428,45 @@ class PostgresStateStoreSyncMixin:
                     """
                     UPDATE dtlms_recruitment_applications
                     SET application_status = %s,
+                        advisor_screening_status = COALESCE(%s, advisor_screening_status),
+                        advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                        first_choice_screening_batch_id = COALESCE(%s, first_choice_screening_batch_id),
+                        second_choice_screening_batch_id = COALESCE(%s, second_choice_screening_batch_id),
+                        first_choice_screening_submitted_at = COALESCE(%s, first_choice_screening_submitted_at),
+                        second_choice_screening_submitted_at = COALESCE(%s, second_choice_screening_submitted_at),
+                        first_choice_screening_score = COALESCE(%s, first_choice_screening_score),
+                        second_choice_screening_score = COALESCE(%s, second_choice_screening_score),
+                        initial_screening_status = COALESCE(%s, initial_screening_status),
+                        initial_screening_result = COALESCE(%s, initial_screening_result),
+                        initial_screening_confirmed_at = COALESCE(%s, initial_screening_confirmed_at),
+                        initial_screening_confirmer_username = COALESCE(%s, initial_screening_confirmer_username),
+                        initial_screening_confirmer_name = COALESCE(%s, initial_screening_confirmer_name),
+                        initial_screening_notification_status = COALESCE(%s, initial_screening_notification_status),
+                        initial_screening_notification_sent_at = COALESCE(%s, initial_screening_notification_sent_at),
+                        next_stage_name = COALESCE(%s, next_stage_name),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s AND is_deleted = FALSE
                     """,
-                    (application_status, int(application_id)),
+                    (
+                        application_status,
+                        payload.get("advisor_screening_status"),
+                        payload.get("advisor_screening_round"),
+                        payload.get("first_choice_screening_batch_id"),
+                        payload.get("second_choice_screening_batch_id"),
+                        payload.get("first_choice_screening_submitted_at"),
+                        payload.get("second_choice_screening_submitted_at"),
+                        payload.get("first_choice_screening_score"),
+                        payload.get("second_choice_screening_score"),
+                        payload.get("initial_screening_status"),
+                        payload.get("initial_screening_result"),
+                        payload.get("initial_screening_confirmed_at"),
+                        payload.get("initial_screening_confirmer_username"),
+                        payload.get("initial_screening_confirmer_name"),
+                        payload.get("initial_screening_notification_status"),
+                        payload.get("initial_screening_notification_sent_at"),
+                        payload.get("next_stage_name"),
+                        int(application_id),
+                    ),
                 )
                 if application_status in {"returned", "rejected"} and portal_student_id > 0:
                     cur.execute(
@@ -1095,6 +1478,83 @@ class PostgresStateStoreSyncMixin:
                         """,
                         (portal_student_id,),
                     )
+            conn.commit()
+
+    def rollback_recruitment_application_stage(
+        self,
+        application_payload: dict[str, Any],
+        workflow_task_payload: dict[str, Any],
+        *,
+        clear_background_assessments: bool = False,
+        clear_initial_screening_confirmation: bool = False,
+        operation_log: dict[str, Any] | None = None,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                application_status = self._map_application_status(str(application_payload.get("application_status") or ""))
+                if clear_background_assessments:
+                    cur.execute(
+                        "DELETE FROM dtlms_background_assessments WHERE application_id = %s",
+                        (int(application_payload["id"]),),
+                    )
+                if clear_initial_screening_confirmation:
+                    cur.execute(
+                        "DELETE FROM dtlms_initial_screening_confirmations WHERE application_id = %s",
+                        (int(application_payload["id"]),),
+                    )
+                    cur.execute(
+                        "DELETE FROM dtlms_initial_screening_notifications WHERE application_id = %s",
+                        (int(application_payload["id"]),),
+                    )
+                cur.execute(
+                    """
+                    UPDATE dtlms_recruitment_applications
+                    SET application_status = %s,
+                        advisor_screening_status = %s,
+                        advisor_screening_round = %s,
+                        first_choice_screening_batch_id = %s,
+                        second_choice_screening_batch_id = %s,
+                        first_choice_screening_submitted_at = %s,
+                        second_choice_screening_submitted_at = %s,
+                        first_choice_screening_score = %s,
+                        second_choice_screening_score = %s,
+                        initial_screening_status = %s,
+                        initial_screening_result = %s,
+                        initial_screening_confirmed_at = %s,
+                        initial_screening_confirmer_username = %s,
+                        initial_screening_confirmer_name = %s,
+                        initial_screening_notification_status = %s,
+                        initial_screening_notification_sent_at = %s,
+                        next_stage_name = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    """,
+                    (
+                        application_status,
+                        application_payload.get("advisor_screening_status"),
+                        application_payload.get("advisor_screening_round"),
+                        application_payload.get("first_choice_screening_batch_id"),
+                        application_payload.get("second_choice_screening_batch_id"),
+                        application_payload.get("first_choice_screening_submitted_at"),
+                        application_payload.get("second_choice_screening_submitted_at"),
+                        application_payload.get("first_choice_screening_score"),
+                        application_payload.get("second_choice_screening_score"),
+                        application_payload.get("initial_screening_status"),
+                        application_payload.get("initial_screening_result"),
+                        application_payload.get("initial_screening_confirmed_at"),
+                        application_payload.get("initial_screening_confirmer_username"),
+                        application_payload.get("initial_screening_confirmer_name"),
+                        application_payload.get("initial_screening_notification_status"),
+                        application_payload.get("initial_screening_notification_sent_at"),
+                        application_payload.get("next_stage_name"),
+                        int(application_payload["id"]),
+                    ),
+                )
+                self._sync_workflow_task_in_tx(cur, workflow_task_payload)
+                self._sync_operation_log_in_tx(cur, operation_log)
             conn.commit()
 
     def sync_portal_application_submission(

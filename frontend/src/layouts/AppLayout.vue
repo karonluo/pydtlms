@@ -55,14 +55,28 @@ const menuGroups: MenuGroup[] = [
     icon: DataAnalysis,
     items: [
       { path: '/dashboard', label: '经营总览', icon: DataAnalysis, requiredPermission: 'dashboard:read' },
-      { path: '/workflow/tasks', label: '流程待办', icon: Files, requiredPermission: 'workflow:read' },
+      { path: '/workflow/tasks', label: '流程待办', icon: Files, requiredPermission: 'workflow_center_menu:read' },
     ],
   },
   {
     key: 'recruitment',
     label: '招生管理',
     icon: Histogram,
-    items: [{ path: '/recruitment', label: '招生计划', icon: Histogram, requiredPermission: 'recruitment:read' }],
+    items: [
+      { path: '/recruitment', label: '招生计划', icon: Histogram, requiredPermission: 'recruitment_plan:read' },
+      { path: '/recruitment/registered-students', label: '注册学生', icon: UserFilled, requiredPermission: 'recruitment_registered_students:read' },
+    ],
+    sections: [
+      {
+        key: 'screening',
+        label: '初筛管理',
+        icon: Files,
+        items: [
+          { path: '/recruitment/advisor-screening', label: '导师初筛', icon: Files, requiredPermission: 'recruitment_advisor_screening:read' },
+          { path: '/recruitment/initial-screening-confirmation', label: '初筛确认', icon: Files, requiredPermission: 'recruitment_initial_screening_confirmation:read' },
+        ],
+      },
+    ],
   },
   {
     key: 'students',
@@ -70,7 +84,6 @@ const menuGroups: MenuGroup[] = [
     icon: UserFilled,
     items: [
       { path: '/students/records', label: '学生主档', icon: UserFilled, requiredPermission: 'students:read' },
-      { path: '/students/portal-registrations', label: '注册学生', icon: UserFilled, requiredPermission: 'students:read' },
       { path: '/students/centers', label: '研究中心', icon: UserFilled, requiredPermission: 'students:read' },
     ],
   },

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { Document, Download } from '@element-plus/icons-vue'
 import { computed } from 'vue'
-import { ElMessage } from 'element-plus'
 
+import AttachmentPreviewActions from '../common/AttachmentPreviewActions.vue'
 import type { RecruitApplicationRecord } from '../../api/recruitment'
 import type { WorkflowActionOption, WorkflowTaskRecord } from '../../api/workflow'
 
@@ -56,6 +55,14 @@ const applicationDetailSections: Array<{ title: string; fields: Array<{ label: s
   },
 ]
 
+const ROLE_DISPLAY_NAME_MAP: Record<string, string> = {
+  platform_admin: '平台管理员',
+  advisor: '导师',
+  AILABMGT: '书院管理员',
+  academy_admin: '书院管理员',
+  secretary: '学位秘书',
+}
+
 function hasDisplayValue(value: unknown) {
   return !(value === null || value === undefined || String(value).trim() === '')
 }
@@ -67,50 +74,22 @@ function displayDetailValue(value: unknown) {
   return String(value)
 }
 
+function displayRoleName(roleCode: unknown) {
+  const normalized = String(roleCode || '').trim()
+  if (!normalized) {
+    return '未填写'
+  }
+  return ROLE_DISPLAY_NAME_MAP[normalized] || normalized
+}
+
 function backgroundAssessmentTagType(result: string | null | undefined) {
   return String(result || '').trim() === '通过' ? 'success' : 'danger'
 }
 
-function resolveAttachmentDisplayName(url: string | null | undefined, fileName: string | null | undefined, fallbackLabel: string) {
-  const preferred = String(fileName || '').trim()
-  if (preferred) {
-    return preferred
-  }
-  const normalized = String(url || '').trim()
-  if (!normalized) {
-    return fallbackLabel
-  }
-  const lastSegment = normalized.split('/').pop() || ''
-  return decodeURIComponent(lastSegment) || fallbackLabel
-}
-
-async function triggerAttachmentDownload(url: string | null | undefined, fileName: string) {
-  if (!url) {
-    ElMessage.warning('附件地址不存在')
-    return
-  }
-  try {
-    const response = await fetch(url)
-    if (!response.ok) {
-      throw new Error('download failed')
-    }
-    const blob = await response.blob()
-    const objectUrl = window.URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = objectUrl
-    anchor.download = fileName
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    window.URL.revokeObjectURL(objectUrl)
-  } catch {
-    ElMessage.error('附件下载失败')
-  }
-}
 </script>
 
 <template>
-  <el-drawer v-model="visible" title="报名申请详情" size="760px" destroy-on-close>
+  <el-drawer v-model="visible" title="报名申请详情" size="720px" destroy-on-close>
     <template v-if="application">
       <section class="review-toolbar">
         <div class="review-toolbar__meta">
@@ -159,7 +138,7 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
               </div>
               <div class="detail-item">
                 <span class="detail-item__label">角色</span>
-                <span class="detail-item__value">{{ displayDetailValue(item.evaluator_role_code) }}</span>
+                <span class="detail-item__value">{{ displayRoleName(item.evaluator_role_code) }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-item__label">评估结果</span>
@@ -184,44 +163,37 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
         <div v-if="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment" class="detail-text-list section-spacing-top">
           <article class="detail-text-card">
             <h4>个人简历附件</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment || '#'" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人简历附件') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, resolveAttachmentDisplayName(application.personal_statement?.resume_attachment_url || application.personal_statement_attachment, application.personal_statement?.resume_attachment_name, '个人简历附件'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
+            <AttachmentPreviewActions
+              :url="application.personal_statement?.resume_attachment_url || application.personal_statement_attachment"
+              :file-name="application.personal_statement?.resume_attachment_name"
+              fallback-label="个人简历附件"
+              preview-title="个人简历附件预览"
+              stacked
+            />
           </article>
         </div>
         <div class="detail-text-list section-spacing-top">
           <article v-if="application.profile?.profile_photo_url" class="detail-text-card">
             <h4>证件照</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="application.profile.profile_photo_url" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.profile_photo_url, resolveAttachmentDisplayName(application.profile.profile_photo_url, null, '证件照'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
+            <AttachmentPreviewActions
+              :url="application.profile.profile_photo_url"
+              fallback-label="证件照"
+              preview-title="证件照预览"
+              image-alt="证件照"
+              :inline-image="true"
+              stacked
+            />
           </article>
           <article v-if="application.profile?.id_card_collage_url" class="detail-text-card">
             <h4>身份证拼图</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="application.profile.id_card_collage_url" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.profile.id_card_collage_url, resolveAttachmentDisplayName(application.profile.id_card_collage_url, null, '身份证拼图'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
+            <AttachmentPreviewActions
+              :url="application.profile.id_card_collage_url"
+              fallback-label="身份证拼图"
+              preview-title="身份证拼图预览"
+              image-alt="身份证拼图"
+              :inline-image="true"
+              stacked
+            />
           </article>
         </div>
         <div class="detail-grid section-spacing-top">
@@ -281,29 +253,11 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
               <div class="detail-item"><span class="detail-item__label">证明人电话</span><span class="detail-item__value">{{ displayDetailValue(item.verifier_phone) }}</span></div>
               <div v-if="item.transcript_attachment_url" class="detail-item detail-item--full">
                 <span class="detail-item__label">成绩单附件</span>
-                <div class="detail-attachment-actions">
-                  <a class="detail-attachment-link" :href="item.transcript_attachment_url" target="_blank" rel="noopener noreferrer">
-                    <el-icon><Document /></el-icon>
-                    <span>{{ resolveAttachmentDisplayName(item.transcript_attachment_url, item.transcript_attachment_name, '成绩单附件') }}</span>
-                  </a>
-                  <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(item.transcript_attachment_url, resolveAttachmentDisplayName(item.transcript_attachment_url, item.transcript_attachment_name, '成绩单附件'))">
-                    <el-icon><Download /></el-icon>
-                    <span>下载</span>
-                  </button>
-                </div>
+                <AttachmentPreviewActions :url="item.transcript_attachment_url" :file-name="item.transcript_attachment_name" fallback-label="成绩单附件" preview-title="成绩单附件预览" />
               </div>
               <div v-if="item.degree_certificate_attachment_url" class="detail-item detail-item--full">
                 <span class="detail-item__label">学位证附件</span>
-                <div class="detail-attachment-actions">
-                  <a class="detail-attachment-link" :href="item.degree_certificate_attachment_url" target="_blank" rel="noopener noreferrer">
-                    <el-icon><Document /></el-icon>
-                    <span>{{ resolveAttachmentDisplayName(item.degree_certificate_attachment_url, item.degree_certificate_attachment_name, '学位证附件') }}</span>
-                  </a>
-                  <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(item.degree_certificate_attachment_url, resolveAttachmentDisplayName(item.degree_certificate_attachment_url, item.degree_certificate_attachment_name, '学位证附件'))">
-                    <el-icon><Download /></el-icon>
-                    <span>下载</span>
-                  </button>
-                </div>
+                <AttachmentPreviewActions :url="item.degree_certificate_attachment_url" :file-name="item.degree_certificate_attachment_name" fallback-label="学位证附件" preview-title="学位证附件预览" />
               </div>
             </div>
           </article>
@@ -344,16 +298,7 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
               <div class="detail-item"><span class="detail-item__label">成绩</span><span class="detail-item__value">{{ displayDetailValue(item.score_text) }}</span></div>
               <div v-if="item.certificate_attachment_url" class="detail-item detail-item--full">
                 <span class="detail-item__label">英语证书附件</span>
-                <div class="detail-attachment-actions">
-                  <a class="detail-attachment-link" :href="item.certificate_attachment_url" target="_blank" rel="noopener noreferrer">
-                    <el-icon><Document /></el-icon>
-                    <span>{{ resolveAttachmentDisplayName(item.certificate_attachment_url, item.certificate_attachment_name, '英语证书附件') }}</span>
-                  </a>
-                  <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(item.certificate_attachment_url, resolveAttachmentDisplayName(item.certificate_attachment_url, item.certificate_attachment_name, '英语证书附件'))">
-                    <el-icon><Download /></el-icon>
-                    <span>下载</span>
-                  </button>
-                </div>
+                <AttachmentPreviewActions :url="item.certificate_attachment_url" :file-name="item.certificate_attachment_name" fallback-label="英语证书附件" preview-title="英语证书附件预览" />
               </div>
             </div>
           </article>
@@ -403,16 +348,7 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
               <div v-if="hasDisplayValue(item.responsibility_text)" class="detail-item detail-item--full"><span class="detail-item__label">本人贡献</span><span class="detail-item__value">{{ displayDetailValue(item.responsibility_text) }}</span></div>
               <div v-if="item.award_certificate_attachment_url" class="detail-item detail-item--full">
                 <span class="detail-item__label">成果证明附件</span>
-                <div class="detail-attachment-actions">
-                  <a class="detail-attachment-link" :href="item.award_certificate_attachment_url" target="_blank" rel="noopener noreferrer">
-                    <el-icon><Document /></el-icon>
-                    <span>{{ resolveAttachmentDisplayName(item.award_certificate_attachment_url, item.award_certificate_attachment_name, '成果证明附件') }}</span>
-                  </a>
-                  <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(item.award_certificate_attachment_url, resolveAttachmentDisplayName(item.award_certificate_attachment_url, item.award_certificate_attachment_name, '成果证明附件'))">
-                    <el-icon><Download /></el-icon>
-                    <span>下载</span>
-                  </button>
-                </div>
+                <AttachmentPreviewActions :url="item.award_certificate_attachment_url" :file-name="item.award_certificate_attachment_name" fallback-label="成果证明附件" preview-title="成果证明附件预览" />
               </div>
             </div>
           </article>
@@ -425,29 +361,23 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
         <div class="detail-text-list">
           <article v-if="application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment" class="detail-text-card">
             <h4>补充材料附件</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment || '#'" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment, application.personal_statement?.supporting_material_attachment_name || application.material_list_attachment_name, '补充材料附件') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment, resolveAttachmentDisplayName(application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment, application.personal_statement?.supporting_material_attachment_name || application.material_list_attachment_name, '补充材料附件'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
+            <AttachmentPreviewActions
+              :url="application.personal_statement?.supporting_material_attachment_url || application.material_list_attachment"
+              :file-name="application.personal_statement?.supporting_material_attachment_name || application.material_list_attachment_name"
+              fallback-label="补充材料附件"
+              preview-title="补充材料附件预览"
+              stacked
+            />
           </article>
           <article v-if="application.material_list_attachment" class="detail-text-card">
             <h4>材料清单附件</h4>
-            <div class="detail-attachment-actions detail-attachment-actions--stacked">
-              <a class="detail-attachment-link" :href="application.material_list_attachment" target="_blank" rel="noopener noreferrer">
-                <el-icon><Document /></el-icon>
-                <span>{{ resolveAttachmentDisplayName(application.material_list_attachment, application.material_list_attachment_name, '材料清单附件') }}</span>
-              </a>
-              <button type="button" class="detail-attachment-download" @click="triggerAttachmentDownload(application.material_list_attachment, resolveAttachmentDisplayName(application.material_list_attachment, application.material_list_attachment_name, '材料清单附件'))">
-                <el-icon><Download /></el-icon>
-                <span>下载</span>
-              </button>
-            </div>
+            <AttachmentPreviewActions
+              :url="application.material_list_attachment"
+              :file-name="application.material_list_attachment_name"
+              fallback-label="材料清单附件"
+              preview-title="材料清单附件预览"
+              stacked
+            />
           </article>
         </div>
       </section>
@@ -473,11 +403,11 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 .review-toolbar {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   align-items: flex-start;
-  margin-bottom: 16px;
-  padding: 14px 16px;
-  border-radius: 16px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
   background: linear-gradient(135deg, rgba(20, 78, 145, 0.08), rgba(17, 132, 107, 0.08));
 }
 
@@ -507,11 +437,11 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 }
 
 .detail-section {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .dialog-section__title {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   color: #1c3f66;
   font-size: 16px;
 }
@@ -519,7 +449,7 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .detail-item,
@@ -532,9 +462,9 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 
 .detail-item {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
 }
 
 .detail-item--full {
@@ -542,41 +472,54 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 }
 
 .detail-item__label {
+  flex: 0 0 88px;
   color: #6d8094;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .detail-item__value {
+  flex: 1 1 auto;
+  min-width: 0;
   color: #18324f;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.25;
   word-break: break-word;
+}
+
+.detail-item :deep(.attachment-preview-block) {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .detail-record-stack,
 .detail-text-list {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .detail-record-card,
 .detail-text-card {
-  padding: 14px;
+  padding: 8px;
 }
 
 .detail-record-card__header {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   color: #1b3e64;
+  font-size: 12px;
 }
 
 .detail-text-card h4 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: #173557;
 }
 
 .detail-text-card p {
   margin: 0;
   color: #24415f;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.32;
   white-space: pre-wrap;
 }
 
@@ -623,6 +566,14 @@ async function triggerAttachmentDownload(url: string | null | undefined, fileNam
 
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .detail-item {
+    align-items: flex-start;
+  }
+
+  .detail-item__label {
+    flex-basis: 76px;
   }
 }
 </style>

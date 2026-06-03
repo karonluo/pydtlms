@@ -360,16 +360,35 @@ class PostgresStateStoreCoreMixin:
                 cur.execute(
                     """
                     SELECT
-                        username,
-                        full_name,
-                        role_name,
-                        department_name,
-                        introduction,
-                        phone_number,
-                        email,
-                        theme_color
-                    FROM dtlms_user_profiles
-                    WHERE username = %s
+                        u.username,
+                        COALESCE(up.full_name, u.full_name) AS full_name,
+                        COALESCE(
+                            MAX(r.role_name) FILTER (WHERE r.role_name IS NOT NULL AND r.role_name <> ''),
+                            MAX(r.role_code) FILTER (WHERE r.role_code IS NOT NULL AND r.role_code <> ''),
+                            '未分配角色'
+                        ) AS role_name,
+                        COALESCE(up.department_name, u.department_name, '') AS department_name,
+                        up.introduction AS introduction,
+                        COALESCE(up.phone_number, u.phone_number) AS phone_number,
+                        COALESCE(up.email, u.email) AS email,
+                        COALESCE(NULLIF(up.theme_color, ''), '#0f4cbd') AS theme_color
+                    FROM dtlms_users u
+                    LEFT JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                    LEFT JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                    LEFT JOIN dtlms_user_profiles up ON up.username = u.username
+                    WHERE u.username = %s AND u.is_deleted = FALSE
+                    GROUP BY
+                        u.username,
+                        up.full_name,
+                        u.full_name,
+                        up.department_name,
+                        u.department_name,
+                        up.introduction,
+                        up.phone_number,
+                        u.phone_number,
+                        up.email,
+                        u.email,
+                        up.theme_color
                     """,
                     (str(username),),
                 )
@@ -1136,6 +1155,9 @@ class PostgresStateStoreCoreMixin:
             "plan_id": int(row.get("plan_id") or 0),
             "business_key": str(row.get("business_key") or ""),
             "portal_student_id": int(row.get("portal_student_id") or 0) or None,
+            "account_status": row.get("account_status"),
+            "selected_plan_name": row.get("selected_plan_name"),
+            "registered_at": cls._stringify_datetime(row.get("registered_at")),
             "candidate_no": row.get("candidate_no"),
             "review_round": row.get("review_round"),
             "student_name": str(row.get("student_name") or ""),
@@ -1198,6 +1220,22 @@ class PostgresStateStoreCoreMixin:
             "supplementary_profile": row.get("supplementary_profile"),
             "material_status": cls._material_status_label(row.get("material_status")),
             "application_status": cls._application_status_label(row.get("application_status")),
+            "advisor_screening_status": row.get("advisor_screening_status"),
+            "advisor_screening_round": row.get("advisor_screening_round"),
+            "first_choice_screening_batch_id": int(row.get("first_choice_screening_batch_id") or 0) or None,
+            "second_choice_screening_batch_id": int(row.get("second_choice_screening_batch_id") or 0) or None,
+            "first_choice_screening_submitted_at": cls._stringify_datetime(row.get("first_choice_screening_submitted_at")),
+            "second_choice_screening_submitted_at": cls._stringify_datetime(row.get("second_choice_screening_submitted_at")),
+            "first_choice_screening_score": float(row["first_choice_screening_score"]) if row.get("first_choice_screening_score") is not None else None,
+            "second_choice_screening_score": float(row["second_choice_screening_score"]) if row.get("second_choice_screening_score") is not None else None,
+            "initial_screening_status": row.get("initial_screening_status"),
+            "initial_screening_result": row.get("initial_screening_result"),
+            "initial_screening_confirmed_at": cls._stringify_datetime(row.get("initial_screening_confirmed_at")),
+            "initial_screening_confirmer_username": row.get("initial_screening_confirmer_username"),
+            "initial_screening_confirmer_name": row.get("initial_screening_confirmer_name"),
+            "initial_screening_notification_status": row.get("initial_screening_notification_status"),
+            "initial_screening_notification_sent_at": cls._stringify_datetime(row.get("initial_screening_notification_sent_at")),
+            "next_stage_name": row.get("next_stage_name"),
             "reviewer_name": row.get("reviewer_name"),
             "final_score": float(row["final_score"]) if row.get("final_score") is not None else None,
         }
@@ -1551,6 +1589,11 @@ class PostgresStateStoreCoreMixin:
             "报名终止": "terminated",
             "资格审核通过": "qualified",
             "待背景评估": "background_review",
+            "待导师初筛": "initial_screening",
+            "待导师初筛-第一志愿": "initial_screening_first",
+            "待导师初筛-第二志愿": "initial_screening_second",
+            "待初筛确认": "initial_screening_confirmation",
+            "入营面试": "camp_interview",
             "待中心考核": "center_assessment",
             "待中心考核-第一志愿": "center_assessment_first",
             "待中心考核-第二志愿": "center_assessment_second",
@@ -1571,6 +1614,11 @@ class PostgresStateStoreCoreMixin:
             "terminated": "报名终止",
             "qualified": "资格审核通过",
             "background_review": "待背景评估",
+            "initial_screening": "待导师初筛",
+            "initial_screening_first": "待导师初筛-第一志愿",
+            "initial_screening_second": "待导师初筛-第二志愿",
+            "initial_screening_confirmation": "待初筛确认",
+            "camp_interview": "入营面试",
             "center_assessment": "待中心考核",
             "center_assessment_first": "待中心考核-第一志愿",
             "center_assessment_second": "待中心考核-第二志愿",

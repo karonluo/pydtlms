@@ -91,12 +91,22 @@ class NotificationEmailService:
         business_key: str,
         application_status: str,
         plan_name: str | None = None,
+        review_comment: str | None = None,
     ) -> None:
         subject = f"招生申请状态更新通知：{application_status}"
         plan_line = f"招生计划：{plan_name}\n" if plan_name else ""
+        normalized_comment = str(review_comment or "").strip()
+        comment_line = ""
+        if application_status in {"驳回重填", "不录取", "报名终止"} and normalized_comment:
+            comment_line = f"原因：{normalized_comment}\n"
         guidance_map = {
             "资格审核通过": "您的申请已通过资格审核，后续请留意系统中的后续安排。\n",
-            "待中心考核": "您的申请已通过背景评估，正在等待进入导师考核环节，请留意系统、邮件或电话通知。\n",
+            "待导师初筛": "您的申请已通过背景评估，正在等待进入导师初筛环节，请留意系统、邮件或电话通知。\n",
+            "待导师初筛-第一志愿": "您的申请已通过背景评估，当前正在等待第一志愿导师完成初筛评分，系统将按 80 分阈值自动判定结果，请留意系统、邮件或电话通知。\n",
+            "待导师初筛-第二志愿": "您的申请已进入第二志愿导师初筛阶段，导师完成评分后系统将按 80 分阈值自动判定结果，请留意系统、邮件或电话通知。\n",
+            "待初筛确认": "您的导师初筛已完成，当前正在等待书院管理员完成初筛确认，请留意系统通知。\n",
+            "入营面试": "您的申请已通过初筛，已进入入营面试环节，请留意系统、邮件或电话通知。\n",
+            "待中心考核": "您的申请已通过背景评估，正在等待进入导师初筛环节，请留意系统、邮件或电话通知。\n",
             "预录取": "您的申请已进入预录取阶段，请关注后续确认通知。\n",
             "同意录取": "您的申请已确认录取，请按后续通知完成相关手续。\n",
             "驳回重填": "您的申请已被驳回重填，请登录系统补充或修改信息后重新提交。\n",
@@ -109,6 +119,7 @@ class NotificationEmailService:
             "您的招生申请状态已更新，请及时登录系统查看。\n\n"
             f"业务编号：{business_key}\n"
             f"当前状态：{application_status}\n"
+            f"{comment_line}"
             f"{guidance_line}"
             f"{plan_line}\n"
             "此邮件为系统自动发送，请勿直接回复。"
@@ -118,6 +129,34 @@ class NotificationEmailService:
             subject=subject,
             text_body=text_body,
             template_code="recruitment_status_update",
+            business_key=business_key,
+        )
+
+    def send_recruitment_stage_rollback(
+        self,
+        *,
+        student_name: str,
+        email: str,
+        business_key: str,
+        target_stage_label: str,
+        plan_name: str | None = None,
+    ) -> None:
+        subject = f"招生申请环节调整通知：已退回至{target_stage_label}"
+        plan_line = f"招生计划：{plan_name}\n" if plan_name else ""
+        text_body = (
+            f"{student_name}，您好：\n\n"
+            "您的招生申请已由平台管理员调整流程节点，请及时登录系统查看最新安排。\n\n"
+            f"业务编号：{business_key}\n"
+            f"当前退回环节：{target_stage_label}\n"
+            f"{plan_line}"
+            "如后续需补充材料、重新评审或等待下一步通知，请以系统页面、邮件或电话通知为准。\n\n"
+            "此邮件为系统自动发送，请勿直接回复。"
+        )
+        self.send_message(
+            to_email=email,
+            subject=subject,
+            text_body=text_body,
+            template_code="recruitment_stage_rollback",
             business_key=business_key,
         )
 

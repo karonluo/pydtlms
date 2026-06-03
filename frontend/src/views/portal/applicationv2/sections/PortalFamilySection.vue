@@ -28,7 +28,7 @@ defineProps<{
         <div class="section-grid">
           <label><span>与本人关系</span><select v-model="item.relation_type"><option value="">请选择</option><option v-for="relation in familyRelationOptions" :key="relation" :value="relation">{{ relation }}</option></select></label>
           <label><span>姓名</span><input v-model="item.member_name" placeholder="请输入姓名" /></label>
-          <label><span>联系电话</span><input v-model="item.contact_phone" placeholder="请输入联系电话" /></label>
+          <label><span><span class="required-mark">*</span>联系电话</span><input v-model="item.contact_phone" placeholder="请输入联系电话" /></label>
           <label><span>工作单位</span><input v-model="item.employer_name" placeholder="请输入工作单位" /></label>
           <label><span>职务</span><input v-model="item.job_title" placeholder="请输入职务" /></label>
         </div>

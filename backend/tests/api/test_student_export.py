@@ -79,6 +79,7 @@ def test_registered_portal_students_list_endpoint_accepts_multiple_advisor_names
         params={
             "keyword": "张三",
             "application_form_status": "已填写报名",
+            "recruitment_application_status": "待初筛确认",
             "advisor_names": "刘亚,何琳",
             "page": 1,
             "page_size": 10,
@@ -87,6 +88,7 @@ def test_registered_portal_students_list_endpoint_accepts_multiple_advisor_names
 
     assert response.status_code == 200
     assert captured["advisor_names"] == ["刘亚", "何琳"]
+    assert captured["recruitment_application_status"] == "待初筛确认"
 
 
 def test_create_registered_portal_student_export_job_endpoint_returns_job(monkeypatch, client: TestClient) -> None:

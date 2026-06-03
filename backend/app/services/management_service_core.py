@@ -1084,6 +1084,40 @@ class RuntimeManagementStoreCoreMixin:
     def _dict_option_values(self, dict_type: str) -> list[str]:
         return [item.value for item in self._dict_options(dict_type)]
 
+    def _registered_portal_application_status_options(self) -> list[SelectOption]:
+        allowed_statuses = [
+            "报名已提交",
+            "驳回重填",
+            "待背景评估",
+            "待导师初筛-第一志愿",
+            "待导师初筛-第二志愿",
+            "待初筛确认",
+            "入营面试",
+            "报名终止",
+        ]
+        allowed_status_set = set(allowed_statuses)
+        dict_options = [item for item in self._dict_options("recruitment_application_status") if str(item.value or "") in allowed_status_set]
+        option_map: dict[str, SelectOption] = {
+            str(item.value): item
+            for item in dict_options
+            if str(item.value or "").strip()
+        }
+        ordered_values = [str(item.value) for item in dict_options if str(item.value or "").strip()]
+
+        live_statuses = [
+            str(item.get("application_status") or "").strip()
+            for item in self._list("recruitment_applications")
+            if str(item.get("application_status") or "").strip() in allowed_status_set
+        ]
+
+        for status in [*allowed_statuses, *live_statuses]:
+            if status in option_map:
+                continue
+            option_map[status] = SelectOption(label=status, value=status)
+            ordered_values.append(status)
+
+        return [option_map[value] for value in ordered_values]
+
     def _reorder_portal_political_status_options(self, options: list[SelectOption]) -> list[SelectOption]:
         return sorted(
             options,
@@ -1184,9 +1218,10 @@ class RuntimeManagementStoreCoreMixin:
             *[item.get("intended_field") for item in self._list("recruitment_applications") if item.get("intended_field")],
         }
         graduation_schools = {item.get("graduation_school") for item in self._list("recruitment_applications") if item.get("graduation_school")}
+        advisor_values = set(self._advisor_name_values())
         reviewers = {
             *[item.get("reviewer_name") for item in self._list("recruitment_applications") if item.get("reviewer_name")],
-            *self._advisor_name_values(),
+            *advisor_values,
             *self._system_user_name_values(),
         }
         return RecruitmentOptionsResponse(
@@ -1196,13 +1231,17 @@ class RuntimeManagementStoreCoreMixin:
             material_status_options=self._dict_options("recruitment_material_status"),
             application_status_options=self._dict_options("recruitment_application_status"),
             intended_field_options=self._select_options_from_values(intended_fields),
+            advisor_options=self._select_options_from_values(advisor_values),
             reviewer_options=self._select_options_from_values(reviewers),
             graduation_school_options=self._select_options_from_values(graduation_schools),
         )
 
-    def get_student_options(self) -> StudentOptionsResponse:
+    def get_student_options(self, *, principal: Principal | dict[str, Any] | None = None) -> StudentOptionsResponse:
         advisor_options = self._advisor_select_options()
         registered_portal_advisor_filter_options = self._registered_portal_advisor_filter_options()
+        scoped_advisor_name = self._registered_portal_scope_advisor_name(principal) if hasattr(self, "_registered_portal_scope_advisor_name") else None
+        if scoped_advisor_name:
+            registered_portal_advisor_filter_options = [item for item in registered_portal_advisor_filter_options if str(item.value or "") == scoped_advisor_name]
         advisor_option_map = {item.value: item for item in advisor_options}
         centers = self.get_centers(page=1, page_size=1000).items
         political_values = {
@@ -1214,6 +1253,7 @@ class RuntimeManagementStoreCoreMixin:
             degree_options=self._dict_options("student_degree_type"),
             advisor_options=advisor_options,
             registered_portal_advisor_filter_options=registered_portal_advisor_filter_options,
+            registered_portal_application_status_options=self._registered_portal_application_status_options(),
             center_options=[SelectOption(label=item.center_name, value=item.center_name) for item in centers if item.is_enabled],
             political_status_options=self._select_options_from_values(political_values),
             center_advisor_map=[

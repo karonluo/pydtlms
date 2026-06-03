@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   clearPortalToken,
+  exchangePortalImpersonation,
   getPortalProfile,
   getPortalToken,
   loginPortalStudentByEmailCode,
@@ -19,9 +20,11 @@ import { getChinaResidentIdValidationMessage, normalizeChinaResidentIdNumber } f
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 const router = useRouter()
+const route = useRoute()
 const mode = ref<'login' | 'register' | 'reset'>('login')
 const loginMethod = ref<'password' | 'email-code'>('password')
 const submitting = ref(false)
+const impersonationLoading = ref(false)
 const agreed = ref(true)
 const emailCodeSending = ref(false)
 const emailCodeCooldownSeconds = ref(0)
@@ -631,8 +634,34 @@ async function submitReset() {
   }
 }
 
+async function consumePortalImpersonationCode() {
+  const impersonationCode = typeof route.query.impersonation_code === 'string' ? route.query.impersonation_code.trim() : ''
+  if (!impersonationCode) {
+    return false
+  }
+  impersonationLoading.value = true
+  try {
+    clearPortalToken()
+    const response = await exchangePortalImpersonation({ impersonation_code: impersonationCode })
+    setPortalToken(response.data.access_token)
+    const nextQuery = { ...route.query }
+    delete nextQuery.impersonation_code
+    await router.replace({ path: '/portal/home', query: nextQuery })
+    return true
+  } catch (error) {
+    clearPortalToken()
+    await showPortalAlert(resolveRequestError(error, '模拟学生登录失败'), '模拟失败', 'error')
+    return true
+  } finally {
+    impersonationLoading.value = false
+  }
+}
+
 onMounted(async () => {
   refreshCaptcha()
+  if (await consumePortalImpersonationCode()) {
+    return
+  }
   if (getPortalToken()) {
     try {
       await getPortalProfile()
@@ -670,6 +699,8 @@ onUnmounted(() => {
         </div>
         <strong>{{ panelTitle }}</strong>
       </div>
+
+      <div v-if="impersonationLoading" class="auth-loading-banner">正在模拟学生登录，请稍候...</div>
 
       <div v-if="mode === 'login'" class="auth-form">
         <div class="login-method-tabs">
@@ -879,6 +910,16 @@ onUnmounted(() => {
   display: grid;
   gap: 18px;
   margin-bottom: 28px;
+}
+
+.auth-loading-banner {
+  margin: -12px 0 20px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(43, 88, 214, 0.12), rgba(31, 47, 150, 0.08));
+  color: #1f2f96;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .auth-tabs {

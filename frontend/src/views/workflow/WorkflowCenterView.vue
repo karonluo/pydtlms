@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
 import { useServerPagination } from '../../composables/useServerPagination'
@@ -44,6 +44,7 @@ const editingId = ref<number | null>(null)
 const taskDetail = ref<WorkflowTaskDetailResponse | null>(null)
 const actionComment = ref('')
 const showHistory = ref(false)
+const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 
 const filters = reactive({ keyword: '', status: '', module: '' })
 const form = reactive<WorkflowTaskUpsert>({
@@ -71,6 +72,19 @@ const statCards = computed(() => [
 const taskPager = useServerPagination()
 const detailTask = computed(() => taskDetail.value?.task ?? null)
 const detailHistory = computed(() => taskDetail.value?.history ?? [])
+const showWorkflowTypeColumn = computed(() => viewportWidth.value >= 900)
+const compactWorkflowActionColumnWidth = computed(() => (viewportWidth.value < 1100 ? 180 : 220))
+const showWorkflowStatusColumn = computed(() => viewportWidth.value >= 1180)
+const showWorkflowCurrentNodeColumn = computed(() => viewportWidth.value >= 1280)
+const showWorkflowCurrentHandlerColumn = computed(() => viewportWidth.value >= 1400)
+const showWorkflowApplicantColumn = computed(() => viewportWidth.value >= 1520)
+const showWorkflowCreatedAtColumn = computed(() => viewportWidth.value >= 1640)
+const workflowDialogWidth = computed(() => (viewportWidth.value < 900 ? 'calc(100vw - 24px)' : '760px'))
+const workflowDetailDialogWidth = computed(() => (viewportWidth.value < 1280 ? 'calc(100vw - 24px)' : '1120px'))
+
+function updateViewportWidth() {
+  viewportWidth.value = window.innerWidth
+}
 
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
@@ -304,7 +318,13 @@ function moreActionsForRow(row: WorkflowTaskRecord): TableRowAction<WorkflowTask
 }
 
 onMounted(() => {
+  updateViewportWidth()
+  window.addEventListener('resize', updateViewportWidth)
   void loadData()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportWidth)
 })
 </script>
 
@@ -360,15 +380,15 @@ onMounted(() => {
       </div>
 
       <el-table :data="tasks" stripe border v-loading="loading">
-        <el-table-column prop="workflow_name" label="待办类型" width="150" />
-        <el-table-column prop="business_key" label="业务编号" width="190" />
+        <el-table-column v-if="showWorkflowTypeColumn" prop="workflow_name" label="待办类型" width="140" />
+        <el-table-column prop="business_key" label="业务编号" width="160" />
         <el-table-column prop="title" label="任务标题" min-width="220" />
-        <el-table-column prop="status" label="当前状态" width="100" />
-          <el-table-column prop="current_node" label="当前节点" width="120" />
-        <el-table-column prop="current_handler" label="审批人" width="110" />
-        <el-table-column prop="applicant_name" label="提交人" width="110" />
-        <el-table-column prop="created_at" label="提交时间" width="160" />
-        <el-table-column label="操作" width="220" align="left">
+        <el-table-column v-if="showWorkflowStatusColumn" prop="status" label="当前状态" width="100" />
+        <el-table-column v-if="showWorkflowCurrentNodeColumn" prop="current_node" label="当前节点" width="120" />
+        <el-table-column v-if="showWorkflowCurrentHandlerColumn" prop="current_handler" label="审批人" width="110" />
+        <el-table-column v-if="showWorkflowApplicantColumn" prop="applicant_name" label="提交人" width="110" />
+        <el-table-column v-if="showWorkflowCreatedAtColumn" prop="created_at" label="提交时间" width="160" />
+        <el-table-column label="操作" :width="compactWorkflowActionColumnWidth" align="left">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="mainActionsForRow(scope.row)" :more-actions="moreActionsForRow(scope.row)" />
           </template>
@@ -388,7 +408,7 @@ onMounted(() => {
       </div>
     </article>
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增审批任务' : '编辑审批任务'" width="760px">
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增审批任务' : '编辑审批任务'" :width="workflowDialogWidth">
       <el-form label-width="100px" class="dialog-grid">
         <el-form-item label="流程名称">
           <el-select v-model="form.workflow_name" filterable allow-create default-first-option placeholder="请选择流程名称">
@@ -437,7 +457,7 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="审批详情" width="1120px" class="workflow-detail-dialog" @closed="showHistory = false">
+    <el-dialog v-model="detailVisible" title="审批详情" :width="workflowDetailDialogWidth" class="workflow-detail-dialog" @closed="showHistory = false">
       <div v-loading="detailLoading">
         <template v-if="detailTask">
           <div class="detail-toolbar">
@@ -584,6 +604,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: start;
   gap: 12px;
+  min-width: 0;
   margin-bottom: 12px;
 }
 
@@ -628,6 +649,15 @@ onMounted(() => {
   margin-top: 10px;
 }
 
+.filter-form :deep(.el-form-item) {
+  max-width: 100%;
+}
+
+.filter-form :deep(.el-input),
+.filter-form :deep(.el-select) {
+  max-width: 100%;
+}
+
 .dialog-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -643,19 +673,29 @@ onMounted(() => {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+  min-width: 0;
   margin-bottom: 16px;
+}
+
+.detail-toolbar > div:first-child {
+  min-width: 0;
 }
 
 .detail-toolbar__actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .detail-subtitle {
   margin: 6px 0 0;
   color: #7d91ad;
   font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .detail-layout {
@@ -741,6 +781,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   flex-shrink: 0;
 }
 
@@ -810,6 +851,7 @@ onMounted(() => {
   margin: 4px 0 0;
   color: #69809c;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .history-arrow {
@@ -821,6 +863,12 @@ onMounted(() => {
   .stat-grid,
   .dialog-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-card__header,
+  .filter-panel__header {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .detail-toolbar {
@@ -838,6 +886,15 @@ onMounted(() => {
     width: min(92vw, 340px);
     height: 100vh;
     border-radius: 0;
+  }
+
+  .filter-form :deep(.el-form-item) {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .filter-form :deep(.el-form-item__content) {
+    width: 100%;
   }
 }
 </style>

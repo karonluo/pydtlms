@@ -86,8 +86,12 @@ class RegisteredPortalStudentListResponse(PaginationResponseBase):
 class RegisteredPortalStudentExportRequest(BaseModel):
     ids: list[int] = Field(default_factory=list)
     keyword: str | None = None
+    plan_id: int | None = None
     application_form_status: str | None = None
+    recruitment_application_status: str | None = None
+    show_all_background_assessed: bool = False
     advisor_names: list[str] = Field(default_factory=list)
+    export_scope: str | None = None
 
 
 class RegisteredPortalStudentExportJobRecord(BaseModel):
@@ -118,6 +122,11 @@ class RegisteredPortalStudentEmailRequest(BaseModel):
     content: str
 
 
+class RegisteredPortalStudentRollbackStageRequest(BaseModel):
+    target_stage: str
+    comment: str | None = None
+
+
 class RegisteredPortalStudentActionResponse(BaseModel):
     message: str
     account_status: str | None = None
@@ -135,6 +144,7 @@ class StudentOptionsResponse(BaseModel):
     degree_options: list[SelectOption]
     advisor_options: list[SelectOption]
     registered_portal_advisor_filter_options: list[SelectOption] = Field(default_factory=list)
+    registered_portal_application_status_options: list[SelectOption] = Field(default_factory=list)
     center_options: list[SelectOption]
     political_status_options: list[SelectOption] = Field(default_factory=list)
     center_advisor_map: list[CenterAdvisorMapItem] = Field(default_factory=list)
