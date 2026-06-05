@@ -244,6 +244,7 @@ def test_list_registered_portal_students_page_returns_application_identifiers(mo
                 "phone_number": "13800001111",
                 "email": "zhangsan@example.com",
                 "id_number": "32000019990101123X",
+                "candidate_no": "SH20260420",
                 "account_status": "启用",
                 "selected_plan_name": "2026博士招生",
                 "selected_team_name": "智能制造联合团队",
@@ -267,7 +268,9 @@ def test_list_registered_portal_students_page_returns_application_identifiers(mo
     assert total == 1
     assert items[0]["recruitment_application_id"] == 15
     assert items[0]["recruitment_application_business_key"] == "RECRUIT-20260420-0015"
+    assert items[0]["candidate_no"] == "SH20260420"
     assert items[0]["application_form_status"] == "已填写报名"
+    assert "ps.candidate_no" in cursor.executed[1][0]
 
 
 def test_list_registered_portal_students_page_marks_returned_forms(monkeypatch) -> None:
@@ -402,7 +405,8 @@ def test_sync_recruitment_application_status_falls_back_to_db_portal_student_id(
         "SELECT portal_student_id FROM dtlms_recruitment_applications WHERE id = %s AND is_deleted = FALSE",
         (15,),
     )
-    assert cursor.executed[1][1] == ("returned", 15)
+    assert cursor.executed[1][1][0] == "returned"
+    assert cursor.executed[1][1][-1] == 15
     assert cursor.executed[2][1] == (7,)
 
 
@@ -504,6 +508,78 @@ def test_get_portal_student_detail_hides_submitted_at_for_rejected_application(m
     assert item is not None
     assert item["submitted_at"] is None
     assert item["application_draft"]["submitted_at"] is None
+
+
+def test_dashboard_advisor_choice_queries_prefer_selected_plan_application(monkeypatch) -> None:
+    store = PostgresStateStore()
+
+    distribution_cursor = FakeCursor(fetchall_results=[[]])
+    distribution_connection = FakeConnection(distribution_cursor)
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: distribution_connection)
+
+    store.list_dashboard_recruitment_advisor_choice_distribution()
+    distribution_sql = distribution_cursor.executed[0][0]
+    assert "dtlms_portal_application_preferences" in distribution_sql
+    assert "jsonb_array_elements" not in distribution_sql
+    assert "latest_application" not in distribution_sql
+
+    students_cursor = FakeCursor(fetchall_results=[[]])
+    students_connection = FakeConnection(students_cursor)
+    monkeypatch.setattr(store, "_connect", lambda database_name: students_connection)
+
+    store.list_dashboard_recruitment_advisor_choice_students(choice_round="first_choice", advisor_name="周伯文")
+    students_sql = students_cursor.executed[0][0]
+    assert "dtlms_portal_application_preferences" in students_sql
+    assert "jsonb_array_elements" not in students_sql
+    assert "latest_application" not in students_sql
+
+
+def test_dashboard_advisor_choice_students_keeps_rows_without_application_id(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchall_results=[
+            [
+                {
+                    "recruitment_application_id": 0,
+                    "student_name": "张三",
+                    "choice_round": "first_choice",
+                    "advisor_name": "周伯文",
+                    "school_name": "上海交通大学",
+                    "candidate_no": "SH20260001",
+                    "registered_at": "2026-06-01 10:00:00",
+                    "phone_number": "13800001111",
+                    "email": "zhangsan@example.com",
+                }
+            ]
+        ]
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    items = store.list_dashboard_recruitment_advisor_choice_students(choice_round="first_choice", advisor_name="周伯文")
+
+    assert len(items) == 1
+    assert items[0]["recruitment_application_id"] == 0
+    assert items[0]["student_name"] == "张三"
+
+
+def test_dashboard_advisor_choice_students_does_not_reference_portal_candidate_column(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchall_results=[[]])
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    store.list_dashboard_recruitment_advisor_choice_students(choice_round="first_choice", advisor_name="周伯文")
+
+    students_sql = cursor.executed[0][0]
+    assert "ps.candidate_no" not in students_sql
+    assert "jsonb_array_elements" not in students_sql
+    assert "dtlms_portal_application_preferences" in students_sql
 
 
 def test_get_portal_student_detail_prefers_saved_draft_over_existing_application(monkeypatch) -> None:
@@ -650,7 +726,8 @@ def test_sync_recruitment_application_status_updates_relational_status(monkeypat
     assert "SELECT portal_student_id FROM dtlms_recruitment_applications" in lookup_sql
     assert lookup_params == (15,)
     assert "UPDATE dtlms_recruitment_applications" in update_sql
-    assert update_params == ("returned", 15)
+    assert update_params[0] == "returned"
+    assert update_params[-1] == 15
 
 
 def test_sync_recruitment_application_status_clears_portal_submission_for_resubmittable_status(monkeypatch) -> None:
@@ -675,7 +752,8 @@ def test_sync_recruitment_application_status_clears_portal_submission_for_resubm
     update_sql, update_params = cursor.executed[0]
     portal_update_sql, portal_update_params = cursor.executed[1]
     assert "UPDATE dtlms_recruitment_applications" in update_sql
-    assert update_params == ("rejected", 15)
+    assert update_params[0] == "rejected"
+    assert update_params[-1] == 15
     assert "UPDATE dtlms_portal_students" in portal_update_sql
     assert portal_update_params == (7,)
 
@@ -716,9 +794,9 @@ def test_sync_portal_student_persists_application_draft_json(monkeypatch) -> Non
     )
 
     insert_sql, insert_params = cursor.executed[0]
-    assert "application_draft" in insert_sql
-    assert '"source_channel": "其他"' in insert_params[31]
-    assert '"source_channel_other": "老师宣讲"' in insert_params[31]
+    assert "application_draft" not in insert_sql
+    assert "candidate_no" not in insert_sql
+    assert len(insert_params) == 36
 
 
 def test_get_recruitment_application_detail_returns_full_portal_v2_sections(monkeypatch) -> None:
@@ -1009,8 +1087,8 @@ def test_seed_portal_students_persists_application_draft_payload() -> None:
 
     insert_sql, params = next((sql, params) for sql, params in cursor.executed if "INSERT INTO dtlms_portal_students" in sql)
 
-    assert "application_draft" in insert_sql
-    assert any(isinstance(item, str) and '"selected_plan_id": 3' in item for item in params)
+    assert "application_draft" not in insert_sql
+    assert len(params) == 34
 
 
 def test_seed_recruitment_normalizes_academic_year_range_for_plan_dates() -> None:

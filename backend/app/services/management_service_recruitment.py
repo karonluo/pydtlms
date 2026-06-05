@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from app.schemas.portal import PortalApplicationDeclarationData, PortalPersonalStatementData
+from app.schemas.dashboard import (
+    DashboardRecruitmentAdvisorChoiceDistributionResponse,
+    DashboardUndergraduateSchoolStudentItem,
+    DashboardUndergraduateSchoolStudentListResponse,
+)
 from app.schemas.recruitment import RecruitApplicationRecord, RecruitPortalApplicationDetail
 
 from .management_service_shared import *
@@ -373,6 +378,58 @@ class RuntimeManagementStoreRecruitmentMixin:
             logger.warning("Query dashboard undergraduate school student list from PostgreSQL failed in database-only mode: %s", exc)
             raise DatabaseUnavailableError("本科院校报名学生清单当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
 
+    def get_dashboard_recruitment_advisor_choice_distribution(self) -> DashboardRecruitmentAdvisorChoiceDistributionResponse:
+        try:
+            payload = self._postgres_store.list_dashboard_recruitment_advisor_choice_distribution()
+            return DashboardRecruitmentAdvisorChoiceDistributionResponse(
+                choices=[
+                    {
+                        "choice_round": str(choice.get("choice_round") or ""),
+                        "choice_name": str(choice.get("choice_name") or ""),
+                        "total": int(choice.get("total") or 0),
+                        "items": [
+                            {
+                                "advisor_name": str(item.get("advisor_name") or ""),
+                                "student_count": int(item.get("student_count") or 0),
+                                "percentage": float(item.get("percentage") or 0),
+                            }
+                            for item in choice.get("items", [])
+                        ],
+                    }
+                    for choice in payload.get("choices", [])
+                ],
+            )
+        except Exception as exc:
+            logger.warning("Query dashboard advisor choice distribution from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("报名导师志愿分布当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+
+    def get_dashboard_recruitment_advisor_choice_students(
+        self,
+        *,
+        choice_round: str,
+        advisor_name: str | None = None,
+        bucket: str | None = None,
+    ) -> DashboardUndergraduateSchoolStudentListResponse:
+        try:
+            items = self._postgres_store.list_dashboard_recruitment_advisor_choice_students(
+                choice_round=choice_round,
+                advisor_name=advisor_name,
+                bucket=bucket,
+            )
+            choice_name = "第一志愿导师" if choice_round == "first_choice" else "第二志愿导师"
+            if str(bucket or "").strip().lower() == "other":
+                display_name = f"{choice_name}其他导师"
+            else:
+                display_name = f"{choice_name} - {str(advisor_name or '').strip()}"
+            return DashboardUndergraduateSchoolStudentListResponse(
+                school_name=display_name,
+                total=len(items),
+                items=[DashboardUndergraduateSchoolStudentItem(**item) for item in items],
+            )
+        except Exception as exc:
+            logger.warning("Query dashboard advisor choice student list from PostgreSQL failed in database-only mode: %s", exc)
+            raise DatabaseUnavailableError("报名导师志愿学生清单当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+
     def create_recruitment_application(self, payload: RecruitApplicationUpsert, principal: Any | None = None) -> RecruitApplicationRecord:
         with self._lock:
             operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
@@ -482,17 +539,26 @@ class RuntimeManagementStoreRecruitmentMixin:
         advisor_names: list[str] | None = None,
         principal: Principal | Any | None = None,
     ) -> bytes:
-        records = self.get_recruitment_applications(
+        principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": [], "permissions": []})
+        role_codes = {str(item) for item in principal_summary["roles"] if str(item).strip()}
+        advisor_name = None
+        normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
+        if "advisor" in role_codes and not role_codes.intersection({"platform_admin", "AILABMGT", "academy_admin"}):
+            advisor_name = str(principal_summary.get("full_name") or "").strip() or None
+            if normalized_advisor_names and advisor_name not in normalized_advisor_names:
+                return build_recruitment_template([])
+            normalized_advisor_names = [advisor_name] if advisor_name else []
+        items, _ = self._postgres_store.list_recruitment_applications_page(
             keyword=keyword,
             plan_id=plan_id,
             status=status,
             portal_student_only=portal_student_only,
-            advisor_names=advisor_names,
-            principal=principal,
+            advisor_name=advisor_name,
+            advisor_names=normalized_advisor_names or None,
             page=1,
             page_size=10000,
-        ).items
-        return build_recruitment_template([record.model_dump() for record in records])
+        )
+        return build_recruitment_template(items)
 
     def export_recruitment_application_blank_template(self) -> bytes:
         return build_recruitment_template([])

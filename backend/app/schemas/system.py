@@ -20,6 +20,29 @@ class RoleRecord(BaseModel):
     user_count: int = 0
 
 
+class RoleDeletionUserRecord(BaseModel):
+    id: int
+    username: str
+    full_name: str
+    role_count: int
+    fallback_role_code: str | None = None
+    fallback_role_name: str | None = None
+    can_be_unbound: bool
+
+
+class RoleDeletionPreviewResponse(BaseModel):
+    id: int
+    role_code: str
+    role_name: str
+    scope_name: str
+    assigned_user_count: int
+    blocking_user_count: int
+    can_force_delete: bool
+    assigned_users: list[RoleDeletionUserRecord] = Field(default_factory=list)
+    blocking_users: list[RoleDeletionUserRecord] = Field(default_factory=list)
+    message: str
+
+
 class RoleUpsert(BaseModel):
     role_code: str
     role_name: str

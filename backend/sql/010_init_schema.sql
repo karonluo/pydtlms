@@ -272,12 +272,14 @@ CREATE TABLE IF NOT EXISTS dtlms_recruitment_plans (
     CHECK (end_date >= start_date)
 );
 
+-- 注册学生主表：所有学生基础事实优先落在这里，其他表只做申请、历史或扩展信息关联。
 CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     id BIGSERIAL PRIMARY KEY,
     full_name VARCHAR(128) NOT NULL,
     phone_number VARCHAR(32) NOT NULL UNIQUE,
     email VARCHAR(128) NOT NULL UNIQUE,
     id_number VARCHAR(64) NOT NULL UNIQUE,
+    candidate_no VARCHAR(64),
     account_status VARCHAR(32) NOT NULL DEFAULT '启用',
     password_hash VARCHAR(255),
     gender VARCHAR(16),
@@ -304,11 +306,27 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     selected_team_name VARCHAR(128),
     selected_advisor_name VARCHAR(128),
     self_evaluation TEXT,
-    application_draft JSONB,
     submitted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE OR REPLACE FUNCTION dtlms_portal_students_candidate_no_immutable()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF COALESCE(OLD.candidate_no, '') <> ''
+       AND COALESCE(NEW.candidate_no, '') IS DISTINCT FROM OLD.candidate_no THEN
+        RAISE EXCEPTION 'candidate_no is immutable once assigned for dtlms_portal_students id=%', OLD.id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_dtlms_portal_students_candidate_no_immutable ON dtlms_portal_students;
+CREATE TRIGGER trg_dtlms_portal_students_candidate_no_immutable
+BEFORE UPDATE OF candidate_no ON dtlms_portal_students
+FOR EACH ROW
+EXECUTE FUNCTION dtlms_portal_students_candidate_no_immutable();
 
 CREATE TABLE IF NOT EXISTS dtlms_portal_student_profiles (
     portal_student_id BIGINT PRIMARY KEY REFERENCES dtlms_portal_students(id) ON DELETE CASCADE,
@@ -340,6 +358,7 @@ CREATE TABLE IF NOT EXISTS dtlms_research_fields (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 报名申请表：注册学生的申请历史记录，通过 portal_student_id 关联注册学生主表。
 CREATE TABLE IF NOT EXISTS dtlms_recruitment_applications (
     id BIGSERIAL PRIMARY KEY,
     plan_id BIGINT NOT NULL REFERENCES dtlms_recruitment_plans(id),
@@ -423,7 +442,6 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_preferences (
     preference_order INTEGER NOT NULL,
     research_center_name VARCHAR(128),
     advisor_name VARCHAR(128),
-    is_optional BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_portal_application_preferences_order UNIQUE (application_id, preference_order),
@@ -883,3 +901,30 @@ CREATE INDEX IF NOT EXISTS idx_sync_logs_source_target ON dtlms_data_sync_logs(s
 CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_status_time ON dtlms_notification_delivery_logs(send_status, created_at);
 CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_channel_time ON dtlms_notification_delivery_logs(channel, created_at);
 CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_recipient ON dtlms_notification_delivery_logs(recipient);
+
+CREATE TABLE IF NOT EXISTS dtlms_news_articles (
+    id BIGSERIAL PRIMARY KEY,
+    news_code VARCHAR(64) NOT NULL UNIQUE,
+    news_title VARCHAR(255) NOT NULL,
+    news_content TEXT NOT NULL,
+    news_type VARCHAR(100) NOT NULL,
+    publisher_user_id BIGINT,
+    publisher_username VARCHAR(64),
+    publisher_name VARCHAR(128),
+    reviewer_user_id BIGINT,
+    reviewer_username VARCHAR(64),
+    reviewer_name VARCHAR(128),
+    published_at TIMESTAMPTZ,
+    status VARCHAR(32) NOT NULL DEFAULT '草稿',
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_dtlms_news_articles_status CHECK (status IN ('草稿', '待发布', '已发布', '已下线')),
+    CONSTRAINT chk_dtlms_news_articles_type CHECK (news_type IN ('学生门户通知消息', '学生门户新闻信息'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_dtlms_news_articles_status_published ON dtlms_news_articles(status, published_at DESC, display_order DESC, id DESC) WHERE is_deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_dtlms_news_articles_type_status ON dtlms_news_articles(news_type, status, published_at DESC, id DESC) WHERE is_deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_dtlms_news_articles_deleted_order ON dtlms_news_articles(is_deleted, display_order DESC, id DESC);

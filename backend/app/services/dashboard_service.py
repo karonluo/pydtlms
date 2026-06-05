@@ -1,8 +1,10 @@
 from typing import Any
 
 from app.schemas.auth import UserProfile, UserProfileUpdate
+from app.schemas.common import SelectOption
 from app.schemas.dashboard import (
     DashboardOverview,
+    DashboardRecruitmentAdvisorChoiceDistributionResponse,
     DashboardUndergraduateSchoolGroupDistributionResponse,
     DashboardUndergraduateSchoolRankingResponse,
     DashboardUndergraduateSchoolStudentListResponse,
@@ -61,6 +63,7 @@ from app.schemas.system import (
     SystemUserListResponse,
     SystemUserUpsert,
 )
+from app.schemas.news import NewsArticleListResponse, NewsArticleRecord, NewsArticleUpsert
 from app.schemas.training import (
     DegreeOptionsResponse,
     DegreeStats,
@@ -107,6 +110,23 @@ def get_dashboard_undergraduate_school_group_students(
 
 def get_dashboard_undergraduate_school_students(school_name: str) -> DashboardUndergraduateSchoolStudentListResponse:
     return store.get_dashboard_undergraduate_school_students(school_name)
+
+
+def get_dashboard_recruitment_advisor_choice_distribution() -> DashboardRecruitmentAdvisorChoiceDistributionResponse:
+    return store.get_dashboard_recruitment_advisor_choice_distribution()
+
+
+def get_dashboard_recruitment_advisor_choice_students(
+    *,
+    choice_round: str,
+    advisor_name: str | None = None,
+    bucket: str | None = None,
+) -> DashboardUndergraduateSchoolStudentListResponse:
+    return store.get_dashboard_recruitment_advisor_choice_students(
+        choice_round=choice_round,
+        advisor_name=advisor_name,
+        bucket=bucket,
+    )
 
 
 def get_recruitment_workbench() -> RecruitWorkbench:
@@ -231,6 +251,7 @@ def get_center_list(
     keyword: str | None = None,
     is_enabled: bool | None = None,
     director_id: int | None = None,
+    principal=None,
     page: int = 1,
     page_size: int = 10,
 ) -> CenterListResponse:
@@ -238,6 +259,7 @@ def get_center_list(
         keyword=keyword,
         is_enabled=is_enabled,
         director_id=director_id,
+        principal=principal,
         page=page,
         page_size=page_size,
     )
@@ -614,8 +636,12 @@ def update_role(role_id: int, payload: RoleUpsert):
     return store.update_role(role_id, payload)
 
 
-def delete_role(role_id: int) -> None:
-    store.delete_role(role_id)
+def delete_role(role_id: int, force_unbind: bool = False) -> None:
+    store.delete_role(role_id, force_unbind=force_unbind)
+
+
+def get_role_deletion_preview(role_id: int):
+    return store.get_role_deletion_preview(role_id)
 
 
 def delete_roles(role_ids: list[int]) -> BulkActionResponse:
@@ -775,6 +801,46 @@ def update_dict_data(dict_data_id: int, payload: DictDataUpsert):
 
 def delete_dict_data(dict_data_id: int) -> None:
     store.delete_dict_data(dict_data_id)
+
+
+def get_news_type_options() -> list[SelectOption]:
+    return [SelectOption(**item) for item in store.list_dict_options("news_type")]
+
+
+def get_news_article_list(keyword: str | None = None, news_type: str | None = None, status: str | None = None, page: int = 1, page_size: int = 10) -> NewsArticleListResponse:
+    return store.get_news_articles(keyword=keyword, news_type=news_type, status=status, page=page, page_size=page_size)
+
+
+def get_news_article_detail(news_article_id: int) -> NewsArticleRecord:
+    return store.get_news_article(news_article_id)
+
+
+def create_news_article(payload: NewsArticleUpsert, principal: Principal | None = None) -> NewsArticleRecord:
+    return store.create_news_article(payload, principal=principal)
+
+
+def update_news_article(news_article_id: int, payload: NewsArticleUpsert, principal: Principal | None = None) -> NewsArticleRecord:
+    return store.update_news_article(news_article_id, payload, principal=principal)
+
+
+def publish_news_article(news_article_id: int, principal: Principal | None = None) -> NewsArticleRecord:
+    return store.publish_news_article(news_article_id, principal=principal)
+
+
+def offline_news_article(news_article_id: int) -> NewsArticleRecord:
+    return store.offline_news_article(news_article_id)
+
+
+def batch_publish_news_articles(news_article_ids: list[int], principal: Principal | None = None) -> BulkActionResponse:
+    return store.batch_publish_news_articles(news_article_ids, principal=principal)
+
+
+def batch_offline_news_articles(news_article_ids: list[int]) -> BulkActionResponse:
+    return store.batch_offline_news_articles(news_article_ids)
+
+
+def delete_news_article(news_article_id: int) -> None:
+    store.delete_news_article(news_article_id)
 
 
 def get_system_options() -> SystemOptionsResponse:

@@ -78,25 +78,55 @@ class PostgresStateStoreSyncMixin:
                 )
                 permission_map = self._fetch_permission_key_map(cur)
                 cur.execute("DELETE FROM dtlms_role_permissions WHERE role_id = %s", (int(role_payload["id"]),))
+                permission_rows: list[tuple[int, int]] = []
                 for permission_code in role_payload.get("permissions", []):
                     permission_id = permission_map.get(str(permission_code))
                     if not permission_id:
                         continue
-                    cur.execute(
-                        """
+                    permission_rows.append((int(role_payload["id"]), int(permission_id)))
+                if permission_rows:
+                    placeholders = ", ".join(["(%s, %s)"] * len(permission_rows))
+                    parameters: list[Any] = []
+                    for role_id, permission_id in permission_rows:
+                        parameters.extend([role_id, permission_id])
+                    self._execute_dynamic(
+                        cur,
+                        f"""
                         INSERT INTO dtlms_role_permissions (role_id, permission_id)
-                        VALUES (%s, %s)
+                        VALUES {placeholders}
                         ON CONFLICT (role_id, permission_id) DO NOTHING
                         """,
-                        (int(role_payload["id"]), int(permission_id)),
+                        parameters,
                     )
                 self._sync_operation_log_in_tx(cur, operation_log)
             conn.commit()
 
-    def delete_role(self, role_id: int) -> None:
+    def delete_role(self, role_id: int, force_unbind: bool = False) -> None:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
             with conn.cursor() as cur:
+                if force_unbind:
+                    cur.execute(
+                        """
+                        SELECT u.id
+                        FROM dtlms_users u
+                        JOIN dtlms_user_roles ur_target ON ur_target.user_id = u.id AND ur_target.role_id = %s
+                        LEFT JOIN LATERAL (
+                            SELECT 1 AS has_other_role
+                            FROM dtlms_user_roles ur_other
+                            JOIN dtlms_roles r_other ON r_other.id = ur_other.role_id AND r_other.is_deleted = FALSE
+                            WHERE ur_other.user_id = u.id AND ur_other.role_id <> %s
+                            LIMIT 1
+                        ) other_role ON TRUE
+                        WHERE u.is_deleted = FALSE AND other_role.has_other_role IS NULL
+                        LIMIT 1
+                        """,
+                        (int(role_id), int(role_id)),
+                    )
+                    blocking_user = cur.fetchone()
+                    if blocking_user is not None:
+                        raise ValueError("该角色仍被至少 1 位仅绑定此角色的用户使用，请先重新配置这些用户的角色后再删除")
+                    cur.execute("DELETE FROM dtlms_user_roles WHERE role_id = %s", (int(role_id),))
                 cur.execute("UPDATE dtlms_roles SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (int(role_id),))
                 cur.execute("DELETE FROM dtlms_role_permissions WHERE role_id = %s", (int(role_id),))
             conn.commit()

@@ -67,6 +67,31 @@ export type RoleRecord = {
 }
 
 
+export type RoleDeletionUserRecord = {
+  id: number
+  username: string
+  full_name: string
+  role_count: number
+  fallback_role_code?: string | null
+  fallback_role_name?: string | null
+  can_be_unbound: boolean
+}
+
+
+export type RoleDeletionPreviewResponse = {
+  id: number
+  role_code: string
+  role_name: string
+  scope_name: string
+  assigned_user_count: number
+  blocking_user_count: number
+  can_force_delete: boolean
+  assigned_users: RoleDeletionUserRecord[]
+  blocking_users: RoleDeletionUserRecord[]
+  message: string
+}
+
+
 export type RoleUpsert = {
   role_code: string
   role_name: string
@@ -399,8 +424,13 @@ export function updateRole(id: number, payload: RoleUpsert) {
 }
 
 
-export function deleteRole(id: number) {
-  return http.delete(`/system/roles/${id}`)
+export function getRoleDeletionPreview(id: number) {
+  return http.get<RoleDeletionPreviewResponse>(`/system/roles/${id}/deletion-preview`)
+}
+
+
+export function deleteRole(id: number, forceUnbind = false) {
+  return http.delete(`/system/roles/${id}`, { params: { force_unbind: forceUnbind } })
 }
 
 

@@ -1405,6 +1405,7 @@ def test_resolve_registered_portal_student_export_ids_scopes_explicit_ids_for_ad
         keyword=None,
         application_form_status=None,
         recruitment_application_status=None,
+        show_all_background_assessed=False,
         advisor_names=None,
         principal={"username": "liu.ya", "full_name": "刘亚", "roles": ["advisor"]},
     )
@@ -1430,12 +1431,45 @@ def test_resolve_registered_portal_student_export_ids_passes_recruitment_status_
         keyword="待导出",
         application_form_status="已填写报名",
         recruitment_application_status="待初筛确认",
+        show_all_background_assessed=False,
         advisor_names=["陈恺"],
         principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
     )
 
     assert resolved_ids == [21]
     assert captured_kwargs["recruitment_application_status"] == "待初筛确认"
+
+
+def test_resolve_registered_portal_student_export_ids_reads_all_pages(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    call_history: list[tuple[int, int]] = []
+
+    def fake_get_registered_portal_students(*, page: int, page_size: int, **kwargs):
+        call_history.append((page, page_size))
+        if page == 1:
+            return SimpleNamespace(items=[SimpleNamespace(id=21)], total=2)
+        if page == 2:
+            return SimpleNamespace(items=[SimpleNamespace(id=22)], total=2)
+        return SimpleNamespace(items=[], total=2)
+
+    monkeypatch.setattr(store, "get_registered_portal_students", fake_get_registered_portal_students)
+
+    resolved_ids = store._resolve_registered_portal_student_export_ids(
+        [],
+        keyword="待导出",
+        application_form_status="已填写报名",
+        recruitment_application_status="待初筛确认",
+        show_all_background_assessed=False,
+        advisor_names=["陈恺"],
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    assert resolved_ids == [21, 22]
+    assert [page for page, _ in call_history] == [1, 2]
+    assert len({page_size for _, page_size in call_history}) == 1
 
 
 def test_create_recruitment_plan_keeps_internal_defaults_while_returning_trimmed_record(monkeypatch) -> None:
@@ -2669,10 +2703,8 @@ def test_end_to_end_screening_flow_rejection_updates_second_choice_and_student_p
     payload = payload.model_copy(
         update={
             "preferences": [
-                payload.preferences[0].model_copy(update={"advisor_name": "刘亚", "advisor_user_id": 11, "is_optional": False}),
-                payload.preferences[0].model_copy(
-                    update={"preference_order": 2, "advisor_name": "王青", "advisor_user_id": 12, "is_optional": True}
-                ),
+                payload.preferences[0].model_copy(update={"advisor_name": "刘亚", "advisor_user_id": 11}),
+                payload.preferences[0].model_copy(update={"preference_order": 2, "advisor_name": "王青", "advisor_user_id": 12}),
             ],
             "selected_advisor_user_id": 11,
             "selected_advisor_name": "刘亚",
@@ -3653,6 +3685,19 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
     )
     store.save_portal_application_draft(draft_registration.student.id, PortalApplicationDraftUpsert.model_validate(payload_data))
 
+    runtime_student = next(item for item in store.state["portal_students"] if item["id"] == draft_registration.student.id)
+
+    def _get_portal_student_detail(_: int) -> dict:
+        return runtime_student
+
+    fake_postgres.get_portal_student_detail = _get_portal_student_detail
+
+    monkeypatch.setattr(
+        store,
+        "get_registered_portal_students",
+        lambda **kwargs: SimpleNamespace(items=[SimpleNamespace(id=draft_registration.student.id)], total=1),
+    )
+
     content = store.export_registered_portal_students([], keyword="草稿导出", application_form_status="未填写报名")
 
     workbook = load_workbook(BytesIO(content), data_only=True)
@@ -3748,8 +3793,8 @@ def test_build_registered_portal_student_export_row_does_not_truncate_repeated_g
     first_row = dict(zip(rows[0], rows[1], strict=False))
     second_row = dict(zip(rows[0], rows[2], strict=False))
 
-    assert first_row["志愿2研究中心"] == "方向二"
-    assert second_row["志愿2研究中心"] is None
+    assert first_row["志愿2导师"] == "导师乙"
+    assert second_row["志愿2导师"] is None
     assert first_row["教育经历4学校名称"] == "博士A"
     assert second_row["教育经历4学校名称"] is None
 

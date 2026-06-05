@@ -115,7 +115,6 @@ $submitBody = @{
             preference_order = 1
             research_center_name = $team.team_name
             advisor_name = $team.lead_advisor_name
-            is_optional = $false
         }
     )
     education_experiences = @(

@@ -52,9 +52,28 @@ class DashboardUndergraduateSchoolGroupDistributionResponse(BaseModel):
     groups: list[DashboardUndergraduateSchoolGroupDistribution]
 
 
+class DashboardRecruitmentAdvisorChoiceItem(BaseModel):
+    advisor_name: str
+    student_count: int
+    percentage: float
+
+
+class DashboardRecruitmentAdvisorChoiceDistribution(BaseModel):
+    choice_round: str
+    choice_name: str
+    total: int
+    items: list[DashboardRecruitmentAdvisorChoiceItem]
+
+
+class DashboardRecruitmentAdvisorChoiceDistributionResponse(BaseModel):
+    choices: list[DashboardRecruitmentAdvisorChoiceDistribution]
+
+
 class DashboardUndergraduateSchoolStudentItem(BaseModel):
     recruitment_application_id: int
     student_name: str
+    choice_round: str | None = None
+    advisor_name: str | None = None
     school_name: str | None = None
     candidate_no: str | None = None
     registered_at: str | None = None

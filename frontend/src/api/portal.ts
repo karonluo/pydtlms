@@ -231,6 +231,19 @@ export type PortalPlanRecord = {
   summary?: string | null
 }
 
+export type PortalNewsArticleRecord = {
+  id: number
+  news_code: string
+  news_title: string
+  news_content: string
+  news_type: string
+  publisher_name?: string | null
+  publisher_username?: string | null
+  published_at?: string | null
+  is_pinned: boolean
+  display_order: number
+}
+
 export type PortalProfileOptionsResponse = {
   political_status_options: SelectOption[]
   ethnic_group_options: SelectOption[]
@@ -455,6 +468,11 @@ export function getPortalProfileOptions() {
 
 export function getPortalPublicConfig() {
   return portalHttp.get<PortalPublicConfigResponse>('/portal/public-config')
+}
+
+
+export function listPortalNewsArticles() {
+  return portalHttp.get<PortalNewsArticleRecord[]>('/portal/news')
 }
 
 export function listPortalPlans() {

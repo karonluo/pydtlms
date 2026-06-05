@@ -4,12 +4,15 @@ from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
 from app.schemas.dashboard import (
     DashboardOverview,
+    DashboardRecruitmentAdvisorChoiceDistributionResponse,
+    DashboardUndergraduateSchoolStudentListResponse,
     DashboardUndergraduateSchoolGroupDistributionResponse,
     DashboardUndergraduateSchoolRankingResponse,
-    DashboardUndergraduateSchoolStudentListResponse,
 )
 from app.services.dashboard_service import (
     get_dashboard_overview,
+    get_dashboard_recruitment_advisor_choice_students,
+    get_dashboard_recruitment_advisor_choice_distribution,
     get_dashboard_undergraduate_school_group_distribution,
     get_dashboard_undergraduate_school_group_students,
     get_dashboard_undergraduate_school_rankings,
@@ -48,6 +51,23 @@ def undergraduate_school_group_students(
     principal: Principal = Depends(require_permissions("dashboard:read")),
 ) -> DashboardUndergraduateSchoolStudentListResponse:
     return get_dashboard_undergraduate_school_group_students(dict_type=dict_type, school_name=school_name, bucket=bucket)
+
+
+@router.get("/recruitment-advisor-choice-distribution", response_model=DashboardRecruitmentAdvisorChoiceDistributionResponse)
+def recruitment_advisor_choice_distribution(
+    principal: Principal = Depends(require_permissions("dashboard:read")),
+) -> DashboardRecruitmentAdvisorChoiceDistributionResponse:
+    return get_dashboard_recruitment_advisor_choice_distribution()
+
+
+@router.get("/recruitment-advisor-choice-distribution/students", response_model=DashboardUndergraduateSchoolStudentListResponse)
+def recruitment_advisor_choice_students(
+    choice_round: str,
+    advisor_name: str | None = None,
+    bucket: str | None = Query(default=None),
+    principal: Principal = Depends(require_permissions("dashboard:read")),
+) -> DashboardUndergraduateSchoolStudentListResponse:
+    return get_dashboard_recruitment_advisor_choice_students(choice_round=choice_round, advisor_name=advisor_name, bucket=bucket)
 
 
 @router.get("/undergraduate-school-rankings/students", response_model=DashboardUndergraduateSchoolStudentListResponse)

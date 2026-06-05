@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+import logging
 
 from app.core.rbac import get_current_principal
 from app.core.security import (
@@ -15,6 +16,7 @@ from app.services.management_service import store
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/token", response_model=TokenResponse)
@@ -22,7 +24,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenResponse:
     user = authenticate_system_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
-    record_user_login(form_data.username)
+    try:
+        record_user_login(form_data.username)
+    except Exception as exc:
+        logger.warning("Record login timestamp failed for %s: %s", form_data.username, exc)
     try:
         access_token, refresh_token = create_token_bundle(
             user["username"],

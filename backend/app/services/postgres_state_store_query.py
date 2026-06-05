@@ -66,6 +66,28 @@ class PostgresStateStoreQueryMixin:
             raise RuntimeError(f"Expected row for {context}")
         return row
 
+    @staticmethod
+    def _principal_field_value(principal: Any | None, field_name: str) -> Any:
+        if principal is None:
+            return None
+        if isinstance(principal, dict):
+            return principal.get(field_name)
+        return getattr(principal, field_name, None)
+
+    @classmethod
+    def _principal_role_codes(cls, principal: Any | None) -> set[str]:
+        raw_roles = cls._principal_field_value(principal, "roles") or []
+        return {str(item).strip() for item in raw_roles if str(item).strip()}
+
+    @classmethod
+    def _needs_center_scope_filter(cls, principal: Any | None) -> bool:
+        role_codes = cls._principal_role_codes(principal)
+        if not role_codes:
+            return False
+        if role_codes.intersection({"platform_admin", "AILABMGT", "academy_admin"}):
+            return False
+        return "advisor" in role_codes
+
     def get_system_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -279,6 +301,87 @@ class PostgresStateStoreQueryMixin:
                     normalized["password_hash"] = row.get("password_hash")
                     rows.append(normalized)
                 return rows
+
+    def get_role_deletion_preview(self, role_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, role_code, role_name, COALESCE(scope_name, '系统管理') AS scope_name
+                    FROM dtlms_roles
+                    WHERE id = %s AND is_deleted = FALSE
+                    LIMIT 1
+                    """,
+                    (int(role_id),),
+                )
+                role_row = cur.fetchone()
+                if role_row is None:
+                    return None
+                cur.execute(
+                    """
+                    SELECT
+                        u.id,
+                        u.username,
+                        u.full_name,
+                        role_counts.role_count,
+                        fallback.role_code AS fallback_role_code,
+                        fallback.role_name AS fallback_role_name
+                    FROM dtlms_users u
+                    JOIN dtlms_user_roles ur_target ON ur_target.user_id = u.id AND ur_target.role_id = %s
+                    LEFT JOIN LATERAL (
+                        SELECT COUNT(*) AS role_count
+                        FROM dtlms_user_roles ur_all
+                        JOIN dtlms_roles r_all ON r_all.id = ur_all.role_id AND r_all.is_deleted = FALSE
+                        WHERE ur_all.user_id = u.id
+                    ) role_counts ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT r_rem.role_code, r_rem.role_name
+                        FROM dtlms_user_roles ur_rem
+                        JOIN dtlms_roles r_rem ON r_rem.id = ur_rem.role_id AND r_rem.is_deleted = FALSE
+                        WHERE ur_rem.user_id = u.id AND ur_rem.role_id <> %s
+                        ORDER BY r_rem.id ASC
+                        LIMIT 1
+                    ) fallback ON TRUE
+                    WHERE u.is_deleted = FALSE
+                    ORDER BY u.id ASC
+                    """,
+                    (int(role_id), int(role_id)),
+                )
+                assigned_users: list[dict[str, Any]] = []
+                blocking_users: list[dict[str, Any]] = []
+                for row in cur.fetchall():
+                    role_count = int(row.get("role_count") or 0)
+                    can_be_unbound = role_count > 1 and bool(row.get("fallback_role_code"))
+                    item = {
+                        "id": int(row["id"]),
+                        "username": str(row["username"]),
+                        "full_name": str(row["full_name"]),
+                        "role_count": role_count,
+                        "fallback_role_code": row.get("fallback_role_code"),
+                        "fallback_role_name": row.get("fallback_role_name"),
+                        "can_be_unbound": can_be_unbound,
+                    }
+                    assigned_users.append(item)
+                    if not can_be_unbound:
+                        blocking_users.append(item)
+                return {
+                    "id": int(role_row["id"]),
+                    "role_code": str(role_row["role_code"]),
+                    "role_name": str(role_row["role_name"]),
+                    "scope_name": str(role_row["scope_name"]),
+                    "assigned_users": assigned_users,
+                    "blocking_users": blocking_users,
+                    "assigned_user_count": len(assigned_users),
+                    "blocking_user_count": len(blocking_users),
+                    "can_force_delete": len(blocking_users) == 0,
+                    "message": (
+                        f"该角色当前被 {len(assigned_users)} 位用户使用。"
+                        if assigned_users
+                        else "该角色当前未被任何用户使用，可直接删除。"
+                    ),
+                }
 
     def load_user_profile_state(self) -> dict[str, dict[str, Any]]:
         self.ensure_schema()
@@ -2283,6 +2386,253 @@ class PostgresStateStoreQueryMixin:
                     if int(row.get("recruitment_application_id") or 0) > 0
                 ]
 
+    def list_dashboard_recruitment_advisor_choice_distribution(self) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH latest_application AS (
+                        SELECT DISTINCT ON (ps.id)
+                            ps.id AS portal_student_id,
+                            ra.id AS recruitment_application_id,
+                            NULLIF(BTRIM(ps.selected_advisor_name), '') AS selected_advisor_name,
+                            NULLIF(BTRIM(ra.intended_advisor_name), '') AS intended_advisor_name
+                        FROM dtlms_portal_students ps
+                        JOIN dtlms_recruitment_applications ra ON ra.portal_student_id = ps.id AND ra.is_deleted = FALSE
+                        ORDER BY ps.id, COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                    ),
+                    choice_rows AS (
+                        SELECT
+                            'first_choice' AS choice_round,
+                            COALESCE(
+                                NULLIF(BTRIM(pref1.advisor_name), ''),
+                                latest_application.selected_advisor_name,
+                                latest_application.intended_advisor_name
+                            ) AS advisor_name
+                        FROM latest_application
+                        LEFT JOIN LATERAL (
+                            SELECT NULLIF(BTRIM(pref.advisor_name), '') AS advisor_name
+                            FROM dtlms_portal_application_preferences pref
+                            WHERE pref.application_id = latest_application.recruitment_application_id
+                              AND pref.preference_order = 1
+                            LIMIT 1
+                        ) pref1 ON TRUE
+                        UNION ALL
+                        SELECT
+                            'second_choice' AS choice_round,
+                            NULLIF(BTRIM(pref2.advisor_name), '') AS advisor_name
+                        FROM latest_application
+                        LEFT JOIN LATERAL (
+                            SELECT NULLIF(BTRIM(pref.advisor_name), '') AS advisor_name
+                            FROM dtlms_portal_application_preferences pref
+                            WHERE pref.application_id = latest_application.recruitment_application_id
+                              AND pref.preference_order = 2
+                            LIMIT 1
+                        ) pref2 ON TRUE
+                    ),
+                    choice_counts AS (
+                        SELECT choice_round, advisor_name, COUNT(*)::int AS student_count
+                        FROM choice_rows
+                        WHERE advisor_name IS NOT NULL AND BTRIM(advisor_name) <> ''
+                        GROUP BY choice_round, advisor_name
+                    ),
+                    ranked_counts AS (
+                        SELECT
+                            choice_round,
+                            advisor_name,
+                            student_count,
+                            ROW_NUMBER() OVER (PARTITION BY choice_round ORDER BY student_count DESC, advisor_name ASC)::int AS advisor_rank,
+                            SUM(student_count) OVER (PARTITION BY choice_round)::int AS total
+                        FROM choice_counts
+                    ),
+                    bucketed_counts AS (
+                        SELECT
+                            choice_round,
+                            CASE WHEN advisor_rank <= 10 THEN advisor_name ELSE '其他导师' END AS advisor_name,
+                            CASE WHEN advisor_rank <= 10 THEN advisor_rank ELSE 11 END AS bucket_order,
+                            SUM(student_count)::int AS student_count,
+                            MAX(total)::int AS total
+                        FROM ranked_counts
+                        GROUP BY choice_round, CASE WHEN advisor_rank <= 10 THEN advisor_name ELSE '其他导师' END, CASE WHEN advisor_rank <= 10 THEN advisor_rank ELSE 11 END
+                    )
+                    SELECT
+                        choice_round,
+                        CASE choice_round
+                            WHEN 'first_choice' THEN '第一志愿导师'
+                            WHEN 'second_choice' THEN '第二志愿导师'
+                            ELSE choice_round
+                        END AS choice_name,
+                        total,
+                        advisor_name,
+                        student_count,
+                        ROUND(student_count * 100.0 / NULLIF(total, 0), 2)::float AS percentage,
+                        bucket_order
+                    FROM bucketed_counts
+                    ORDER BY CASE choice_round WHEN 'first_choice' THEN 1 WHEN 'second_choice' THEN 2 ELSE 3 END, bucket_order ASC, advisor_name ASC
+                    """
+                )
+                choices: dict[str, dict[str, Any]] = {
+                    "first_choice": {"choice_round": "first_choice", "choice_name": "第一志愿导师", "total": 0, "items": []},
+                    "second_choice": {"choice_round": "second_choice", "choice_name": "第二志愿导师", "total": 0, "items": []},
+                }
+                for row in cur.fetchall():
+                    choice_round = str(row.get("choice_round") or "")
+                    if choice_round not in choices:
+                        continue
+                    total = int(row.get("total") or 0)
+                    student_count = int(row.get("student_count") or 0)
+                    choices[choice_round]["total"] = total
+                    choices[choice_round]["items"].append(
+                        {
+                            "advisor_name": str(row.get("advisor_name") or ""),
+                            "student_count": student_count,
+                            "percentage": float(row.get("percentage") or 0),
+                        }
+                    )
+
+                return {"choices": [choices["first_choice"], choices["second_choice"]]}
+
+    def list_dashboard_recruitment_advisor_choice_students(
+        self,
+        *,
+        choice_round: str,
+        advisor_name: str | None = None,
+        bucket: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        normalized_choice_round = str(choice_round or "").strip()
+        normalized_advisor_name = str(advisor_name or "").strip()
+        normalized_bucket = str(bucket or "").strip().lower()
+        if normalized_choice_round not in {"first_choice", "second_choice"}:
+            return []
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH latest_application AS (
+                        SELECT DISTINCT ON (ps.id)
+                            ps.id AS portal_student_id,
+                            ps.full_name AS student_name,
+                            ps.phone_number,
+                            ps.email,
+                            ps.created_at AS registered_at,
+                            ra.id AS recruitment_application_id,
+                            ra.candidate_no,
+                            NULLIF(BTRIM(ra.undergraduate_school), '') AS school_name,
+                            NULLIF(BTRIM(ps.selected_advisor_name), '') AS selected_advisor_name,
+                            NULLIF(BTRIM(ra.intended_advisor_name), '') AS intended_advisor_name,
+                            NULLIF(BTRIM(pref1.advisor_name), '') AS first_choice_advisor_name,
+                            NULLIF(BTRIM(pref2.advisor_name), '') AS second_choice_advisor_name
+                        FROM dtlms_portal_students ps
+                        JOIN dtlms_recruitment_applications ra ON ra.portal_student_id = ps.id AND ra.is_deleted = FALSE
+                        LEFT JOIN LATERAL (
+                            SELECT pref.advisor_name
+                            FROM dtlms_portal_application_preferences pref
+                            WHERE pref.application_id = ra.id
+                              AND pref.preference_order = 1
+                            ORDER BY pref.id ASC
+                            LIMIT 1
+                        ) pref1 ON TRUE
+                        LEFT JOIN LATERAL (
+                            SELECT pref.advisor_name
+                            FROM dtlms_portal_application_preferences pref
+                            WHERE pref.application_id = ra.id
+                              AND pref.preference_order = 2
+                            ORDER BY pref.id ASC
+                            LIMIT 1
+                        ) pref2 ON TRUE
+                        ORDER BY ps.id, COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                    ),
+                    choice_rows AS (
+                        SELECT
+                            recruitment_application_id,
+                            student_name,
+                            phone_number,
+                            email,
+                            registered_at,
+                            candidate_no,
+                            school_name,
+                            'first_choice' AS choice_round,
+                            COALESCE(first_choice_advisor_name, selected_advisor_name, intended_advisor_name) AS advisor_name
+                        FROM latest_application
+                        UNION ALL
+                        SELECT
+                            recruitment_application_id,
+                            student_name,
+                            phone_number,
+                            email,
+                            registered_at,
+                            candidate_no,
+                            school_name,
+                            'second_choice' AS choice_round,
+                            second_choice_advisor_name AS advisor_name
+                        FROM latest_application
+                    ),
+                    choice_counts AS (
+                        SELECT choice_round, advisor_name, COUNT(*)::int AS student_count
+                        FROM choice_rows
+                        WHERE advisor_name IS NOT NULL AND BTRIM(advisor_name) <> ''
+                        GROUP BY choice_round, advisor_name
+                    ),
+                    ranked_counts AS (
+                        SELECT
+                            choice_round,
+                            advisor_name,
+                            ROW_NUMBER() OVER (PARTITION BY choice_round ORDER BY student_count DESC, advisor_name ASC)::int AS advisor_rank
+                        FROM choice_counts
+                    ),
+                    selected_advisors AS (
+                        SELECT advisor_name
+                        FROM ranked_counts
+                        WHERE choice_round = %s
+                          AND (
+                              (%s = 'other' AND advisor_rank > 10)
+                              OR (%s <> 'other' AND advisor_name = %s)
+                          )
+                    )
+                    SELECT
+                        cr.recruitment_application_id,
+                        cr.student_name,
+                        cr.choice_round,
+                        cr.advisor_name,
+                        cr.school_name,
+                        cr.candidate_no,
+                        cr.registered_at,
+                        cr.phone_number,
+                        cr.email
+                    FROM choice_rows cr
+                    JOIN selected_advisors sa ON sa.advisor_name = cr.advisor_name
+                    WHERE cr.choice_round = %s
+                    ORDER BY cr.registered_at DESC NULLS LAST, cr.recruitment_application_id DESC
+                    """,
+                    (
+                        normalized_choice_round,
+                        normalized_bucket,
+                        normalized_bucket,
+                        normalized_advisor_name,
+                        normalized_choice_round,
+                    ),
+                )
+                return [
+                    {
+                        "recruitment_application_id": int(row.get("recruitment_application_id") or 0),
+                        "student_name": str(row.get("student_name") or ""),
+                        "choice_round": str(row.get("choice_round") or ""),
+                        "advisor_name": row.get("advisor_name"),
+                        "school_name": row.get("school_name"),
+                        "candidate_no": row.get("candidate_no"),
+                        "registered_at": self._stringify_datetime(row.get("registered_at")),
+                        "phone_number": row.get("phone_number"),
+                        "email": row.get("email"),
+                    }
+                    for row in cur.fetchall()
+                    if int(row.get("recruitment_application_id") or 0) > 0
+                ]
+
     def list_theses_page(
         self,
         keyword: str | None = None,
@@ -2671,6 +3021,7 @@ class PostgresStateStoreQueryMixin:
         keyword: str | None = None,
         is_enabled: bool | None = None,
         director_id: int | None = None,
+        principal: Any | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -2704,6 +3055,38 @@ class PostgresStateStoreQueryMixin:
         if director_id:
             where_clauses.append("COALESCE(t.lead_user_id, lead.user_id, 0) = %s")
             params.append(int(director_id))
+        if self._needs_center_scope_filter(principal):
+            username = str(self._principal_field_value(principal, "username") or "").strip()
+            if not username:
+                return [], 0
+            where_clauses.append(
+                """
+                (
+                    COALESCE(t.lead_user_id, lead.user_id, 0) = (
+                        SELECT u.id
+                        FROM dtlms_users u
+                        WHERE u.username = %s
+                          AND u.is_deleted = FALSE
+                        LIMIT 1
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM dtlms_team_advisors ta_scope
+                        LEFT JOIN dtlms_advisors advisor_scope ON advisor_scope.id = ta_scope.advisor_id AND advisor_scope.is_deleted = FALSE
+                        WHERE ta_scope.team_id = t.id
+                          AND ta_scope.is_deleted = FALSE
+                          AND COALESCE(ta_scope.advisor_user_id, advisor_scope.user_id, 0) = (
+                              SELECT u.id
+                              FROM dtlms_users u
+                              WHERE u.username = %s
+                                AND u.is_deleted = FALSE
+                              LIMIT 1
+                          )
+                    )
+                )
+                """
+            )
+            params.extend([username, username])
 
         where_sql = " AND ".join(where_clauses)
 
@@ -3184,6 +3567,357 @@ class PostgresStateStoreQueryMixin:
                 self._execute_dynamic(cur, sql_text, params)
                 return [self._normalize_dict_row(dict(row)) for row in cur.fetchall()]
 
+    def list_news_articles(self, keyword: str | None = None, news_type: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                where_clauses = ["is_deleted = FALSE"]
+                params: list[Any] = []
+                if news_type:
+                    where_clauses.append("news_type = %s")
+                    params.append(news_type)
+                if status:
+                    where_clauses.append("status = %s")
+                    params.append(status)
+                if keyword:
+                    where_clauses.append("(news_title ILIKE %s OR news_content ILIKE %s OR news_code ILIKE %s OR publisher_name ILIKE %s OR reviewer_name ILIKE %s)")
+                    params.extend([f"%{keyword}%"] * 5)
+                sql_text = f"""
+                    SELECT
+                        id,
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order,
+                        created_at,
+                        updated_at
+                    FROM dtlms_news_articles
+                    WHERE {' AND '.join(where_clauses)}
+                    ORDER BY is_pinned DESC, published_at DESC NULLS LAST, display_order DESC, id DESC
+                """
+                self._execute_dynamic(cur, sql_text, params)
+                return [self._normalize_news_row(dict(row)) for row in cur.fetchall()]
+
+    def get_news_article_by_id(self, news_article_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        id,
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order,
+                        created_at,
+                        updated_at
+                    FROM dtlms_news_articles
+                    WHERE id = %s AND is_deleted = FALSE
+                    LIMIT 1
+                    """,
+                    (int(news_article_id),),
+                )
+                row = cur.fetchone()
+                return self._normalize_news_row(dict(row)) if row is not None else None
+
+    def create_news_article(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_news_articles (
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING
+                        id,
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order,
+                        created_at,
+                        updated_at
+                    """,
+                    (
+                        payload["news_code"],
+                        payload["news_title"],
+                        payload["news_content"],
+                        payload["news_type"],
+                        payload.get("publisher_user_id"),
+                        payload.get("publisher_username"),
+                        payload.get("publisher_name"),
+                        payload.get("reviewer_user_id"),
+                        payload.get("reviewer_username"),
+                        payload.get("reviewer_name"),
+                        payload.get("published_at"),
+                        payload.get("status", "草稿"),
+                        bool(payload.get("is_pinned", False)),
+                        int(payload.get("display_order", 0)),
+                    ),
+                )
+                record = self._normalize_news_row(self._require_row(cur.fetchone(), "create_news_article"))
+            conn.commit()
+        return record
+
+    def update_news_article(self, news_article_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM dtlms_news_articles WHERE id = %s AND is_deleted = FALSE", (int(news_article_id),))
+                if not cur.fetchone():
+                    raise KeyError(news_article_id)
+                cur.execute(
+                    """
+                    UPDATE dtlms_news_articles
+                    SET news_title = %s,
+                        news_content = %s,
+                        news_type = %s,
+                        published_at = %s,
+                        status = %s,
+                        is_pinned = %s,
+                        display_order = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING
+                        id,
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order,
+                        created_at,
+                        updated_at
+                    """,
+                    (
+                        payload["news_title"],
+                        payload["news_content"],
+                        payload["news_type"],
+                        payload.get("published_at"),
+                        payload.get("status", "草稿"),
+                        bool(payload.get("is_pinned", False)),
+                        int(payload.get("display_order", 0)),
+                        int(news_article_id),
+                    ),
+                )
+                record = self._normalize_news_row(self._require_row(cur.fetchone(), "update_news_article"))
+            conn.commit()
+        return record
+
+    def delete_news_article(self, news_article_id: int) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM dtlms_news_articles WHERE id = %s AND is_deleted = FALSE", (int(news_article_id),))
+                if not cur.fetchone():
+                    raise KeyError(news_article_id)
+                cur.execute(
+                    "UPDATE dtlms_news_articles SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                    (int(news_article_id),),
+                )
+            conn.commit()
+
+    def publish_news_article(
+        self,
+        news_article_id: int,
+        *,
+        publisher_username: str | None = None,
+        publisher_name: str | None = None,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE dtlms_news_articles
+                    SET status = '已发布',
+                        published_at = COALESCE(published_at, CURRENT_TIMESTAMP),
+                        publisher_username = COALESCE(%s, publisher_username),
+                        publisher_name = COALESCE(%s, publisher_name),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    RETURNING
+                        id,
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order,
+                        created_at,
+                        updated_at
+                    """,
+                    (
+                        publisher_username,
+                        publisher_name,
+                        int(news_article_id),
+                    ),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise KeyError(news_article_id)
+                record = self._normalize_news_row(dict(row))
+            conn.commit()
+        return record
+
+    def offline_news_article(self, news_article_id: int) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE dtlms_news_articles
+                    SET status = '已下线',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    RETURNING
+                        id,
+                        news_code,
+                        news_title,
+                        news_content,
+                        news_type,
+                        publisher_user_id,
+                        publisher_username,
+                        publisher_name,
+                        reviewer_user_id,
+                        reviewer_username,
+                        reviewer_name,
+                        published_at,
+                        status,
+                        is_pinned,
+                        display_order,
+                        created_at,
+                        updated_at
+                    """,
+                    (int(news_article_id),),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise KeyError(news_article_id)
+                record = self._normalize_news_row(dict(row))
+            conn.commit()
+        return record
+
+    def batch_publish_news_articles(
+        self,
+        news_article_ids: list[int],
+        *,
+        publisher_username: str | None = None,
+        publisher_name: str | None = None,
+    ) -> int:
+        self.ensure_schema()
+        normalized_ids = [int(news_article_id) for news_article_id in news_article_ids if int(news_article_id) > 0]
+        if not normalized_ids:
+            return 0
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE dtlms_news_articles
+                    SET status = '已发布',
+                        published_at = COALESCE(published_at, CURRENT_TIMESTAMP),
+                        publisher_username = COALESCE(%s, publisher_username),
+                        publisher_name = COALESCE(%s, publisher_name),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE is_deleted = FALSE AND id = ANY(%s)
+                    """,
+                    (
+                        publisher_username,
+                        publisher_name,
+                        normalized_ids,
+                    ),
+                )
+                success_count = int(cur.rowcount or 0)
+            conn.commit()
+        return success_count
+
+    def batch_offline_news_articles(self, news_article_ids: list[int]) -> int:
+        self.ensure_schema()
+        normalized_ids = [int(news_article_id) for news_article_id in news_article_ids if int(news_article_id) > 0]
+        if not normalized_ids:
+            return 0
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE dtlms_news_articles
+                    SET status = '已下线',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE is_deleted = FALSE AND id = ANY(%s)
+                    """,
+                    (normalized_ids,),
+                )
+                success_count = int(cur.rowcount or 0)
+            conn.commit()
+        return success_count
+
     def list_dict_options(self, dict_type: str) -> list[dict[str, Any]]:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -3364,6 +4098,16 @@ class PostgresStateStoreQueryMixin:
 
     @staticmethod
     def _normalize_dict_row(row: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in row.items():
+            if isinstance(value, str):
+                normalized[key] = value.strip()
+            else:
+                normalized[key] = value
+        return normalized
+
+    @staticmethod
+    def _normalize_news_row(row: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}
         for key, value in row.items():
             if isinstance(value, str):

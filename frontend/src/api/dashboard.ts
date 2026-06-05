@@ -60,6 +60,26 @@ export type DashboardUndergraduateSchoolGroupDistributionResponse = {
 }
 
 
+export type DashboardRecruitmentAdvisorChoiceItem = {
+  advisor_name: string
+  student_count: number
+  percentage: number
+}
+
+
+export type DashboardRecruitmentAdvisorChoiceDistribution = {
+  choice_round: string
+  choice_name: string
+  total: number
+  items: DashboardRecruitmentAdvisorChoiceItem[]
+}
+
+
+export type DashboardRecruitmentAdvisorChoiceDistributionResponse = {
+  choices: DashboardRecruitmentAdvisorChoiceDistribution[]
+}
+
+
 export type DashboardUndergraduateSchoolStudentItem = {
   recruitment_application_id: number
   student_name: string
@@ -92,6 +112,18 @@ export function getDashboardUndergraduateSchoolRankings(limit = 20) {
 
 export function getDashboardUndergraduateSchoolGroupDistribution() {
   return http.get<DashboardUndergraduateSchoolGroupDistributionResponse>('/dashboard/undergraduate-school-group-distribution')
+}
+
+
+export function getDashboardRecruitmentAdvisorChoiceDistribution() {
+  return http.get<DashboardRecruitmentAdvisorChoiceDistributionResponse>('/dashboard/recruitment-advisor-choice-distribution')
+}
+
+
+export function getDashboardRecruitmentAdvisorChoiceStudents(params: { choice_round: string; advisor_name?: string; bucket?: string }) {
+  return http.get<DashboardUndergraduateSchoolStudentListResponse>('/dashboard/recruitment-advisor-choice-distribution/students', {
+    params,
+  })
 }
 
 

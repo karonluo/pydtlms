@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from io import BytesIO
+import secrets
 from typing import TYPE_CHECKING
 
 from openpyxl import Workbook
@@ -9,6 +11,7 @@ from pypinyin import lazy_pinyin
 
 from .management_service_shared import *
 from .system_user_excel_service import build_system_user_import_template
+from app.schemas.news import NewsArticleListResponse, NewsArticleRecord, NewsArticleUpsert
 
 
 SYSTEM_USER_EXPORT_COLUMNS: list[tuple[str, str]] = [
@@ -472,6 +475,9 @@ class RuntimeManagementStoreSystemMixin:
         paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
         return DictDataListResponse(items=paged_items, total=total, page=page, page_size=page_size)
 
+    def list_dict_options(self, dict_type: str) -> list[dict[str, Any]]:
+        return self._postgres_store.list_dict_options(dict_type)
+
     def create_dict_data(self, payload: DictDataUpsert) -> DictDataRecord:
         record = self._postgres_store.create_dict_data(payload.model_dump())
         return DictDataRecord(**record)
@@ -482,6 +488,88 @@ class RuntimeManagementStoreSystemMixin:
 
     def delete_dict_data(self, dict_data_id: int) -> None:
         self._postgres_store.delete_dict_data(dict_data_id)
+
+    @staticmethod
+    def _principal_news_actor(principal: Any | None) -> tuple[int | None, str | None, str | None]:
+        if principal is None:
+            return None, None, None
+        username = str(getattr(principal, "username", "") or "").strip() or None
+        full_name = str(getattr(principal, "full_name", "") or "").strip() or None
+        return None, username, full_name
+
+    def get_news_articles(
+        self,
+        keyword: str | None = None,
+        news_type: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> NewsArticleListResponse:
+        records = self._postgres_store.list_news_articles(keyword=keyword, news_type=news_type, status=status)
+        items = [NewsArticleRecord(**item) for item in records]
+        paged_items, total = self._paginate_items(items, page=page, page_size=page_size)
+        return NewsArticleListResponse(items=paged_items, total=total, page=page, page_size=page_size)
+
+    def get_news_article(self, news_article_id: int) -> NewsArticleRecord:
+        record = self._postgres_store.get_news_article_by_id(news_article_id)
+        if record is None:
+            raise KeyError(news_article_id)
+        return NewsArticleRecord(**record)
+
+    def create_news_article(self, payload: NewsArticleUpsert, principal: Any | None = None) -> NewsArticleRecord:
+        _, publisher_username, publisher_name = self._principal_news_actor(principal)
+        item = payload.model_dump()
+        if item.get("status") == "已发布" and item.get("published_at") is None:
+            item["published_at"] = datetime.now()
+        item["news_code"] = f"NEWS{datetime.now().strftime('%Y%m%d%H%M%S')}{secrets.token_hex(2).upper()}"
+        item["publisher_user_id"] = None
+        item["publisher_username"] = publisher_username
+        item["publisher_name"] = publisher_name
+        record = self._postgres_store.create_news_article(item)
+        return NewsArticleRecord(**record)
+
+    def update_news_article(self, news_article_id: int, payload: NewsArticleUpsert, principal: Any | None = None) -> NewsArticleRecord:
+        existing = self._postgres_store.get_news_article_by_id(news_article_id)
+        if existing is None:
+            raise KeyError(news_article_id)
+        updated = {**existing, **payload.model_dump(), "id": news_article_id}
+        if updated.get("status") == "已发布" and updated.get("published_at") is None:
+            updated["published_at"] = datetime.now()
+        if updated.get("status") == "已发布":
+            _, publisher_username, publisher_name = self._principal_news_actor(principal)
+            updated["publisher_username"] = publisher_username
+            updated["publisher_name"] = publisher_name
+        record = self._postgres_store.update_news_article(news_article_id, updated)
+        return NewsArticleRecord(**record)
+
+    def publish_news_article(self, news_article_id: int, principal: Any | None = None) -> NewsArticleRecord:
+        _, publisher_username, publisher_name = self._principal_news_actor(principal)
+        record = self._postgres_store.publish_news_article(
+            news_article_id,
+            publisher_username=publisher_username,
+            publisher_name=publisher_name,
+        )
+        return NewsArticleRecord(**record)
+
+    def offline_news_article(self, news_article_id: int) -> NewsArticleRecord:
+        record = self._postgres_store.offline_news_article(news_article_id)
+        return NewsArticleRecord(**record)
+
+    def batch_publish_news_articles(self, news_article_ids: list[int], principal: Any | None = None) -> BulkActionResponse:
+        _, publisher_username, publisher_name = self._principal_news_actor(principal)
+        success_count = self._postgres_store.batch_publish_news_articles(
+            news_article_ids,
+            publisher_username=publisher_username,
+            publisher_name=publisher_name,
+        )
+        return BulkActionResponse(success_count=success_count)
+
+    def batch_offline_news_articles(self, news_article_ids: list[int]) -> BulkActionResponse:
+        success_count = self._postgres_store.batch_offline_news_articles(news_article_ids)
+        return BulkActionResponse(success_count=success_count)
+
+    def delete_news_article(self, news_article_id: int) -> None:
+        self._postgres_store.delete_news_article(news_article_id)
 
     def get_roles(
         self,
@@ -569,16 +657,32 @@ class RuntimeManagementStoreSystemMixin:
             self._invalidate_system_user_caches_for_role(updated["role_code"])
             return self._build_role_record(updated)
 
-    def delete_role(self, role_id: int) -> None:
+    def get_role_deletion_preview(self, role_id: int) -> dict[str, Any]:
+        preview = self._postgres_store.get_role_deletion_preview(role_id)
+        if preview is None:
+            raise KeyError(role_id)
+        return preview
+
+    def delete_role(self, role_id: int, force_unbind: bool = False) -> None:
         with self._lock:
             index, item = self._get_role_for_write(role_id)
-            in_use = next((user for user in self._list("system_users") if user["role_code"] == item["role_code"]), None)
-            if in_use:
-                raise ValueError("Role is assigned to users")
-            self._list("roles").pop(index)
+            preview = self._postgres_store.get_role_deletion_preview(role_id)
+            if preview is None:
+                raise KeyError(role_id)
+            blocking_users = list(preview.get("blocking_users") or [])
+            assigned_users = list(preview.get("assigned_users") or [])
+            if blocking_users:
+                blocking_names = "、".join(str(user.get("full_name") or user.get("username") or user.get("id")) for user in blocking_users[:5])
+                raise ValueError(f"以下用户仅使用该角色，请先重新配置这些用户的角色后再删除：{blocking_names}")
+            if assigned_users and not force_unbind:
+                assigned_names = "、".join(str(user.get("full_name") or user.get("username") or user.get("id")) for user in assigned_users[:5])
+                raise ValueError(f"该角色当前被 {len(assigned_users)} 位用户使用，请先确认是否需要解绑：{assigned_names}")
             operation_log = self._record_operation("系统治理", "角色", str(role_id), "删除角色", f'删除角色 {item["role_name"]}')
             try:
-                self._postgres_store.delete_role(int(role_id))
+                self._postgres_store.delete_role(int(role_id), force_unbind=force_unbind)
+                self._list("roles").pop(index)
+                self.state = self._load_state()
+                self._counters = self.state.setdefault("counters", {})
                 self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
             except Exception:
                 self._save()

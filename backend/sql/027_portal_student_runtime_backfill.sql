@@ -9,7 +9,7 @@ WITH runtime_students AS (
     FROM dtlms_runtime_portal_students rs
 )
 INSERT INTO dtlms_portal_students (
-    id, full_name, phone_number, email, id_number, account_status, password_hash, gender, birth_date,
+    id, full_name, phone_number, email, id_number, candidate_no, account_status, password_hash, gender, birth_date,
     ethnic_group, native_place, marital_status, religious_belief, id_type, mailing_address,
     graduation_school, highest_degree, intended_field, political_status, english_level,
     family_info, education_experience, practice_experience, personal_profile,
@@ -22,6 +22,7 @@ SELECT
     payload ->> 'phone_number',
     payload ->> 'email',
     payload ->> 'id_number',
+    NULLIF(payload ->> 'candidate_no', ''),
     COALESCE(NULLIF(payload ->> 'account_status', ''), '启用'),
     NULLIF(payload ->> 'password_hash', ''),
     NULLIF(payload ->> 'gender', ''),
@@ -82,6 +83,7 @@ SET full_name = EXCLUDED.full_name,
     phone_number = EXCLUDED.phone_number,
     email = EXCLUDED.email,
     id_number = EXCLUDED.id_number,
+    candidate_no = COALESCE(NULLIF(dtlms_portal_students.candidate_no, ''), EXCLUDED.candidate_no),
     account_status = EXCLUDED.account_status,
     password_hash = EXCLUDED.password_hash,
     gender = EXCLUDED.gender,

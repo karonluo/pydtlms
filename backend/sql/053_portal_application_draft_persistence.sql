@@ -1,13 +1,2 @@
-ALTER TABLE IF EXISTS dtlms_portal_students
-    ADD COLUMN IF NOT EXISTS application_draft JSONB;
-
-UPDATE dtlms_portal_students AS ps
-SET application_draft = rs.payload -> 'application_draft',
-    updated_at = CURRENT_TIMESTAMP
-FROM dtlms_runtime_portal_students AS rs
-WHERE rs.id = ps.id
-  AND jsonb_typeof(rs.payload -> 'application_draft') = 'object'
-  AND (
-      ps.application_draft IS NULL
-      OR ps.application_draft = '{}'::jsonb
-  );
+-- 已废弃：portal_students.application_draft 已在新结构中移除。
+-- 该脚本保留为历史兼容标记，不再回填 JSONB 草稿列。

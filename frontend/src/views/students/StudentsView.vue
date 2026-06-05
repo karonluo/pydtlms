@@ -11,6 +11,7 @@ import { useServerPagination } from '../../composables/useServerPagination'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
 import { getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail } from '../../api/recruitment'
+import { hasGrantedPermission } from '../../router/menuAccess'
 import {
   activateRegisteredPortalStudent,
   batchDeleteCenters,
@@ -217,7 +218,16 @@ const isCenterSection = computed(() => activeSection.value === 'centers')
 const isPlatformAdmin = computed(() => authStore.roles.includes('platform_admin'))
 const isRegisteredPortalSection = computed(() => activeSection.value === 'portal-registrations')
 const isRegisteredPortalAcademyAdmin = computed(() => !isPlatformAdmin.value && authStore.roles.some((role) => role === 'AILABMGT' || role === 'academy_admin'))
-const canMutateSection = computed(() => !isRegisteredPortalSection.value)
+const canMaintainCenterSection = computed(() => hasGrantedPermission(authStore.permissions, 'research_center:write'))
+const canMutateSection = computed(() => {
+  if (isRegisteredPortalSection.value) {
+    return false
+  }
+  if (isCenterSection.value) {
+    return canMaintainCenterSection.value
+  }
+  return true
+})
 const sectionConfig = computed(() => {
   if (activeSection.value === 'portal-registrations') {
     return {
@@ -1317,7 +1327,7 @@ onMounted(() => {
         </div>
         <div class="header-actions">
           <el-button
-            v-if="activeSection === 'centers'"
+            v-if="activeSection === 'centers' && canMaintainCenterSection"
             plain
             type="danger"
             :disabled="!selectedCenterIds.length"
@@ -1466,7 +1476,7 @@ onMounted(() => {
         </el-table>
 
         <el-table v-else-if="isCenterSection" :data="centers" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleCenterSelectionChange">
-          <el-table-column type="selection" width="44" />
+          <el-table-column v-if="canMaintainCenterSection" type="selection" width="44" />
           <el-table-column prop="center_name" label="研究中心名称" min-width="180" show-overflow-tooltip />
           <el-table-column prop="director_name" label="负责人" width="120" show-overflow-tooltip />
           <el-table-column label="导师团队" min-width="220" show-overflow-tooltip>
@@ -1488,7 +1498,7 @@ onMounted(() => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="118" align="left">
+          <el-table-column v-if="canMaintainCenterSection" label="操作" width="118" align="left">
             <template #default="scope">
               <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openCenterEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteCenter }]" />
             </template>

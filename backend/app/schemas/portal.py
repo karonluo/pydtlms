@@ -6,7 +6,7 @@ from typing import Any, Literal, Sequence
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import SelectOption
-from app.schemas.contact import validate_email, validate_optional_phone_number, validate_phone_number
+from app.schemas.contact import validate_email, validate_phone_number
 from app.schemas.identity import validate_china_resident_id_number
 
 
@@ -119,6 +119,8 @@ def _validate_portal_practice_rules(items: Sequence["PortalPracticeExperienceIte
             missing_fields.append("证明人手机")
         if missing_fields:
             raise ValueError(f"实践经历{index}一旦新增，以下字段必填：{'、'.join(missing_fields)}")
+        if _first_non_empty(item.verifier_phone):
+            validate_phone_number(item.verifier_phone or "", f"实践经历{index}证明人手机")
 
 
 def _english_item_has_content(item: "PortalEnglishProficiencyItem") -> bool:
@@ -325,6 +327,8 @@ def _validate_portal_education_rules(items: Sequence["PortalEducationExperienceI
                     missing_fields.append("毕业证附件")
         if missing_fields:
             raise ValueError(f"教育经历{index}以下字段必填：{'、'.join(missing_fields)}")
+        if _first_non_empty(item.verifier_phone):
+            validate_phone_number(item.verifier_phone or "", f"教育经历{index}证明人手机")
 
     stages = {_first_non_empty(item.education_stage) for item in stage_selected}
     if "本科毕业" in stages and not ({"硕士在读", "硕士毕业"} & stages):
@@ -541,11 +545,6 @@ class PortalApplicantProfileData(BaseModel):
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
 
-    @field_validator("emergency_contact_phone")
-    @classmethod
-    def validate_emergency_contact_phone_field(cls, value: str | None) -> str | None:
-        return validate_optional_phone_number(value, "紧急联系人手机")
-
 
 class PortalApplicationPreferenceItem(BaseModel):
     preference_order: int = 1
@@ -580,11 +579,6 @@ class PortalEducationExperienceItem(BaseModel):
     graduation_certificate_attachment_url: str | None = None
     graduation_certificate_attachment_name: str | None = None
 
-    @field_validator("verifier_phone")
-    @classmethod
-    def validate_verifier_phone_field(cls, value: str | None) -> str | None:
-        return validate_optional_phone_number(value, "教育经历证明人手机")
-
 
 class PortalPracticeExperienceItem(BaseModel):
     start_month: str | None = None
@@ -594,11 +588,6 @@ class PortalPracticeExperienceItem(BaseModel):
     responsibility_text: str | None = None
     verifier_name: str | None = None
     verifier_phone: str | None = None
-
-    @field_validator("verifier_phone")
-    @classmethod
-    def validate_verifier_phone_field(cls, value: str | None) -> str | None:
-        return validate_optional_phone_number(value, "实践经历证明人手机")
 
 
 class PortalEnglishProficiencyItem(BaseModel):
@@ -614,11 +603,6 @@ class PortalFamilyMemberItem(BaseModel):
     employer_name: str | None = None
     job_title: str | None = None
     contact_phone: str | None = None
-
-    @field_validator("contact_phone")
-    @classmethod
-    def validate_contact_phone_field(cls, value: str | None) -> str | None:
-        return validate_optional_phone_number(value, "家庭成员联系电话")
 
 
 class PortalAchievementRecordItem(BaseModel):

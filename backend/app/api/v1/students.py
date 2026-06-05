@@ -308,12 +308,13 @@ def center_list(
     director_id: int | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
-    principal: Principal = Depends(require_permissions("students:read")),
+    principal: Principal = Depends(require_permissions("research_center:read")),
 ) -> CenterListResponse:
     return get_center_list(
         keyword=keyword,
         is_enabled=is_enabled,
         director_id=director_id,
+        principal=principal,
         page=page,
         page_size=page_size,
     )
@@ -321,7 +322,7 @@ def center_list(
 
 @router.post("/centers", response_model=CenterRecord, status_code=status.HTTP_201_CREATED)
 @router.post("/teams", response_model=CenterRecord, status_code=status.HTTP_201_CREATED, include_in_schema=False)
-def create_center_record(payload: CenterUpsert, principal: Principal = Depends(require_permissions("students:write"))) -> CenterRecord:
+def create_center_record(payload: CenterUpsert, principal: Principal = Depends(require_permissions("research_center:write"))) -> CenterRecord:
     try:
         return create_center(payload)
     except ValueError as exc:
@@ -330,7 +331,7 @@ def create_center_record(payload: CenterUpsert, principal: Principal = Depends(r
 
 @router.put("/centers/{center_id}", response_model=CenterRecord)
 @router.put("/teams/{center_id}", response_model=CenterRecord, include_in_schema=False)
-def update_center_record(center_id: int, payload: CenterUpsert, principal: Principal = Depends(require_permissions("students:write"))) -> CenterRecord:
+def update_center_record(center_id: int, payload: CenterUpsert, principal: Principal = Depends(require_permissions("research_center:write"))) -> CenterRecord:
     try:
         return update_center(center_id, payload)
     except KeyError as exc:
@@ -341,7 +342,7 @@ def update_center_record(center_id: int, payload: CenterUpsert, principal: Princ
 
 @router.delete("/centers/{center_id}", status_code=status.HTTP_204_NO_CONTENT)
 @router.delete("/teams/{center_id}", status_code=status.HTTP_204_NO_CONTENT, include_in_schema=False)
-def delete_center_record(center_id: int, principal: Principal = Depends(require_permissions("students:write"))) -> None:
+def delete_center_record(center_id: int, principal: Principal = Depends(require_permissions("research_center:write"))) -> None:
     try:
         delete_center(center_id)
     except KeyError as exc:
@@ -352,7 +353,7 @@ def delete_center_record(center_id: int, principal: Principal = Depends(require_
 
 @router.post("/centers/batch-delete", response_model=BulkActionResponse)
 @router.post("/teams/batch-delete", response_model=BulkActionResponse, include_in_schema=False)
-def batch_delete_center_records(payload: BulkDeleteRequest, principal: Principal = Depends(require_permissions("students:write"))) -> BulkActionResponse:
+def batch_delete_center_records(payload: BulkDeleteRequest, principal: Principal = Depends(require_permissions("research_center:write"))) -> BulkActionResponse:
     try:
         return delete_centers(payload.ids)
     except KeyError as exc:

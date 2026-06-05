@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 from uuid import uuid4
 
 from app.core.config import settings
@@ -35,6 +36,14 @@ class RuntimeManagementStoreStudentsMixin:
     @staticmethod
     def _registered_portal_export_timestamp() -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _registered_portal_export_namespace(value: Any) -> Any:
+        if isinstance(value, dict):
+            return SimpleNamespace(**{key: RuntimeManagementStoreStudentsMixin._registered_portal_export_namespace(item) for key, item in value.items()})
+        if isinstance(value, list):
+            return [RuntimeManagementStoreStudentsMixin._registered_portal_export_namespace(item) for item in value]
+        return value
 
     @staticmethod
     def _registered_portal_export_job_file_name() -> str:
@@ -547,12 +556,18 @@ class RuntimeManagementStoreStudentsMixin:
             return None
         if hasattr(value, "model_dump"):
             value = value.model_dump(mode="json")
+        elif hasattr(value, "__dict__"):
+            value = vars(value)
         if value in ({}, [], ""):
             return None
         return json.dumps(
             value,
             ensure_ascii=False,
-            default=lambda item: item.model_dump(mode="json") if hasattr(item, "model_dump") else item,
+            default=lambda item: item.model_dump(mode="json")
+            if hasattr(item, "model_dump")
+            else vars(item)
+            if hasattr(item, "__dict__")
+            else item,
         )
 
     @staticmethod
@@ -783,8 +798,8 @@ class RuntimeManagementStoreStudentsMixin:
             "phone_number": self._registered_portal_student_export_text(student.phone_number),
             "email": self._registered_portal_student_export_text(student.email),
             "id_number": self._registered_portal_student_export_text(student.id_number),
-            "portal_business_key": self._registered_portal_student_export_text(student.business_key),
-            "candidate_no": self._registered_portal_student_export_text(student.candidate_no),
+            "portal_business_key": self._registered_portal_student_export_text(getattr(student, "business_key", None)),
+            "candidate_no": self._registered_portal_student_export_text(getattr(student, "candidate_no", None)),
             "account_status": self._normalize_portal_account_status(student.account_status),
             "application_form_status": application_form_status,
             "selected_plan_id": student.selected_plan_id,
@@ -1115,6 +1130,7 @@ class RuntimeManagementStoreStudentsMixin:
         keyword: str | None = None,
         is_enabled: bool | None = None,
         director_id: int | None = None,
+        principal: Principal | dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> CenterListResponse:
@@ -1123,6 +1139,7 @@ class RuntimeManagementStoreStudentsMixin:
                 keyword=keyword,
                 is_enabled=is_enabled,
                 director_id=director_id,
+                principal=principal,
                 page=page,
                 page_size=page_size,
             )
@@ -1205,17 +1222,19 @@ class RuntimeManagementStoreStudentsMixin:
         plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
         records: list[dict[str, Any]] = []
         for student_id in normalized_ids:
+            student_detail = self._postgres_store.get_portal_student_detail(student_id)
+            if student_detail is None:
+                continue
+            portal_student = self._registered_portal_export_namespace(student_detail)
             latest_application_item = self._get_latest_registered_portal_application_item(student_id)
-            _, raw_student = self._find_required("portal_students", student_id)
-            portal_student = self.get_portal_student(student_id)
             application_id = int(latest_application_item.get("id") or 0) if latest_application_item is not None else None
             application_status = self._registered_portal_student_export_text(
-                latest_application_item.get("application_status") if latest_application_item else None
+                latest_application_item.get("application_status") if latest_application_item else getattr(portal_student, "application_status", None)
             )
             application_business_key = self._registered_portal_student_export_text(
-                latest_application_item.get("business_key") if latest_application_item else None
+                latest_application_item.get("business_key") if latest_application_item else getattr(portal_student, "business_key", None)
             )
-            plan_id = portal_student.selected_plan_id
+            plan_id = getattr(portal_student, "selected_plan_id", None)
             plan_name = plan_name_map.get(int(plan_id or 0)) if plan_id is not None else None
             records.append(
                 self._build_registered_portal_student_export_row(
@@ -1223,7 +1242,7 @@ class RuntimeManagementStoreStudentsMixin:
                     application_status,
                     application_id,
                     application_business_key,
-                    self._registered_portal_student_export_text(raw_student.get("created_at")),
+                    self._registered_portal_student_export_text(getattr(portal_student, "created_at", None)),
                     plan_name,
                 )
             )

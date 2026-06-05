@@ -24,6 +24,7 @@ from app.schemas.system import (
     NotificationDeliveryLogListResponse,
     OperationLogListResponse,
     PermissionCatalogResponse,
+    RoleDeletionPreviewResponse,
     RoleListResponse,
     RoleRecord,
     RoleUpsert,
@@ -64,6 +65,7 @@ from app.services.dashboard_service import (
     get_notification_delivery_log_list,
     get_operation_log_list,
     get_role_list,
+    get_role_deletion_preview,
     get_sync_log_list,
     get_system_architecture,
     get_system_options,
@@ -212,10 +214,18 @@ def update_role_record(role_id: int, payload: RoleUpsert, principal: Principal =
         _handle_service_error(exc)
 
 
-@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_role_record(role_id: int, principal: Principal = Depends(require_permissions("system:write"))) -> None:
+@router.get("/roles/{role_id}/deletion-preview", response_model=RoleDeletionPreviewResponse)
+def role_deletion_preview(role_id: int, principal: Principal = Depends(require_permissions("system:read"))) -> RoleDeletionPreviewResponse:
     try:
-        delete_role(role_id)
+        return get_role_deletion_preview(role_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found") from exc
+
+
+@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_role_record(role_id: int, force_unbind: bool = Query(default=False), principal: Principal = Depends(require_permissions("system:write"))) -> None:
+    try:
+        delete_role(role_id, force_unbind=force_unbind)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found") from exc
     except ValueError as exc:

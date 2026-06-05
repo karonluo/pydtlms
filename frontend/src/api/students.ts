@@ -46,6 +46,7 @@ export type RegisteredPortalStudentRecord = {
   phone_number: string
   email: string
   id_number: string
+  candidate_no?: string | null
   account_status: string
   application_form_status: string
   selected_plan_name?: string | null

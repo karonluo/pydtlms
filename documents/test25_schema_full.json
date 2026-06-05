@@ -1,0 +1,6137 @@
+{
+  "dtlms_achievements": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_achievements_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "achievement_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "title",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "published_at",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "publisher_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ranking_text",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_achievements_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_admission_decisions": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_admission_decisions_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "decision_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "rank_no",
+        "data_type": "integer",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "final_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "transfer_option",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "decision_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_admission_decisions_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_advisor_screening_batches": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_advisor_screening_batches_id_seq'::regclass)"
+      },
+      {
+        "name": "advisor_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "advisor_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "advisor_role_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'advisor'::character varying"
+      },
+      {
+        "name": "screening_round",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "signature_base64",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "submitted_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_advisor_screening_items": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_advisor_screening_items_id_seq'::regclass)"
+      },
+      {
+        "name": "batch_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "candidate_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "screening_round",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_score",
+        "data_type": "numeric",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "is_passed",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "screening_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'submitted'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_advisor_screening_items_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_advisor_screening_items_batch_id_fkey",
+        "column": "batch_id",
+        "ref_table": "dtlms_advisor_screening_batches",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_advisors": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_advisors_id_seq'::regclass)"
+      },
+      {
+        "name": "advisor_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "full_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "title",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "organization_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "research_direction",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "annual_quota",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "0"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "fk_dtlms_advisors_user_id",
+        "column": "user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_application_materials": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_application_materials_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "material_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "material_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "file_url",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_application_materials_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_audit_policies": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "item",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "policy",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'启用'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_background_assessments": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_background_assessments_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "evaluator_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "evaluator_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "evaluator_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "evaluator_role_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "assessment_result",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "assessment_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "assessed_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_background_assessments_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_data_sync_logs": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_data_sync_logs_id_seq'::regclass)"
+      },
+      {
+        "name": "source_system",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "target_system",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "sync_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "record_count",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "0"
+      },
+      {
+        "name": "failure_reason",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_dict_data": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_dict_data_id_seq'::regclass)"
+      },
+      {
+        "name": "dict_type_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "dict_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "label",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "value",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "sort_order",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "0"
+      },
+      {
+        "name": "status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'启用'::character varying"
+      },
+      {
+        "name": "color_type",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "css_class",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "remark",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_dict_data_dict_type_id_fkey",
+        "column": "dict_type_id",
+        "ref_table": "dtlms_dict_types",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_dict_types": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_dict_types_id_seq'::regclass)"
+      },
+      {
+        "name": "dict_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "dict_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'启用'::character varying"
+      },
+      {
+        "name": "remark",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_initial_screening_confirmations": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_initial_screening_confirmations_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "candidate_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "confirmer_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "confirmer_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "confirmer_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "confirmer_role_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "confirmation_result",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "confirmation_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "confirmed_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_initial_screening_confirmations_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_initial_screening_notifications": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_initial_screening_notifications_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "notification_channel",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "notification_event",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "notification_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "recipient_address",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "recipient_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "recipient_username",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "payload_json",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "sent_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_initial_screening_notifications_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_integrations": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "direction",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "cadence",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'正常'::character varying"
+      },
+      {
+        "name": "owner",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "''::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_interview_groups": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_interview_groups_id_seq'::regclass)"
+      },
+      {
+        "name": "plan_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "group_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "group_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "interview_mode",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'offline'::character varying"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_interview_groups_plan_id_fkey",
+        "column": "plan_id",
+        "ref_table": "dtlms_recruitment_plans",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_interview_schedules": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_interview_schedules_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "interview_group_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "admission_ticket_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "starts_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "ends_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "schedule_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'scheduled'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_interview_schedules_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_interview_schedules_interview_group_id_fkey",
+        "column": "interview_group_id",
+        "ref_table": "dtlms_interview_groups",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_interview_scores": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_interview_scores_id_seq'::regclass)"
+      },
+      {
+        "name": "schedule_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "evaluator_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "single_choice_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "fill_blank_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "coding_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "interview_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ideological_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_interview_scores_schedule_id_fkey",
+        "column": "schedule_id",
+        "ref_table": "dtlms_interview_schedules",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_login_logs": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_login_logs_id_seq'::regclass)"
+      },
+      {
+        "name": "username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "login_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "login_ip",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "user_agent",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_material_scores": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_material_scores_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "reviewer_assignment_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "material_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "recommendation_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_material_scores_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_material_scores_reviewer_assignment_id_fkey",
+        "column": "reviewer_assignment_id",
+        "ref_table": "dtlms_reviewer_assignments",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_news_articles": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_news_articles_id_seq'::regclass)"
+      },
+      {
+        "name": "news_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "news_title",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "news_content",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "news_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "publisher_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "publisher_username",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "publisher_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewer_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewer_username",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewer_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "published_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'草稿'::character varying"
+      },
+      {
+        "name": "is_pinned",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "display_order",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "0"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_notification_delivery_logs": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_notification_delivery_logs_id_seq'::regclass)"
+      },
+      {
+        "name": "channel",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "template_code",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "recipient",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "subject",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "send_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "failure_reason",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "triggered_by",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_notification_templates": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_notification_templates_id_seq'::regclass)"
+      },
+      {
+        "name": "template_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "channel",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "title",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "content_template",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "variables_schema",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_operation_logs": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_operation_logs_id_seq'::regclass)"
+      },
+      {
+        "name": "operator_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "operator_role",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "module_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "entity_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "entity_id",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "action",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "old_value",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "new_value",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "request_ip",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "result",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'success'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_outbound_studies": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_outbound_studies_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "study_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "destination",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "start_date",
+        "data_type": "date",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "end_date",
+        "data_type": "date",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "approval_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'submitted'::character varying"
+      },
+      {
+        "name": "expected_outcome",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_outbound_studies_advisor_id_fkey",
+        "column": "advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_outbound_studies_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_permissions": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_permissions_id_seq'::regclass)"
+      },
+      {
+        "name": "permission_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "permission_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "module_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_portal_application_achievement_records": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_achievement_records_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "achievement_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "paper_title",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "author_order",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "journal_or_conference",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "publish_or_index_month",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "award_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "awarding_organization",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "award_level",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "award_year",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "responsibility_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "achievement_month",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "award_rank",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "award_certificate_attachment_url",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "description_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_achievement_record_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_attachments": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_attachments_id_seq'::regclass)"
+      },
+      {
+        "name": "portal_student_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "owner_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "owner_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "attachment_category",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "file_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "file_url",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "file_type",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "file_size",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_attachments_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_portal_application_attachments_portal_student_id_fkey",
+        "column": "portal_student_id",
+        "ref_table": "dtlms_portal_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_declarations": {
+    "columns": [
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "has_read_declaration",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "declaration_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "progress_snapshot",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "application_id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_declarations_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_education_experiences": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_education_experiences_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "sort_order",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "1"
+      },
+      {
+        "name": "education_stage",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "start_month",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "end_month",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "school_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "major_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "average_score",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "gpa",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ranking",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "verifier_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "verifier_phone",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "transcript_attachment_url",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "degree_certificate_attachment_url",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "graduation_certificate_attachment_url",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_education_experien_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_english_proficiencies": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_english_proficiencies_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exam_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "score_text",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "certificate_attachment_url",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_english_proficienc_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_family_members": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_family_members_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "member_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "relation_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "employer_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "job_title",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "contact_phone",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_family_members_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_personal_statements": {
+    "columns": [
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "personal_statement_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ai_problem_statement",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ai_industry_opinion",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "resume_attachment_url",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "growth_experience_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "program_application_reason_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "career_plan_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "supporting_material_attachment_url",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "application_id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_personal_statement_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_practice_experiences": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_practice_experiences_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "start_month",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "end_month",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "organization_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "position_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "responsibility_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "verifier_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "verifier_phone",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_practice_experienc_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_application_preferences": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_application_preferences_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "preference_order",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "research_center_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "advisor_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_optional",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "team_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "advisor_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_application_preferences_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_portal_application_preferences_advisor_user_id",
+        "column": "advisor_user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_portal_application_preferences_team_id",
+        "column": "team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_student_profiles": {
+    "columns": [
+      {
+        "name": "portal_student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "full_name_pinyin",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "gender",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "birth_date",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ethnic_group",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "native_place",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "political_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "marital_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "religious_belief",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "id_type",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "mailing_address",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "emergency_contact_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "emergency_contact_phone",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "profile_photo_url",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "id_card_collage_url",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "portal_student_id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_student_profiles_portal_student_id_fkey",
+        "column": "portal_student_id",
+        "ref_table": "dtlms_portal_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_portal_students": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_portal_students_id_seq'::regclass)"
+      },
+      {
+        "name": "full_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "phone_number",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "email",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "id_number",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "graduation_school",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "highest_degree",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "intended_field",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "political_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "selected_plan_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "selected_team_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "selected_advisor_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "self_evaluation",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "submitted_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "password_hash",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "gender",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "birth_date",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ethnic_group",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "native_place",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "marital_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "religious_belief",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "id_type",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "mailing_address",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "english_level",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "family_info",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "education_experience",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "practice_experience",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "personal_profile",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "recommendation_notes",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "personal_statement_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "signed_agreement",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "account_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'启用'::character varying"
+      },
+      {
+        "name": "application_draft",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "selected_team_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "selected_advisor_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_portal_students_selected_plan_id_fkey",
+        "column": "selected_plan_id",
+        "ref_table": "dtlms_recruitment_plans",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_portal_students_selected_advisor_user_id",
+        "column": "selected_advisor_user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_portal_students_selected_team_id",
+        "column": "selected_team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_qualification_review_logs": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_qualification_review_logs_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "reviewer_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewer_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "reviewer_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewer_role_code",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "action",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "action_label",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "review_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewed_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_qualification_review_logs_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_qualification_reviews": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_qualification_reviews_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "reviewer_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "review_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "review_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_qualification_reviews_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_recruitment_applications": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_recruitment_applications_id_seq'::regclass)"
+      },
+      {
+        "name": "plan_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "student_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "candidate_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "gender",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "graduation_school",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "highest_degree",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "intended_field_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "application_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'submitted'::character varying"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "review_round",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "first_choice",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "second_choice",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "political_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "marital_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "religious_belief",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "native_place",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "phone_number",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "email",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "mailing_address",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "id_type",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "id_number",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "undergraduate_school",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "accept_adjustment",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "undergraduate_average_score",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "undergraduate_gpa",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "undergraduate_rank",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "undergraduate_major",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "graduate_average_score",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "graduate_gpa",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "graduate_rank",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "graduate_major",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "intended_advisor_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "discovery_channel",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "graduate_school",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "overseas_university_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "overseas_master_university_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "self_evaluation",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "applied_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "research_problem",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "research_status_analysis",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "research_impact",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "ai_society_impact",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "dissenting_view",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "family_info",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "education_experience",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "practice_experience",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "personal_statement_text",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "student_activity_experience",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "personal_statement_attachment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "material_list_attachment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "supplementary_profile",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "portal_student_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "source_channel",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "source_channel_other",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "first_choice_team_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "second_choice_team_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "intended_advisor_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "advisor_screening_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "advisor_screening_round",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": "'first_choice'::character varying"
+      },
+      {
+        "name": "first_choice_screening_batch_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "second_choice_screening_batch_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "first_choice_screening_submitted_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "second_choice_screening_submitted_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "first_choice_screening_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "second_choice_screening_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "initial_screening_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "initial_screening_result",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "initial_screening_confirmed_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "initial_screening_confirmer_username",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "initial_screening_confirmer_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "initial_screening_notification_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "initial_screening_notification_sent_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "next_stage_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_recruitment_applications_intended_field_id_fkey",
+        "column": "intended_field_id",
+        "ref_table": "dtlms_research_fields",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_recruitment_applications_plan_id_fkey",
+        "column": "plan_id",
+        "ref_table": "dtlms_recruitment_plans",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_recruitment_applications_portal_student_id_fkey",
+        "column": "portal_student_id",
+        "ref_table": "dtlms_portal_students",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_recruitment_applications_first_choice_team_id",
+        "column": "first_choice_team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_recruitment_applications_intended_advisor_user_id",
+        "column": "intended_advisor_user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_recruitment_applications_second_choice_team_id",
+        "column": "second_choice_team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_recruitment_plans": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_recruitment_plans_id_seq'::regclass)"
+      },
+      {
+        "name": "plan_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "plan_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "academic_year",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "semester",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "start_date",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "end_date",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "target_quota",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "0"
+      },
+      {
+        "name": "plan_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'draft'::character varying"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "brochure_image_url",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "plan_description",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_research_fields": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_research_fields_id_seq'::regclass)"
+      },
+      {
+        "name": "field_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "field_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "description",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_research_projects": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_research_projects_id_seq'::regclass)"
+      },
+      {
+        "name": "project_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "project_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "principal_advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "funding_amount",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_research_projects_principal_advisor_id_fkey",
+        "column": "principal_advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_reviewer_assignments": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_reviewer_assignments_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "reviewer_username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "reviewer_role",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "assignment_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'assigned'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_reviewer_assignments_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_role_permissions": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_role_permissions_id_seq'::regclass)"
+      },
+      {
+        "name": "role_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "permission_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_role_permissions_permission_id_fkey",
+        "column": "permission_id",
+        "ref_table": "dtlms_permissions",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_role_permissions_role_id_fkey",
+        "column": "role_id",
+        "ref_table": "dtlms_roles",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_roles": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_roles_id_seq'::regclass)"
+      },
+      {
+        "name": "role_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "role_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "description",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "scope_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'系统管理'::character varying"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_schema_migrations": {
+    "columns": [
+      {
+        "name": "file_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "applied_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "file_name"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_scientific_reports": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_scientific_reports_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "training_plan_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "period_label",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "report_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "summary",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "attachment_url",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "reviewer_advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "review_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "review_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_scientific_reports_reviewer_advisor_id_fkey",
+        "column": "reviewer_advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_scientific_reports_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_scientific_reports_training_plan_id_fkey",
+        "column": "training_plan_id",
+        "ref_table": "dtlms_training_plans",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_student_advisor_history": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_student_advisor_history_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "relation_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'primary'::character varying"
+      },
+      {
+        "name": "start_date",
+        "data_type": "date",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "end_date",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "change_reason",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_student_advisor_history_advisor_id_fkey",
+        "column": "advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_student_advisor_history_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_student_team_history": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_student_team_history_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "team_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "start_date",
+        "data_type": "date",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "end_date",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "change_reason",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_student_team_history_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_student_team_history_team_id_fkey",
+        "column": "team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_students": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_students_id_seq'::regclass)"
+      },
+      {
+        "name": "student_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "full_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "gender",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "political_status",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "phone_number",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "identity_no",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "enrollment_year",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "degree_type",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "team_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "current_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'enrolled'::character varying"
+      },
+      {
+        "name": "primary_advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "team_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "portal_student_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_students_primary_advisor_id_fkey",
+        "column": "primary_advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_students_team_id_fkey",
+        "column": "team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_students_portal_student_id",
+        "column": "portal_student_id",
+        "ref_table": "dtlms_portal_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_system_configs": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_system_configs_id_seq'::regclass)"
+      },
+      {
+        "name": "config_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "config_value",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "description",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_team_advisors": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_team_advisors_id_seq'::regclass)"
+      },
+      {
+        "name": "team_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_role",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'member'::character varying"
+      },
+      {
+        "name": "joined_on",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "left_on",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "advisor_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_team_advisors_advisor_id_fkey",
+        "column": "advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_team_advisors_team_id_fkey",
+        "column": "team_id",
+        "ref_table": "dtlms_teams",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_team_advisors_advisor_user_id",
+        "column": "advisor_user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_teams": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_teams_id_seq'::regclass)"
+      },
+      {
+        "name": "team_code",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "team_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "department_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "discipline_name",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "lead_advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "research_directions",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "team_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'active'::character varying"
+      },
+      {
+        "name": "established_on",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "description",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "lead_user_id",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_teams_lead_advisor_id_fkey",
+        "column": "lead_advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "fk_dtlms_teams_lead_user_id",
+        "column": "lead_user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_theses": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_theses_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "title",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "plagiarism_rate",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "thesis_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'draft'::character varying"
+      },
+      {
+        "name": "blind_review_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "defense_date",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "degree_granted",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "business_key",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_theses_advisor_id_fkey",
+        "column": "advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_theses_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_thesis_reviews": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_thesis_reviews_id_seq'::regclass)"
+      },
+      {
+        "name": "thesis_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "expert_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "review_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "review_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'pending'::character varying"
+      },
+      {
+        "name": "review_comment",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_thesis_reviews_thesis_id_fkey",
+        "column": "thesis_id",
+        "ref_table": "dtlms_theses",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_training_plan_versions": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_training_plan_versions_id_seq'::regclass)"
+      },
+      {
+        "name": "training_plan_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "version_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "change_reason",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "plan_snapshot",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_training_plan_versions_training_plan_id_fkey",
+        "column": "training_plan_id",
+        "ref_table": "dtlms_training_plans",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_training_plans": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_training_plans_id_seq'::regclass)"
+      },
+      {
+        "name": "student_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "advisor_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "version_no",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'v1.0'::character varying"
+      },
+      {
+        "name": "report_cycle",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "plan_status",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'draft'::character varying"
+      },
+      {
+        "name": "scientific_goal",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "assessment_rule",
+        "data_type": "text",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_training_plans_advisor_id_fkey",
+        "column": "advisor_id",
+        "ref_table": "dtlms_advisors",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_training_plans_student_id_fkey",
+        "column": "student_id",
+        "ref_table": "dtlms_students",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_user_profiles": {
+    "columns": [
+      {
+        "name": "username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "full_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "role_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "department_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "phone_number",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "email",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "theme_color",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'#0f4cbd'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "introduction",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "username"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_user_profiles_username_fkey",
+        "column": "username",
+        "ref_table": "dtlms_users",
+        "ref_column": "username"
+      }
+    ]
+  },
+  "dtlms_user_roles": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_user_roles_id_seq'::regclass)"
+      },
+      {
+        "name": "user_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "role_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "grant_source",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'bootstrap'::character varying"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_user_roles_role_id_fkey",
+        "column": "role_id",
+        "ref_table": "dtlms_roles",
+        "ref_column": "id"
+      },
+      {
+        "constraint_name": "dtlms_user_roles_user_id_fkey",
+        "column": "user_id",
+        "ref_table": "dtlms_users",
+        "ref_column": "id"
+      }
+    ]
+  },
+  "dtlms_users": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_users_id_seq'::regclass)"
+      },
+      {
+        "name": "username",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "full_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "email",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "password_hash",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "is_active",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "true"
+      },
+      {
+        "name": "is_deleted",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "department_name",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "''::character varying"
+      },
+      {
+        "name": "phone_number",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "last_login_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_wf_de_model": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "key_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "category_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "version_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "1"
+      },
+      {
+        "name": "model_type_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "0"
+      },
+      {
+        "name": "description_",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "meta_info_",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "last_updated_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "tenant_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "deployment_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "resource_name_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "editor_source_value_",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "editor_source_extra_value_",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_wf_hi_actinst": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_def_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exec_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "act_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "act_name_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "act_type_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "assignee_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "start_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "end_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "duration_ms_",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "business_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_hi_actinst_proc_def_id__fkey",
+        "column": "proc_def_id_",
+        "ref_table": "dtlms_wf_re_procdef",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_wf_hi_procinst": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "proc_def_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "start_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "end_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "duration_ms_",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "start_user_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "end_act_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "delete_reason_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "start_act_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "state_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": "'ACTIVE'::character varying"
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_hi_procinst_proc_def_id__fkey",
+        "column": "proc_def_id_",
+        "ref_table": "dtlms_wf_re_procdef",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_wf_hi_taskinst": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "task_def_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "proc_def_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exec_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "assignee_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "owner_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "start_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "claim_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "end_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "duration_ms_",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "due_date_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "delete_reason_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "priority_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "50"
+      },
+      {
+        "name": "category_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_hi_taskinst_proc_def_id__fkey",
+        "column": "proc_def_id_",
+        "ref_table": "dtlms_wf_re_procdef",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_wf_hi_varinst": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exec_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "task_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "var_type_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "text_value_",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "number_value_",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "json_value_",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "create_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "last_updated_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_wf_re_deployment": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "category_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "deploy_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "tenant_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_wf_re_procdef": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "key_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "version_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "1"
+      },
+      {
+        "name": "deployment_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "resource_name_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "diagram_resource_name_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "category_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "description_",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "suspension_state_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "1"
+      },
+      {
+        "name": "tenant_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_re_procdef_deployment_id__fkey",
+        "column": "deployment_id_",
+        "ref_table": "dtlms_wf_re_deployment",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_wf_ru_execution": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_def_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "parent_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "act_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "is_active_",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "true"
+      },
+      {
+        "name": "is_concurrent_",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "false"
+      },
+      {
+        "name": "is_scope_",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "default": "true"
+      },
+      {
+        "name": "start_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "start_user_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "super_exec_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "tenant_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_ru_execution_proc_def_id__fkey",
+        "column": "proc_def_id_",
+        "ref_table": "dtlms_wf_re_procdef",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_wf_ru_identitylink": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_wf_ru_identitylink_id__seq'::regclass)"
+      },
+      {
+        "name": "task_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "user_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "group_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "link_type_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "created_at_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": []
+  },
+  "dtlms_wf_ru_task": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exec_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_def_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "task_def_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "business_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "assignee_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "owner_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "create_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "due_date_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "claim_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "priority_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "50"
+      },
+      {
+        "name": "suspension_state_",
+        "data_type": "integer",
+        "is_nullable": "NO",
+        "default": "1"
+      },
+      {
+        "name": "tenant_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "form_key_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "description_",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_ru_task_exec_id__fkey",
+        "column": "exec_id_",
+        "ref_table": "dtlms_wf_ru_execution",
+        "ref_column": "id_"
+      },
+      {
+        "constraint_name": "dtlms_wf_ru_task_proc_def_id__fkey",
+        "column": "proc_def_id_",
+        "ref_table": "dtlms_wf_re_procdef",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_wf_ru_variable": {
+    "columns": [
+      {
+        "name": "id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exec_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "proc_inst_id_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "task_id_",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "name_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "var_type_",
+        "data_type": "character varying",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "text_value_",
+        "data_type": "text",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "number_value_",
+        "data_type": "bigint",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "json_value_",
+        "data_type": "jsonb",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "create_time_",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id_"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_wf_ru_variable_exec_id__fkey",
+        "column": "exec_id_",
+        "ref_table": "dtlms_wf_ru_execution",
+        "ref_column": "id_"
+      }
+    ]
+  },
+  "dtlms_written_exam_scores": {
+    "columns": [
+      {
+        "name": "id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": "nextval('dtlms_written_exam_scores_id_seq'::regclass)"
+      },
+      {
+        "name": "application_id",
+        "data_type": "bigint",
+        "is_nullable": "NO",
+        "default": null
+      },
+      {
+        "name": "exam_date",
+        "data_type": "date",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "exam_score",
+        "data_type": "numeric",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "import_batch_no",
+        "data_type": "character varying",
+        "is_nullable": "YES",
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "data_type": "timestamp with time zone",
+        "is_nullable": "NO",
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": [
+      {
+        "constraint_name": "dtlms_written_exam_scores_application_id_fkey",
+        "column": "application_id",
+        "ref_table": "dtlms_recruitment_applications",
+        "ref_column": "id"
+      }
+    ]
+  }
+}

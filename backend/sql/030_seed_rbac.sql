@@ -18,8 +18,11 @@ VALUES
     ('workflow_center_menu:read', '查看流程待办菜单', 'workspace'),
     ('recruitment:read', '查看招生工作台', 'recruitment'),
     ('recruitment:write', '维护招生流程', 'recruitment'),
+    ('news_management:read', '查看新闻管理菜单', 'recruitment'),
     ('recruitment_plan:read', '查看招生计划菜单', 'recruitment'),
     ('recruitment_registered_students:read', '查看注册学生菜单', 'recruitment'),
+    ('research_center:read', '查看研究中心菜单', 'students'),
+    ('research_center:write', '维护研究中心数据', 'students'),
     ('recruitment_advisor_screening:read', '查看导师初筛菜单', 'recruitment'),
     ('recruitment_initial_screening_confirmation:read', '查看初筛确认菜单', 'recruitment'),
     ('students:read', '查看学生主数据', 'students'),
@@ -42,11 +45,11 @@ FROM dtlms_roles r
 JOIN dtlms_permissions p ON (
     (r.role_code = 'platform_admin') OR
     (r.role_code = 'student' AND p.permission_code IN ('dashboard:read')) OR
-    (r.role_code = 'advisor' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'recruitment_plan:read', 'recruitment_registered_students:read', 'recruitment_advisor_screening:read', 'students:read', 'training:read', 'training:write', 'degree:read', 'workflow:read', 'workflow:write')) OR
-    (r.role_code = 'AILABMGT' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'recruitment_plan:read', 'recruitment_registered_students:read', 'recruitment_initial_screening_confirmation:read', 'students:read', 'workflow:read', 'workflow:write')) OR
+    (r.role_code = 'advisor' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'news_management:read', 'recruitment_plan:read', 'recruitment_registered_students:read', 'recruitment_advisor_screening:read', 'research_center:read', 'students:read', 'training:read', 'training:write', 'degree:read', 'workflow:read', 'workflow:write')) OR
+    (r.role_code = 'AILABMGT' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'news_management:read', 'recruitment_plan:read', 'recruitment_registered_students:read', 'recruitment_initial_screening_confirmation:read', 'research_center:read', 'research_center:write', 'students:read', 'workflow:read', 'workflow:write')) OR
     (r.role_code = 'secretary' AND p.permission_code IN ('dashboard:read', 'degree:read', 'degree:write', 'workflow:read', 'workflow:write', 'system:read')) OR
-    (r.role_code = 'recruit_reviewer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment_plan:read', 'workflow:read')) OR
-    (r.role_code = 'interview_officer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'recruitment_plan:read', 'workflow:read')) OR
+    (r.role_code = 'recruit_reviewer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'news_management:read', 'recruitment_plan:read', 'workflow:read')) OR
+    (r.role_code = 'interview_officer' AND p.permission_code IN ('dashboard:read', 'recruitment:read', 'recruitment:write', 'news_management:read', 'recruitment_plan:read', 'workflow:read')) OR
     (r.role_code = 'hrbp' AND p.permission_code IN ('dashboard:read', 'students:read', 'training:read', 'recruitment_registered_students:read')) OR
     (r.role_code = 'party_affairs' AND p.permission_code IN ('dashboard:read', 'students:read', 'audit:read', 'recruitment_registered_students:read'))
 )

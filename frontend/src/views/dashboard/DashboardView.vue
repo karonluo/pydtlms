@@ -22,11 +22,15 @@ import { use, init, type ComposeOption, type ECharts } from 'echarts/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import {
+  getDashboardRecruitmentAdvisorChoiceDistribution,
+  getDashboardRecruitmentAdvisorChoiceStudents,
   getDashboardOverview,
   getDashboardUndergraduateSchoolGroupDistribution,
   getDashboardUndergraduateSchoolGroupStudents,
   getDashboardUndergraduateSchoolRankings,
   getDashboardUndergraduateSchoolStudents,
+  type DashboardRecruitmentAdvisorChoiceDistribution,
+  type DashboardRecruitmentAdvisorChoiceDistributionResponse,
   type DashboardUndergraduateSchoolGroupDistribution,
   type DashboardUndergraduateSchoolGroupDistributionResponse,
   type DashboardOverview,
@@ -54,11 +58,27 @@ type SchoolGroupDisplayItem = {
 type SchoolStudentDialogSource =
   | { type: 'school'; schoolName: string }
   | { type: 'group'; title: string; dictType: string; schoolName?: string; bucket?: 'other' }
+  | { type: 'advisor'; title: string; choiceRound: string; advisorName?: string; bucket?: 'other' }
+
+type AdvisorChoiceStudentDialogSource = {
+  type: 'advisor'
+  title: string
+  choiceRound: string
+  advisorName?: string
+  bucket?: 'other'
+}
+
+type AdvisorChoiceDisplayItem = {
+  advisor_name: string
+  student_count: number
+  percentage: number
+}
 
 const schoolRankingChartRef = ref<HTMLDivElement>()
 const loading = ref(false)
 const overview = ref<DashboardOverview | null>(null)
 const schoolGroupDistribution = ref<DashboardUndergraduateSchoolGroupDistributionResponse>({ total_applications: 0, groups: [] })
+const advisorChoiceDistribution = ref<DashboardRecruitmentAdvisorChoiceDistributionResponse>({ choices: [] })
 const schoolRankings = ref<DashboardUndergraduateSchoolRankingItem[]>([])
 const schoolStudentDialogVisible = ref(false)
 const schoolStudentListLoading = ref(false)
@@ -66,6 +86,18 @@ const selectedSchoolName = ref('')
 const selectedSchoolStudents = ref<DashboardUndergraduateSchoolStudentItem[]>([])
 const selectedSchoolStudentFilter = ref('')
 const selectedSchoolDialogSource = ref<SchoolStudentDialogSource | null>(null)
+const selectedAdvisorChoiceName = ref('')
+const selectedAdvisorChoiceStudents = ref<DashboardUndergraduateSchoolStudentItem[]>([])
+const selectedAdvisorChoicePaginationPage = ref(1)
+const selectedAdvisorChoicePageSize = ref(10)
+const selectedAdvisorChoiceTotal = computed(() => selectedAdvisorChoiceStudents.value.length)
+const selectedAdvisorChoicePagedStudents = computed(() => {
+  const start = (selectedAdvisorChoicePaginationPage.value - 1) * selectedAdvisorChoicePageSize.value
+  return selectedAdvisorChoiceStudents.value.slice(start, start + selectedAdvisorChoicePageSize.value)
+})
+const selectedAdvisorChoiceDialogVisible = ref(false)
+const selectedAdvisorChoiceListLoading = ref(false)
+const selectedAdvisorChoiceDialogSource = ref<AdvisorChoiceStudentDialogSource | null>(null)
 const portalApplicationDetailVisible = ref(false)
 const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
 const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
@@ -75,8 +107,10 @@ const portalWorkflowCommentDialogVisible = ref(false)
 const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
 const portalWorkflowComment = ref('')
 const schoolGroupPieChartRefs = ref<Record<string, HTMLDivElement | null>>({})
+const advisorChoicePieChartRefs = ref<Record<string, HTMLDivElement | null>>({})
 let schoolRankingChart: ECharts | undefined
 let schoolGroupPieCharts: Record<string, ECharts | undefined> = {}
+let advisorChoicePieCharts: Record<string, ECharts | undefined> = {}
 
 const schoolGroupPalette = ['#2e9bea', '#36b59a', '#e4a53d', '#e47857', '#8d72d9', '#4675bb', '#60c4a4', '#f0b45a', '#d86666', '#7a8796']
 
@@ -131,6 +165,8 @@ const selectedSchoolStudentStats = computed(() => {
     .sort((left, right) => right.student_count - left.student_count || left.school_name.localeCompare(right.school_name, 'zh-Hans-CN'))
 })
 
+const advisorChoiceTotal = computed(() => advisorChoiceDistribution.value.choices.reduce((sum, choice) => sum + choice.total, 0))
+
 const isSchoolStudentFiltered = computed(() => !!selectedSchoolStudentFilter.value)
 const filteredSelectedSchoolStudents = computed(() => {
   const activeFilter = selectedSchoolStudentFilter.value.trim()
@@ -143,16 +179,17 @@ const filteredSelectedSchoolStudents = computed(() => {
 async function loadOverview() {
   loading.value = true
   try {
-    const [{ data: overviewData }, { data: rankingData }, { data: groupDistributionData }] = await Promise.all([
-      getDashboardOverview(),
-      getDashboardUndergraduateSchoolRankings(20),
-      getDashboardUndergraduateSchoolGroupDistribution(),
-    ])
+    const { data: overviewData } = await getDashboardOverview()
+    const { data: rankingData } = await getDashboardUndergraduateSchoolRankings(20)
+    const { data: groupDistributionData } = await getDashboardUndergraduateSchoolGroupDistribution()
+    const { data: advisorChoiceData } = await getDashboardRecruitmentAdvisorChoiceDistribution()
     overview.value = overviewData
     schoolRankings.value = rankingData.items
     schoolGroupDistribution.value = groupDistributionData
+    advisorChoiceDistribution.value = advisorChoiceData
     await nextTick()
     renderSchoolGroupPieCharts()
+    renderAdvisorChoicePieCharts()
     renderSchoolRankingChart()
   } catch {
     ElMessage.error('驾驶舱数据加载失败')
@@ -163,6 +200,10 @@ async function loadOverview() {
 
 function setSchoolGroupPieChartRef(dictType: string, element: unknown) {
   schoolGroupPieChartRefs.value[dictType] = element instanceof HTMLDivElement ? element : null
+}
+
+function setAdvisorChoicePieChartRef(choiceRound: string, element: unknown) {
+  advisorChoicePieChartRefs.value[choiceRound] = element instanceof HTMLDivElement ? element : null
 }
 
 function formatRate(value: number) {
@@ -211,6 +252,26 @@ function formatSchoolGroupPieLabel(name: string) {
     return normalizedName
   }
   return `${normalizedName.slice(0, 7)}\n${normalizedName.slice(7)}`
+}
+
+function syncSelectedAdvisorChoicePagination() {
+  const totalPages = Math.max(1, Math.ceil(selectedAdvisorChoiceTotal.value / selectedAdvisorChoicePageSize.value))
+  if (selectedAdvisorChoicePaginationPage.value > totalPages) {
+    selectedAdvisorChoicePaginationPage.value = totalPages
+  }
+  if (selectedAdvisorChoicePaginationPage.value < 1) {
+    selectedAdvisorChoicePaginationPage.value = 1
+  }
+}
+
+function handleAdvisorChoiceCurrentChange(page: number) {
+  selectedAdvisorChoicePaginationPage.value = page
+}
+
+function handleAdvisorChoicePageSizeChange(size: number) {
+  selectedAdvisorChoicePageSize.value = size
+  selectedAdvisorChoicePaginationPage.value = 1
+  syncSelectedAdvisorChoicePagination()
 }
 
 function renderSchoolGroupPieCharts() {
@@ -281,6 +342,76 @@ function renderSchoolGroupPieCharts() {
         bucket: data.bucket === 'other' ? 'other' : undefined,
       }
       void openSchoolGroupStudentDialog(group, item)
+    })
+  })
+}
+
+function renderAdvisorChoicePieCharts() {
+  Object.values(advisorChoicePieCharts).forEach((pieChart) => pieChart?.dispose())
+  advisorChoicePieCharts = {}
+
+  advisorChoiceDistribution.value.choices.forEach((choice: DashboardRecruitmentAdvisorChoiceDistribution) => {
+    const chartElement = advisorChoicePieChartRefs.value[choice.choice_round]
+    if (!chartElement || !choice.items.length) {
+      return
+    }
+
+    const pieChart = init(chartElement)
+    advisorChoicePieCharts[choice.choice_round] = pieChart
+    const option: DashboardChartOption = {
+      color: schoolGroupPalette,
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          const value = Number(params?.value || 0)
+          const rate = typeof params?.data?.percentage === 'number' ? formatRate(params.data.percentage) : `${params?.percent || 0}%`
+          return `${params?.name || ''}<br/>报名学生 ${value} 名<br/>占本志愿 ${rate}`
+        },
+      },
+      series: [
+        {
+          name: choice.choice_name,
+          type: 'pie',
+          radius: '50%',
+          center: ['50%', '48%'],
+          avoidLabelOverlap: true,
+          minAngle: 4,
+          cursor: 'pointer',
+          data: choice.items.map((item: AdvisorChoiceDisplayItem) => ({
+            name: item.advisor_name,
+            value: item.student_count,
+            percentage: item.percentage,
+            bucket: item.advisor_name === '其他导师' ? 'other' : undefined,
+          })),
+          label: {
+            formatter: (params: any) => {
+              const percent = typeof params?.data?.percentage === 'number' ? formatRate(params.data.percentage) : `${params?.percent || 0}%`
+              return `${formatSchoolGroupPieLabel(String(params?.name || ''))}\n${params?.value || 0}人 ${percent}`
+            },
+            color: '#24415f',
+            fontSize: 10,
+            lineHeight: 13,
+          },
+          labelLine: {
+            length: 8,
+            length2: 6,
+          },
+          labelLayout: {
+            hideOverlap: false,
+          },
+        },
+      ],
+    }
+    pieChart.setOption(option)
+    pieChart.on('click', (params: any) => {
+      const data = params?.data || {}
+      const item: AdvisorChoiceDisplayItem & { bucket?: 'other' } = {
+        advisor_name: String(params?.name || ''),
+        student_count: Number(params?.value || 0),
+        percentage: typeof data.percentage === 'number' ? data.percentage : 0,
+        bucket: data.bucket === 'other' ? 'other' : undefined,
+      }
+      void openAdvisorChoiceStudentDialog(choice, item)
     })
   })
 }
@@ -388,6 +519,62 @@ async function openSchoolGroupStudentDialog(group: DashboardUndergraduateSchoolG
   }
 }
 
+async function openAdvisorChoiceStudentDialog(
+  choice: DashboardRecruitmentAdvisorChoiceDistribution,
+  item: AdvisorChoiceDisplayItem & { bucket?: 'other' },
+) {
+  const title = item.bucket === 'other' ? `${choice.choice_name}其他导师` : `${choice.choice_name} - ${item.advisor_name}`
+  selectedAdvisorChoiceName.value = title
+  selectedAdvisorChoicePaginationPage.value = 1
+  selectedAdvisorChoiceDialogSource.value = {
+    type: 'advisor',
+    title,
+    choiceRound: choice.choice_round,
+    advisorName: item.bucket === 'other' ? undefined : item.advisor_name,
+    bucket: item.bucket,
+  }
+  selectedAdvisorChoiceDialogVisible.value = true
+  selectedAdvisorChoiceListLoading.value = true
+  try {
+    const { data } = await getDashboardRecruitmentAdvisorChoiceStudents({
+      choice_round: choice.choice_round,
+      advisor_name: item.bucket === 'other' ? undefined : item.advisor_name,
+      bucket: item.bucket,
+    })
+    selectedAdvisorChoiceStudents.value = data.items
+    syncSelectedAdvisorChoicePagination()
+  } catch {
+    selectedAdvisorChoiceStudents.value = []
+    ElMessage.error('加载导师志愿学生清单失败')
+  } finally {
+    selectedAdvisorChoiceListLoading.value = false
+  }
+}
+
+async function reloadSelectedAdvisorChoiceStudents() {
+  const source = selectedAdvisorChoiceDialogSource.value
+  if (!source || source.type !== 'advisor') {
+    return
+  }
+  selectedAdvisorChoiceName.value = source.title
+  selectedAdvisorChoiceDialogVisible.value = true
+  selectedAdvisorChoiceListLoading.value = true
+  try {
+    const { data } = await getDashboardRecruitmentAdvisorChoiceStudents({
+      choice_round: source.choiceRound,
+      advisor_name: source.bucket === 'other' ? undefined : source.advisorName,
+      bucket: source.bucket,
+    })
+    selectedAdvisorChoiceStudents.value = data.items
+    syncSelectedAdvisorChoicePagination()
+  } catch {
+    selectedAdvisorChoiceStudents.value = []
+    ElMessage.error('刷新导师志愿学生清单失败')
+  } finally {
+    selectedAdvisorChoiceListLoading.value = false
+  }
+}
+
 async function reloadSelectedSchoolStudents() {
   const source = selectedSchoolDialogSource.value
   if (!source) {
@@ -396,6 +583,9 @@ async function reloadSelectedSchoolStudents() {
   selectedSchoolStudentFilter.value = ''
   if (source.type === 'school') {
     await openSchoolStudentDialog(source.schoolName)
+    return
+  }
+  if (source.type !== 'group') {
     return
   }
   selectedSchoolName.value = source.title
@@ -488,6 +678,9 @@ async function submitPortalWorkflowCommentDialog() {
     if (selectedSchoolDialogSource.value) {
       await reloadSelectedSchoolStudents()
     }
+    if (selectedAdvisorChoiceDialogSource.value) {
+      await reloadSelectedAdvisorChoiceStudents()
+    }
   } catch {
     ElMessage.error(`${currentAction.label}失败`)
   } finally {
@@ -519,9 +712,17 @@ watch(() => schoolStudentDialogVisible.value, (visible) => {
   }
 })
 
+watch(() => selectedAdvisorChoiceDialogVisible.value, (visible) => {
+  if (!visible) {
+    selectedAdvisorChoiceStudents.value = []
+    selectedAdvisorChoicePaginationPage.value = 1
+  }
+})
+
 function handleResize() {
   schoolRankingChart?.resize()
   Object.values(schoolGroupPieCharts).forEach((pieChart) => pieChart?.resize())
+  Object.values(advisorChoicePieCharts).forEach((pieChart) => pieChart?.resize())
 }
 
 onMounted(() => {
@@ -533,6 +734,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   schoolRankingChart?.dispose()
   Object.values(schoolGroupPieCharts).forEach((pieChart) => pieChart?.dispose())
+  Object.values(advisorChoicePieCharts).forEach((pieChart) => pieChart?.dispose())
 })
 </script>
 
@@ -594,6 +796,39 @@ onBeforeUnmount(() => {
             </article>
           </div>
         </div>
+        <div class="advisor-choice-card">
+          <div class="school-group-card__header">
+            <div>
+              <span class="school-group-card__kicker">学生报名导师志愿分布</span>
+              <h3>第一志愿 / 第二志愿导师 Top 10</h3>
+            </div>
+            <div class="school-group-card__total">
+              <span>最新报名申请样本</span>
+              <strong>{{ advisorChoiceTotal }}</strong>
+            </div>
+          </div>
+          <div class="advisor-choice-grid">
+            <article v-for="choice in advisorChoiceDistribution.choices" :key="choice.choice_round" class="school-group-panel">
+              <div class="school-group-panel__head">
+                <div>
+                  <h4>{{ choice.choice_name }}</h4>
+                  <span>按最新报名申请统计</span>
+                </div>
+                <strong>{{ choice.total }}<small>人</small></strong>
+              </div>
+              <div v-if="choice.total" :ref="(element) => setAdvisorChoicePieChartRef(choice.choice_round, element)" class="school-group-pie"></div>
+              <ul v-if="choice.total" class="advisor-choice-legend">
+                <li v-for="(item, index) in choice.items" :key="item.advisor_name">
+                  <span class="school-group-legend__dot" :style="schoolGroupLegendDotStyle(index)"></span>
+                  <span class="school-group-legend__name">{{ item.advisor_name }}</span>
+                  <strong>{{ item.student_count }}人</strong>
+                  <span>{{ formatRate(item.percentage) }}</span>
+                </li>
+              </ul>
+              <div v-else class="school-group-empty">暂无匹配导师志愿数据</div>
+            </article>
+          </div>
+        </div>
         <div v-if="schoolRankings.length" ref="schoolRankingChartRef" class="chart-panel school-ranking-chart"></div>
         <div v-else class="dashboard-empty">当前暂无可展示的本科院校报名数据。</div>
       </div>
@@ -640,8 +875,35 @@ onBeforeUnmount(() => {
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="school_name" label="学校" min-width="180" show-overflow-tooltip>
-          <template #default="scope">{{ scope.row.school_name || '未记录' }}</template>
+        <el-table-column prop="candidate_no" label="报名号" min-width="140">
+          <template #default="scope">{{ scope.row.candidate_no || '未生成' }}</template>
+        </el-table-column>
+        <el-table-column prop="registered_at" label="注册日期" min-width="180">
+          <template #default="scope">{{ scope.row.registered_at || '未记录' }}</template>
+        </el-table-column>
+        <el-table-column prop="phone_number" label="手机" min-width="140">
+          <template #default="scope">{{ scope.row.phone_number || '未填写' }}</template>
+        </el-table-column>
+        <el-table-column prop="email" label="邮件" min-width="220">
+          <template #default="scope">{{ scope.row.email || '未填写' }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <el-dialog v-model="selectedAdvisorChoiceDialogVisible" :title="`${selectedAdvisorChoiceName || '导师志愿'}报名学生清单`" width="960px" destroy-on-close>
+      <div class="school-student-summary">
+        <div class="school-student-summary__total">
+          <strong>共 {{ selectedAdvisorChoiceTotal }} 名学生</strong>
+          <!-- <span>按第一 / 第二志愿导师统计</span> -->
+        </div>
+      </div>
+      <el-table :data="selectedAdvisorChoicePagedStudents" v-loading="selectedAdvisorChoiceListLoading" border stripe>
+        <el-table-column label="学生名称" min-width="160">
+          <template #default="scope">
+            <el-button link type="primary" @click="openPortalApplicationDetail(scope.row)">
+              {{ scope.row.student_name || '未命名学生' }}
+            </el-button>
+          </template>
         </el-table-column>
         <el-table-column prop="candidate_no" label="报名号" min-width="140">
           <template #default="scope">{{ scope.row.candidate_no || '未生成' }}</template>
@@ -656,6 +918,18 @@ onBeforeUnmount(() => {
           <template #default="scope">{{ scope.row.email || '未填写' }}</template>
         </el-table-column>
       </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          :current-page="selectedAdvisorChoicePaginationPage"
+          :page-size="selectedAdvisorChoicePageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="selectedAdvisorChoiceTotal"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleAdvisorChoiceCurrentChange"
+          @size-change="handleAdvisorChoicePageSizeChange"
+        />
+      </div>
     </el-dialog>
 
     <RecruitmentPortalApplicationDrawer
@@ -748,6 +1022,16 @@ onBeforeUnmount(() => {
   box-shadow: 0 14px 32px rgba(24, 56, 87, 0.08);
 }
 
+.advisor-choice-card {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid rgba(53, 108, 184, 0.14);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.94));
+  box-shadow: 0 14px 32px rgba(24, 56, 87, 0.08);
+}
+
 .school-group-card__header {
   display: flex;
   align-items: flex-start;
@@ -793,6 +1077,12 @@ onBeforeUnmount(() => {
 .school-group-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.advisor-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -849,10 +1139,33 @@ onBeforeUnmount(() => {
 
 .school-group-legend {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.advisor-choice-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.advisor-choice-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(245, 248, 255, 0.72);
+  color: var(--text-subtle);
+  font-size: 13px;
 }
 
 .school-group-legend li {
@@ -886,6 +1199,12 @@ onBeforeUnmount(() => {
   color: var(--text-main);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .school-group-empty {
@@ -1051,6 +1370,10 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .advisor-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
   .chart-span,
   .alert-span {
     grid-column: 1 / -1;
@@ -1073,6 +1396,11 @@ onBeforeUnmount(() => {
   .school-group-card__total {
     width: 100%;
     text-align: left;
+  }
+
+  .school-group-legend,
+  .advisor-choice-legend {
+    grid-template-columns: 1fr;
   }
 }
 </style>

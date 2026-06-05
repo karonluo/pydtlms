@@ -65,6 +65,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { path: '/recruitment', label: '招生计划', icon: Histogram, requiredPermission: 'recruitment_plan:read' },
       { path: '/recruitment/registered-students', label: '注册学生', icon: UserFilled, requiredPermission: 'recruitment_registered_students:read' },
+      { path: '/recruitment/news', label: '新闻管理', icon: Bell, requiredPermission: 'news_management:read' },
     ],
     sections: [
       {
@@ -84,7 +85,7 @@ const menuGroups: MenuGroup[] = [
     icon: UserFilled,
     items: [
       { path: '/students/records', label: '学生主档', icon: UserFilled, requiredPermission: 'students:read' },
-      { path: '/students/centers', label: '研究中心', icon: UserFilled, requiredPermission: 'students:read' },
+      { path: '/students/centers', label: '研究中心', icon: UserFilled, requiredPermission: 'research_center:read' },
     ],
   },
   {

@@ -138,6 +138,122 @@ a {
   font-size: 12px;
 }
 
+.dialog-form {
+  padding-top: 8px;
+}
+
+.dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 16px;
+}
+
+.dialog-grid .el-select,
+.dialog-grid .el-input-number,
+.dialog-grid .el-date-editor {
+  width: 100%;
+}
+
+.dialog-grid--full {
+  grid-column: 1 / -1;
+}
+
+.reset-password-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.management-confirm-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.management-confirm-dialog__lead {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.management-confirm-dialog__hint {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+}
+
+.management-confirm-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.management-confirm-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.management-confirm-dialog__summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.workflow-comment-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-comment-dialog__hint {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+}
+
+.delete-center-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.delete-center-dialog__lead {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.delete-center-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.delete-center-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.delete-center-dialog__summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .stat-grid {
   display: grid;
   gap: 14px;

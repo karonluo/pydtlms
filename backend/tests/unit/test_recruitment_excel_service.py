@@ -102,14 +102,14 @@ def test_build_registered_portal_students_template_uses_max_repeated_group_count
         [
             {
                 "full_name": "最多列学生",
-                "preference_1_research_center_name": "方向一",
-                "preference_2_research_center_name": "方向二",
+                "preference_1_advisor_name": "导师甲",
+                "preference_2_advisor_name": "导师乙",
                 "education_1_stage": "高中毕业",
                 "education_4_stage": "博士在读",
             },
             {
                 "full_name": "较少列学生",
-                "preference_1_research_center_name": "唯一方向",
+                "preference_1_advisor_name": "导师丙",
                 "education_1_stage": "本科毕业",
             },
         ]
@@ -121,10 +121,10 @@ def test_build_registered_portal_students_template_uses_max_repeated_group_count
     first_row = dict(zip(headers, [cell.value for cell in worksheet[2]], strict=False))
     second_row = dict(zip(headers, [cell.value for cell in worksheet[3]], strict=False))
 
-    assert "志愿2研究中心" in headers
+    assert "志愿2导师" in headers
     assert "教育经历4教育阶段" in headers
-    assert "志愿3研究中心" not in headers
-    assert first_row["志愿2研究中心"] == "方向二"
-    assert second_row["志愿2研究中心"] is None
+    assert "志愿3导师" not in headers
+    assert first_row["志愿2导师"] == "导师乙"
+    assert second_row["志愿2导师"] is None
     assert first_row["教育经历4教育阶段"] == "博士在读"
     assert second_row["教育经历4教育阶段"] is None

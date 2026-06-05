@@ -4,6 +4,7 @@
 
 当前已提供的 Skills：
 
+- backend-management-dialog-style：后台管理弹窗、确认框、提醒框统一样式，优先沿用注册学生页结构
 - workflow-approval-maintenance：流程驱动审批、角色动作、Flowable 兼容运行态维护
 - recruitment-workbench-operations：招生计划与报名申请工作台维护
 - student-master-data-and-teams：学生主档、团队与导师归属维护

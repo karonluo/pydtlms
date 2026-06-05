@@ -429,7 +429,6 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_preferences (
   preference_order INTEGER NOT NULL,
   research_center_name VARCHAR(128) NOT NULL,
   advisor_name VARCHAR(128),
-  is_optional BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uq_portal_application_preferences_order UNIQUE (application_id, preference_order),
@@ -641,7 +640,6 @@ INSERT INTO dtlms_portal_application_preferences (
   preference_order,
   research_center_name,
   advisor_name,
-  is_optional,
   created_at,
   updated_at
 )
@@ -650,7 +648,6 @@ SELECT
   1,
   ra.first_choice,
   ra.intended_advisor_name,
-  FALSE,
   ra.created_at,
   ra.updated_at
 FROM dtlms_recruitment_applications AS ra
@@ -658,7 +655,6 @@ WHERE NULLIF(ra.first_choice, '') IS NOT NULL
 ON CONFLICT (application_id, preference_order) DO UPDATE SET
   research_center_name = EXCLUDED.research_center_name,
   advisor_name = EXCLUDED.advisor_name,
-  is_optional = EXCLUDED.is_optional,
   updated_at = EXCLUDED.updated_at;
 
 INSERT INTO dtlms_portal_application_preferences (
@@ -666,7 +662,6 @@ INSERT INTO dtlms_portal_application_preferences (
   preference_order,
   research_center_name,
   advisor_name,
-  is_optional,
   created_at,
   updated_at
 )
@@ -675,7 +670,6 @@ SELECT
   2,
   ra.second_choice,
   NULL,
-  TRUE,
   ra.created_at,
   ra.updated_at
 FROM dtlms_recruitment_applications AS ra
@@ -683,7 +677,6 @@ WHERE NULLIF(ra.second_choice, '') IS NOT NULL
 ON CONFLICT (application_id, preference_order) DO UPDATE SET
   research_center_name = EXCLUDED.research_center_name,
   advisor_name = EXCLUDED.advisor_name,
-  is_optional = EXCLUDED.is_optional,
   updated_at = EXCLUDED.updated_at;
 
 INSERT INTO dtlms_portal_application_personal_statements (

@@ -33,8 +33,10 @@ from app.schemas.portal import (
     PortalStudentRecord,
     PortalTeamListResponse,
 )
+from app.schemas.news import NewsArticleRecord
 from app.services.dashboard_service import (
     change_portal_student_password,
+    get_news_article_list,
     get_portal_profile_options,
     get_portal_student,
     get_public_recruitment_plans,
@@ -465,6 +467,12 @@ def portal_public_config(student_id: int = Depends(get_current_active_portal_stu
     return PortalPublicConfigResponse(
         portal_admissions_info_url=settings.portal_admissions_info_url,
     )
+
+
+@router.get("/news", response_model=list[NewsArticleRecord])
+def portal_news(student_id: int = Depends(get_current_active_portal_student_id)) -> list[NewsArticleRecord]:
+    del student_id
+    return get_news_article_list(status="已发布", page=1, page_size=100).items
 
 
 @router.post("/attachments/upload", response_model=PortalAttachmentUploadResponse)

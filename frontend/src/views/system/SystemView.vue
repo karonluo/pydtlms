@@ -25,6 +25,7 @@ import {
   downloadSystemUserTemplate,
   exportSystemUsers,
   getPermissionCatalog,
+  getRoleDeletionPreview,
   getSystemOptions,
   getSystemStats,
   importSystemUserRows,
@@ -47,6 +48,7 @@ import {
   type NotificationDeliveryLogRecord,
   type OperationLogRecord,
   type PermissionOption,
+  type RoleDeletionPreviewResponse,
   type RoleRecord,
   type RoleUpsert,
   type SyncLogRecord,
@@ -71,12 +73,18 @@ const templateSubmitting = ref(false)
 const dialogVisible = ref(false)
 const userSaveResultDialogVisible = ref(false)
 const userImportDialogVisible = ref(false)
+const roleDeleteDialogVisible = ref(false)
+const roleBatchDeleteDialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedIds = ref<number[]>([])
 const userImportInputRef = ref<HTMLInputElement | null>(null)
 const systemTagColors = ref<DictColorMap>({})
 const userSaveResult = ref<{ title: string; actionLabel: string; username: string; message: string } | null>(null)
+const deletingRole = ref<RoleRecord | null>(null)
+const roleDeletionPreview = ref<RoleDeletionPreviewResponse | null>(null)
+const roleDeleteSubmitting = ref(false)
+const roleBatchDeleteSubmitting = ref(false)
 const USER_IMPORT_BATCH_SIZE = 20
 
 const userImportState = reactive<{
@@ -754,6 +762,19 @@ async function handleDelete(row: SystemUserRecord | RoleRecord | AuditPolicyReco
         ? (row as AuditPolicyRecord).item
         : (row as IntegrationRecord).name
 
+  if (activeSection.value === 'roles') {
+    try {
+      const role = row as RoleRecord
+      const preview = (await getRoleDeletionPreview(role.id)).data
+      deletingRole.value = role
+      roleDeletionPreview.value = preview
+      roleDeleteDialogVisible.value = true
+    } catch (error) {
+      ElMessage.error(getErrorMessage(error))
+    }
+    return
+  }
+
   await ElMessageBox.confirm(`确定删除 ${targetName} 吗？`, '删除确认', { type: 'warning' })
 
   try {
@@ -789,6 +810,11 @@ async function handleBatchDelete() {
     return
   }
 
+  if (activeSection.value === 'roles') {
+    roleBatchDeleteDialogVisible.value = true
+    return
+  }
+
   await ElMessageBox.confirm(`已选择 ${selectedIds.value.length} 条记录，确认批量删除吗？`, '批量删除确认', { type: 'warning' })
 
   try {
@@ -819,6 +845,46 @@ async function handleBatchDelete() {
     await refreshAfterMutation()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
+  }
+}
+
+async function submitRoleDeleteDialog() {
+  if (!deletingRole.value) {
+    roleDeleteDialogVisible.value = false
+    return
+  }
+  if (roleDeletionPreview.value && !roleDeletionPreview.value.can_force_delete) {
+    ElMessage.warning('该角色仍有用户未配置其他角色，请先重新配置后再删除')
+    return
+  }
+  roleDeleteSubmitting.value = true
+  try {
+    await deleteRole(deletingRole.value.id, true)
+    ElMessage.success('角色已删除')
+    roleDeleteDialogVisible.value = false
+    deletingRole.value = null
+    roleDeletionPreview.value = null
+    resetSelection()
+    await refreshAfterMutation(true)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    roleDeleteSubmitting.value = false
+  }
+}
+
+async function submitRoleBatchDeleteDialog() {
+  roleBatchDeleteSubmitting.value = true
+  try {
+    await batchDeleteRoles(selectedIds.value)
+    ElMessage.success('所选角色已删除')
+    roleBatchDeleteDialogVisible.value = false
+    resetSelection()
+    await refreshAfterMutation(true)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    roleBatchDeleteSubmitting.value = false
   }
 }
 
@@ -1737,6 +1803,114 @@ onMounted(async () => {
         <el-button type="primary" @click="userSaveResultDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="roleDeleteDialogVisible"
+      title="删除确认"
+      width="640px"
+      destroy-on-close
+      :close-on-click-modal="!roleDeleteSubmitting"
+      :close-on-press-escape="!roleDeleteSubmitting"
+      :show-close="!roleDeleteSubmitting"
+      @closed="deletingRole = null; roleDeletionPreview = null"
+    >
+      <div v-if="deletingRole" class="dialog-form delete-center-dialog role-delete-dialog">
+        <p class="delete-center-dialog__lead">删除前会先检查该角色的使用情况。若用户还有其他角色，系统会先解绑再删除；若某个用户只剩这一个角色，则需要先重新配置。</p>
+        <div class="delete-center-dialog__summary">
+          <div>
+            <span class="delete-center-dialog__label">角色名称</span>
+            <strong>{{ deletingRole.role_name }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">角色编码</span>
+            <strong>{{ deletingRole.role_code }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">适用范围</span>
+            <strong>{{ deletingRole.scope_name || '系统管理' }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">权限数量</span>
+            <strong>{{ deletingRole.permissions.length }}</strong>
+          </div>
+        </div>
+
+        <el-alert
+          v-if="roleDeletionPreview"
+          :type="roleDeletionPreview.blocking_user_count > 0 ? 'warning' : 'info'"
+          :closable="false"
+          :title="roleDeletionPreview.blocking_user_count > 0 ? '存在必须先重新配置的用户' : '可以自动解绑后删除'"
+          :description="roleDeletionPreview.message"
+          show-icon
+        />
+
+        <div v-if="roleDeletionPreview && roleDeletionPreview.assigned_users.length > 0" class="role-delete-users">
+          <div class="role-delete-users__header">
+            <strong>关联用户</strong>
+            <span>共 {{ roleDeletionPreview.assigned_user_count }} 人</span>
+          </div>
+          <el-table :data="roleDeletionPreview.assigned_users" size="small" border stripe>
+            <el-table-column prop="username" label="账号" min-width="120" />
+            <el-table-column prop="full_name" label="姓名" min-width="120" />
+            <el-table-column prop="role_count" label="当前角色数" width="120" align="center" />
+            <el-table-column label="处理结果" min-width="180">
+              <template #default="scope">
+                <el-tag v-if="scope.row.can_be_unbound" type="success" effect="light">可自动解绑</el-tag>
+                <el-tag v-else type="warning" effect="light">需先重新配置</el-tag>
+                <span v-if="scope.row.fallback_role_name" class="role-delete-users__fallback">下一个角色：{{ scope.row.fallback_role_name }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="roleDeleteSubmitting" @click="roleDeleteDialogVisible = false">取消</el-button>
+        <el-button
+          type="danger"
+          :disabled="roleDeleteSubmitting || !!(roleDeletionPreview && !roleDeletionPreview.can_force_delete)"
+          :loading="roleDeleteSubmitting"
+          @click="submitRoleDeleteDialog"
+        >
+          确认解绑并删除
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="roleBatchDeleteDialogVisible"
+      title="批量删除确认"
+      width="640px"
+      destroy-on-close
+      :close-on-click-modal="!roleBatchDeleteSubmitting"
+      :close-on-press-escape="!roleBatchDeleteSubmitting"
+      :show-close="!roleBatchDeleteSubmitting"
+    >
+      <div class="dialog-form delete-center-dialog role-delete-dialog">
+        <p class="delete-center-dialog__lead">已选择 {{ selectedIds.length }} 个角色，确认批量删除吗？删除后不可恢复。</p>
+        <div class="delete-center-dialog__summary">
+          <div>
+            <span class="delete-center-dialog__label">选中数量</span>
+            <strong>{{ selectedIds.length }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">操作范围</span>
+            <strong>仅删除选中的角色记录</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">提醒</span>
+            <strong>相关权限分配将同时清除</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">说明</span>
+            <strong>请确认这些角色不再使用</strong>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="roleBatchDeleteSubmitting" @click="roleBatchDeleteDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="roleBatchDeleteSubmitting" @click="submitRoleBatchDeleteDialog">确认删除</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -2034,6 +2208,31 @@ onMounted(async () => {
 .reset-password-dialog {
   display: grid;
   gap: 16px;
+}
+
+.role-delete-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.role-delete-users {
+  display: grid;
+  gap: 12px;
+}
+
+.role-delete-users__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+}
+
+.role-delete-users__fallback {
+  display: inline-block;
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
 }
 
 .reset-password-summary {

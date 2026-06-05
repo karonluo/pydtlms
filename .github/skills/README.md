@@ -4,6 +4,7 @@
 
 已同步 Skills：
 
+- backend-management-dialog-style
 - workflow-approval-maintenance
 - recruitment-workbench-operations
 - student-master-data-and-teams

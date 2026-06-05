@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { Message, Phone, Tickets, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
-import { changePortalStudentPassword, clearPortalToken, getPortalProfile, getPortalPublicConfig, listPortalPlans, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
+import { changePortalStudentPassword, clearPortalToken, getPortalProfile, getPortalPublicConfig, listPortalNewsArticles, listPortalPlans, type PortalNewsArticleRecord, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 type ProgressCard = {
@@ -24,7 +24,6 @@ type WorkflowStageCard = {
 
 const router = useRouter()
 const defaultProfilePhotoUrl = '/images/default_head.png'
-const showPortalHomeNewsSections = false
 const portalAdmissionsInfoUrl = ref('')
 const terminatedWorkflowNotice = '很遗憾您未通过此环节的选拔，但请不要灰心，您已进入项目滚动补录调剂池，有机会时会优先联系您，可关注邮箱与电话，谢谢。'
 
@@ -49,6 +48,9 @@ function resolveProgressCount(value: unknown): number {
 
 const portalStudent = ref<PortalStudentRecord | null>(null)
 const planList = ref<PortalPlanRecord[]>([])
+const portalNewsList = ref<PortalNewsArticleRecord[]>([])
+const portalNewsDialogVisible = ref(false)
+const activePortalNews = ref<PortalNewsArticleRecord | null>(null)
 const passwordDialogVisible = ref(false)
 const passwordSubmitting = ref(false)
 const passwordForm = reactive({
@@ -57,22 +59,22 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
-const fallbackAnnouncements = [
-  { title: '2027 春季招生计划', term: '2027 春' },
-  { title: '2026 智能制造联合培养', term: '2026 秋' },
-  { title: '2026 工程博士专项', term: '2026 秋' },
-]
+// const fallbackAnnouncements = [
+//   { title: '2027 春季招生计划', term: '2027 春' },
+//   { title: '2026 智能制造联合培养', term: '2026 秋' },
+//   { title: '2026 工程博士专项', term: '2026 秋' },
+// ]
 
-const scheduleList = [
-  {
-    month: '2026年7月',
-    items: ['公布博士招生简章目录、推免生目录', '推免博士生（春季招生）材料审核、确定综合考核名单'],
-  },
-  {
-    month: '2026年4月',
-    items: ['推免博士生（春季招生）报名申请', '公布硕士招生简章、普通招考招生目录'],
-  },
-]
+// const scheduleList = [
+//   {
+//     month: '2026年7月',
+//     items: ['公布博士招生简章目录、推免生目录', '推免博士生（春季招生）材料审核、确定综合考核名单'],
+//   },
+//   {
+//     month: '2026年4月',
+//     items: ['推免博士生（春季招生）报名申请', '公布硕士招生简章、普通招考招生目录'],
+//   },
+// ]
 
 const studentDisplayName = computed(() => trimText(portalStudent.value?.full_name) || '未注册')
 const registrationNo = computed(() => {
@@ -239,15 +241,41 @@ const progressCards = computed<ProgressCard[]>(() => {
   ]
 })
 
-const announcements = computed(() => {
-  if (!planList.value.length) {
-    return fallbackAnnouncements
+// const announcements = computed(() => {
+//   if (!planList.value.length) {
+//     return fallbackAnnouncements
+//   }
+//   return planList.value.slice(0, 3).map((item) => ({
+//     title: item.plan_name,
+//     term: item.academic_term,
+//   }))
+// })
+
+const portalNewsTickerItems = computed(() => {
+  const noticeItems = portalNewsList.value.filter((item) => item.news_type === '学生门户通知消息')
+  if (noticeItems.length <= 1) {
+    return noticeItems
   }
-  return planList.value.slice(0, 3).map((item) => ({
-    title: item.plan_name,
-    term: item.academic_term,
-  }))
+  return [...noticeItems, ...noticeItems]
 })
+
+const portalNewsArticleItems = computed(() => portalNewsList.value.filter((item) => item.news_type === '学生门户新闻信息'))
+
+function formatPortalNewsDate(value?: string | null) {
+  if (!value) {
+    return ''
+  }
+  return String(value).slice(0, 10)
+}
+
+function formatPortalNewsPublisher(article: PortalNewsArticleRecord) {
+  return article.publisher_name || article.publisher_username || '上海人工智能实验室'
+}
+
+function openPortalNewsArticle(article: PortalNewsArticleRecord) {
+  activePortalNews.value = article
+  portalNewsDialogVisible.value = true
+}
 
 async function loadPortalHome() {
   try {
@@ -258,6 +286,14 @@ async function loadPortalHome() {
   } catch {
     clearPortalToken()
     await router.replace('/portal')
+    return
+  }
+
+  try {
+    const newsResponse = await listPortalNewsArticles()
+    portalNewsList.value = newsResponse.data || []
+  } catch {
+    portalNewsList.value = []
   }
 }
 
@@ -323,6 +359,11 @@ function logoutPortal() {
   void router.replace('/portal')
 }
 
+function closePortalNewsDialog() {
+  portalNewsDialogVisible.value = false
+  activePortalNews.value = null
+}
+
 onMounted(() => {
   void loadPortalHome()
 })
@@ -354,7 +395,8 @@ onMounted(() => {
       <div class="portal-home-hero__shell">
         <div class="portal-home-hero__copy">
           <h1>欢迎加入上海人工智能实验室！</h1>
-          <p style="font-weight:bolder">上海人工智能实验室自2022年启动博士生联合培养项目以来，已与国内十余所顶尖高校建立深度合作关系，致力于在通用人工智能（AGI）及相关前沿领域培养高水平科研人才。</p>
+          <p style="font-weight:bolder">
+            上海人工智能实验室自2022年启动博士生联合培养项目以来，已与国内十余所顶尖高校建立深度合作关系，致力于在通用人工智能（AGI）及相关前沿领域培养高水平科研人才。</p>
           <!--<span>建成国际一流人工智能实验室，中国人工智能原创理论和关键技术的策源地。</span>-->
         </div>
       </div>
@@ -376,7 +418,9 @@ onMounted(() => {
             <div class="portal-home-profile-card__meta">
               <hr class="portal-home-profile-card__rule" />
               <div class="portal-home-profile-card__meta-label">
-                <el-icon><User /></el-icon>
+                <el-icon>
+                  <User />
+                </el-icon>
                 <span>报名号</span>
               </div>
               <strong>{{ registrationNo }}</strong>
@@ -384,7 +428,9 @@ onMounted(() => {
             <div class="portal-home-profile-card__meta">
               <hr class="portal-home-profile-card__rule" />
               <div class="portal-home-profile-card__meta-label">
-                <el-icon><Tickets /></el-icon>
+                <el-icon>
+                  <Tickets />
+                </el-icon>
                 <span>招生计划</span>
               </div>
               <strong>{{ activePlan?.plan_name || '未填写' }}</strong>
@@ -392,7 +438,9 @@ onMounted(() => {
             <div class="portal-home-profile-card__meta">
               <hr class="portal-home-profile-card__rule" />
               <div class="portal-home-profile-card__meta-label">
-                <el-icon><Phone /></el-icon>
+                <el-icon>
+                  <Phone />
+                </el-icon>
                 <span>手机</span>
               </div>
               <strong>{{ portalStudent?.phone_number || '未填写' }}</strong>
@@ -400,11 +448,29 @@ onMounted(() => {
             <div class="portal-home-profile-card__meta">
               <hr class="portal-home-profile-card__rule" />
               <div class="portal-home-profile-card__meta-label">
-                <el-icon><Message /></el-icon>
+                <el-icon>
+                  <Message />
+                </el-icon>
                 <span>邮箱</span>
               </div>
               <strong>{{ portalStudent?.email || '未填写' }}</strong>
             </div>
+          </div>
+        </div>
+      </section>
+
+
+      <section v-if="portalNewsList.some((item) => item.news_type === '学生门户通知消息')" id="portal-news" class="portal-home-news-ticker" aria-label="学生门户通知消息">
+        <div class="portal-home-news-ticker__label">重要通知</div>
+        <div class="portal-home-news-ticker__viewport">
+          <div class="portal-home-news-ticker__track"
+            :class="{ 'portal-home-news-ticker__track--animated': portalNewsTickerItems.length > 1 }">
+            <button v-for="(item, index) in portalNewsTickerItems" :key="`${item.id}-${index}`" type="button"
+              class="portal-home-news-ticker__item" @click="openPortalNewsArticle(item)">
+              <span class="portal-home-news-ticker__dot"></span>
+              <span class="portal-home-news-ticker__title">{{ item.news_title }}</span>
+              <time class="portal-home-news-ticker__time">{{ formatPortalNewsDate(item.published_at) }}</time>
+            </button>
           </div>
         </div>
       </section>
@@ -415,7 +481,8 @@ onMounted(() => {
             <h3>我的申请进度</h3>
             <span class="portal-home-progress__deadline">（本次夏令营集中选拔申请将于2026年6月9日(周二)23:59截止。）</span>
           </div>
-          <p v-if="showApplicationSectionProgress">已完成 {{ completedProgressCount }}/{{ progressCards.length }} 项，继续填写即可提交申请。</p>
+          <p v-if="showApplicationSectionProgress">已完成 {{ completedProgressCount }}/{{ progressCards.length }}
+            项，继续填写即可提交申请。</p>
         </div>
 
         <div class="portal-home-progress__workflow">
@@ -432,83 +499,65 @@ onMounted(() => {
 
           <div class="portal-home-workflow__timeline" aria-label="申请流程阶段条">
             <template v-for="(stage, index) in workflowStageCards" :key="stage.key">
-              <article
-                class="portal-home-workflow__stage"
-                :class="[
-                  `portal-home-workflow__stage--${stage.status}`,
-                  { 'portal-home-workflow__stage--arrow-hidden': index === workflowStageCards.length - 1 },
-                ]"
-              >
+              <article class="portal-home-workflow__stage" :class="[
+                `portal-home-workflow__stage--${stage.status}`,
+                { 'portal-home-workflow__stage--arrow-hidden': index === workflowStageCards.length - 1 },
+              ]">
                 <span class="portal-home-workflow__stage-index">{{ String(index + 1).padStart(2, '0') }}</span>
                 <strong>{{ stage.label }}</strong>
                 <p>{{ stage.description }}</p>
               </article>
-              <span v-if="index < workflowStageCards.length - 1" class="portal-home-workflow__arrow" aria-hidden="true">→</span>
+              <span v-if="index < workflowStageCards.length - 1" class="portal-home-workflow__arrow"
+                aria-hidden="true">→</span>
             </template>
           </div>
         </div>
 
         <div v-if="showApplicationSectionProgress" class="portal-home-progress__grid">
-          <article
-            v-for="card in progressCards"
-            :key="card.key"
-            class="portal-home-progress__item"
-            :class="{ 'portal-home-progress__item--completed': card.completed }"
-          >
+          <article v-for="card in progressCards" :key="card.key" class="portal-home-progress__item"
+            :class="{ 'portal-home-progress__item--completed': card.completed }">
             <div class="portal-home-progress__item-top">
               <strong>{{ card.label }}</strong>
-              <i :class="{ 'portal-home-progress__item-icon--done': card.completed }">{{ card.completed ? '○' : '◔' }}</i>
+              <i :class="{ 'portal-home-progress__item-icon--done': card.completed }">{{ card.completed ? '○' : '◔'
+                }}</i>
             </div>
             <span>{{ card.completed ? '已完成' : card.hint }}</span>
           </article>
         </div>
 
-        <button v-if="showApplicationSectionProgress" type="button" class="portal-home-progress__cta" @click="goToApplication">
+        <button v-if="showApplicationSectionProgress" type="button" class="portal-home-progress__cta"
+          @click="goToApplication">
           继续填写报名信息
           <span>→</span>
         </button>
       </section>
-
-      <section
-        class="portal-home-banner"
-        role="button"
-        tabindex="0"
-        @click="openPortalAdmissionsInfo"
-        @keydown.enter.prevent="openPortalAdmissionsInfo"
-        @keydown.space.prevent="openPortalAdmissionsInfo"
-      >
+      <section class="portal-home-banner" role="button" tabindex="0" @click="openPortalAdmissionsInfo"
+        @keydown.enter.prevent="openPortalAdmissionsInfo" @keydown.space.prevent="openPortalAdmissionsInfo">
         <div class="portal-home-banner__inner">
           <p>查看更多上海人工智能实验室招生信息</p>
           <span class="portal-home-banner__action">了解更多 <span>→</span></span>
         </div>
       </section>
 
-      <section v-if="showPortalHomeNewsSections" id="portal-news" class="portal-home-info-grid">
-        <article class="portal-home-info-card">
+      <section v-if="portalNewsArticleItems.length > 0" class="portal-home-info-grid">
+        <article class="portal-home-info-card portal-home-news-card">
           <div class="portal-home-info-card__title-row">
-            <h3>招生信息</h3>
-            <span>→</span>
+            <h3>新闻信息</h3>
           </div>
-          <div class="portal-home-info-card__list">
-            <div v-for="item in announcements" :key="`${item.title}-${item.term}`" class="portal-home-info-card__news-item">
-              <span>{{ item.title }}</span>
-              <time>{{ item.term }}</time>
-            </div>
-          </div>
-        </article>
-
-        <article class="portal-home-info-card">
-          <div class="portal-home-info-card__title-row">
-            <h3>报考日程</h3>
-            <span>→</span>
-          </div>
-          <div class="portal-home-schedule">
-            <div v-for="section in scheduleList" :key="section.month" class="portal-home-schedule__item">
-              <div class="portal-home-schedule__month">{{ section.month }}</div>
-              <ul>
-                <li v-for="entry in section.items" :key="entry">{{ entry }}</li>
-              </ul>
-            </div>
+          <div class="portal-home-news-card__grid">
+            <button
+              v-for="item in portalNewsArticleItems"
+              :key="item.id"
+              type="button"
+              class="portal-home-news-card__item"
+              @click="openPortalNewsArticle(item)"
+            >
+              <strong class="portal-home-news-card__title">{{ item.news_title }}</strong>
+              <div class="portal-home-news-card__meta">
+                <span>{{ formatPortalNewsPublisher(item) }}</span>
+                <span>{{ formatPortalNewsDate(item.published_at) }}</span>
+              </div>
+            </button>
           </div>
         </article>
       </section>
@@ -517,8 +566,10 @@ onMounted(() => {
     <footer class="portal-home-footer"></footer>
 
     <div v-if="passwordDialogVisible" class="portal-home-password-dialog">
-      <button type="button" class="portal-home-password-dialog__mask" aria-label="关闭修改密码弹窗" @click="closePasswordDialog"></button>
-      <div class="portal-home-password-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="portal-home-password-title">
+      <button type="button" class="portal-home-password-dialog__mask" aria-label="关闭修改密码弹窗"
+        @click="closePasswordDialog"></button>
+      <div class="portal-home-password-dialog__panel" role="dialog" aria-modal="true"
+        aria-labelledby="portal-home-password-title">
         <div class="portal-home-password-dialog__header">
           <div>
             <strong id="portal-home-password-title">修改登录密码</strong>
@@ -543,11 +594,26 @@ onMounted(() => {
         </div>
 
         <div class="portal-home-password-dialog__actions">
-          <button type="button" class="portal-home-password-dialog__button portal-home-password-dialog__button--ghost" :disabled="passwordSubmitting" @click="closePasswordDialog">取消</button>
-          <button type="button" class="portal-home-password-dialog__button portal-home-password-dialog__button--primary" :disabled="passwordSubmitting" @click="submitPasswordChange">{{ passwordSubmitting ? '提交中...' : '确认修改' }}</button>
+          <button type="button" class="portal-home-password-dialog__button portal-home-password-dialog__button--ghost"
+            :disabled="passwordSubmitting" @click="closePasswordDialog">取消</button>
+          <button type="button" class="portal-home-password-dialog__button portal-home-password-dialog__button--primary"
+            :disabled="passwordSubmitting" @click="submitPasswordChange">{{ passwordSubmitting ? '提交中...' : '确认修改'
+            }}</button>
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="portalNewsDialogVisible" :title="activePortalNews?.news_title || '学生门户通知消息'" width="85%"
+      top="5vh" destroy-on-close class="portal-home-news-dialog" @closed="closePortalNewsDialog">
+      <div v-if="activePortalNews" class="portal-home-news-dialog__body">
+        <div class="portal-home-news-dialog__meta">
+          <span>类型：{{ activePortalNews.news_type }}</span>
+          <span v-if="activePortalNews.published_at">发布时间：{{ formatPortalNewsDate(activePortalNews.published_at)
+            }}</span>
+        </div>
+        <div class="portal-home-news-dialog__content" v-html="activePortalNews.news_content"></div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -1116,6 +1182,98 @@ onMounted(() => {
   font-size: 17px;
 }
 
+.portal-home-news-ticker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid #d9e5f6;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 10px 24px rgba(17, 53, 108, 0.06);
+}
+
+.portal-home-news-ticker__label {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(90deg, #0d67db, #156fe0);
+  box-shadow: 0 8px 18px rgba(13, 103, 219, 0.18);
+}
+
+.portal-home-news-ticker__viewport {
+  overflow: hidden;
+  flex: 1;
+}
+
+.portal-home-news-ticker__track {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+}
+
+.portal-home-news-ticker__track--animated {
+  animation: portal-news-marquee 28s linear infinite;
+}
+
+.portal-home-news-ticker__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 320px;
+  padding: 10px 14px;
+  border: 1px solid #e3edf9;
+  border-radius: 999px;
+  background: #fff;
+  color: #17365d;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(20, 58, 111, 0.05);
+}
+
+.portal-home-news-ticker__item:hover {
+  border-color: #9ec1f7;
+  box-shadow: 0 10px 22px rgba(20, 58, 111, 0.09);
+}
+
+.portal-home-news-ticker__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff7c5c, #f24848);
+  box-shadow: 0 0 0 6px rgba(242, 72, 72, 0.08);
+}
+
+.portal-home-news-ticker__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.portal-home-news-ticker__time {
+  flex: 0 0 auto;
+  color: #8b9eb7;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@keyframes portal-news-marquee {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 .portal-home-info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1125,6 +1283,10 @@ onMounted(() => {
 
 .portal-home-info-card {
   padding: 28px 28px 22px;
+}
+
+.portal-home-news-card {
+  grid-column: 1 / -1;
 }
 
 .portal-home-info-card__title-row {
@@ -1165,6 +1327,89 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.portal-home-news-card__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.portal-home-news-card__item {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 18px 18px 16px;
+  border: 1px solid #eef3fa;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #f9fbff);
+  box-shadow: 0 8px 20px rgba(17, 53, 108, 0.05);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-home-news-card__item:hover {
+  border-color: #b9d0f4;
+  box-shadow: 0 12px 26px rgba(17, 53, 108, 0.1);
+  transform: translateY(-1px);
+}
+
+.portal-home-news-card__title {
+  color: #17365d;
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 700;
+}
+
+.portal-home-news-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #7f91a8;
+  font-size: 12px;
+}
+
+.portal-home-news-card__meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-home-news-dialog__body {
+  display: grid;
+  gap: 16px;
+  max-height: 78vh;
+  overflow: hidden auto;
+  padding-right: 6px;
+}
+
+.portal-home-news-dialog__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  color: #6b7f99;
+  font-size: 13px;
+}
+
+.portal-home-news-dialog__content {
+  color: #1c2f48;
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.portal-home-news-dialog__content :deep(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.portal-home-news-dialog__content :deep(p) {
+  margin: 0 0 12px;
+}
+
+.portal-home-news-dialog__content :deep(figure) {
+  margin: 0 0 12px;
+}
+
 .portal-home-schedule {
   display: grid;
   gap: 16px;
@@ -1194,7 +1439,7 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.portal-home-schedule li + li {
+.portal-home-schedule li+li {
   margin-top: 8px;
 }
 
@@ -1342,6 +1587,7 @@ onMounted(() => {
 }
 
 @media (max-width: 1100px) {
+
   .portal-home-header__inner,
   .portal-home-hero__shell,
   .portal-home-main,
@@ -1432,6 +1678,10 @@ onMounted(() => {
   .portal-home-progress__grid,
   .portal-home-profile-card__meta-grid,
   .portal-home-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-home-news-card__grid {
     grid-template-columns: 1fr;
   }
 

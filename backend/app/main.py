@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import auth, dashboard, degree, portal, recruitment, students, system, training, workflow
+from app.api.v1 import auth, dashboard, degree, news, portal, recruitment, students, system, training, workflow
 from app.core.config import settings
 from app.core.exceptions import DatabaseUnavailableError
 from app.core.logging import configure_logging
@@ -45,6 +45,7 @@ app.add_middleware(
 api_router = APIRouter(prefix=settings.api_v1_prefix)
 api_router.include_router(auth.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(news.router)
 api_router.include_router(portal.router)
 api_router.include_router(recruitment.router)
 api_router.include_router(students.router)

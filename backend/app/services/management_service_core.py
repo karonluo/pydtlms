@@ -1296,7 +1296,14 @@ class RuntimeManagementStoreCoreMixin:
                     self._postgres_store.update_runtime_system_user(int(updated_user["id"]), updated_user)
                     self._bump_system_user_list_cache_version()
                     return
-            raise KeyError(username)
+            candidate = self._load_system_user_auth_context(username)
+            if not candidate:
+                logger.warning("Skip last_login update because system user %s was not found in runtime or PostgreSQL", username)
+                return
+            updated_user = {**candidate, "last_login_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+            self._postgres_store.update_runtime_system_user(int(updated_user["id"]), updated_user)
+            self._list("system_users").append(updated_user)
+            self._bump_system_user_list_cache_version()
 
     def update_user_password(self, username: str, new_password: str) -> None:
         with self._lock:

@@ -1,0 +1,1030 @@
+PS D:\pyproj\pydtlms> 
+          "name": "is_deleted",
+          "data_type": "boolean",
+          "is_nullable": "NO",
+          "default": "false"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "department_name",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": "''::character varying"
+        },
+        {
+          "name": "phone_number",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "last_login_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": []
+    },
+    "dtlms_wf_de_model": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "key_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "category_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "version_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "1"
+        },
+        {
+          "name": "model_type_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "0"
+        },
+        {
+          "name": "description_",
+          "data_type": "text",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "meta_info_",
+          "data_type": "jsonb",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "created_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "last_updated_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "tenant_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "deployment_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "resource_name_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "editor_source_value_",
+          "data_type": "text",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "editor_source_extra_value_",
+          "data_type": "jsonb",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": []
+    },
+    "dtlms_wf_hi_actinst": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_def_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "exec_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "act_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "act_name_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "act_type_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "assignee_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "start_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "end_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "duration_ms_",
+          "data_type": "bigint",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "business_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_hi_actinst_proc_def_id__fkey",
+          "column": "proc_def_id_",
+          "ref_table": "dtlms_wf_re_procdef",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_wf_hi_procinst": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "business_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "proc_def_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "start_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "end_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "duration_ms_",
+          "data_type": "bigint",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "start_user_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "end_act_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "delete_reason_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "start_act_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "state_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": "'ACTIVE'::character varying"
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_hi_procinst_proc_def_id__fkey",
+          "column": "proc_def_id_",
+          "ref_table": "dtlms_wf_re_procdef",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_wf_hi_taskinst": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "task_def_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "proc_def_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "exec_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "business_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "assignee_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "owner_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "start_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "claim_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "end_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "duration_ms_",
+          "data_type": "bigint",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "due_date_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "delete_reason_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "priority_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "50"
+        },
+        {
+          "name": "category_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_hi_taskinst_proc_def_id__fkey",
+          "column": "proc_def_id_",
+          "ref_table": "dtlms_wf_re_procdef",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_wf_hi_varinst": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "exec_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "task_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "var_type_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "text_value_",
+          "data_type": "text",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "number_value_",
+          "data_type": "bigint",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "json_value_",
+          "data_type": "jsonb",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "create_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "last_updated_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": []
+    },
+    "dtlms_wf_re_deployment": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "category_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "deploy_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "tenant_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": []
+    },
+    "dtlms_wf_re_procdef": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "key_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "version_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "1"
+        },
+        {
+          "name": "deployment_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "resource_name_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "diagram_resource_name_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "category_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "description_",
+          "data_type": "text",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "suspension_state_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "1"
+        },
+        {
+          "name": "tenant_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_re_procdef_deployment_id__fkey",
+          "column": "deployment_id_",
+          "ref_table": "dtlms_wf_re_deployment",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_wf_ru_execution": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_def_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "business_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "parent_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "act_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "is_active_",
+          "data_type": "boolean",
+          "is_nullable": "NO",
+          "default": "true"
+        },
+        {
+          "name": "is_concurrent_",
+          "data_type": "boolean",
+          "is_nullable": "NO",
+          "default": "false"
+        },
+        {
+          "name": "is_scope_",
+          "data_type": "boolean",
+          "is_nullable": "NO",
+          "default": "true"
+        },
+        {
+          "name": "start_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "start_user_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "super_exec_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "tenant_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_ru_execution_proc_def_id__fkey",
+          "column": "proc_def_id_",
+          "ref_table": "dtlms_wf_re_procdef",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_wf_ru_identitylink": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "bigint",
+          "is_nullable": "NO",
+          "default": "nextval('dtlms_wf_ru_identitylink_id__seq'::regclass)"
+        },
+        {
+          "name": "task_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "user_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "group_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "link_type_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "created_at_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": []
+    },
+    "dtlms_wf_ru_task": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "exec_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_def_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "task_def_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "business_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "assignee_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "owner_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "create_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "due_date_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "claim_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "priority_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "50"
+        },
+        {
+          "name": "suspension_state_",
+          "data_type": "integer",
+          "is_nullable": "NO",
+          "default": "1"
+        },
+        {
+          "name": "tenant_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "form_key_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "description_",
+          "data_type": "text",
+          "is_nullable": "YES",
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_ru_task_exec_id__fkey",
+          "column": "exec_id_",
+          "ref_table": "dtlms_wf_ru_execution",
+          "ref_column": "id_"
+        },
+        {
+          "constraint_name": "dtlms_wf_ru_task_proc_def_id__fkey",
+          "column": "proc_def_id_",
+          "ref_table": "dtlms_wf_re_procdef",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_wf_ru_variable": {
+      "columns": [
+        {
+          "name": "id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "exec_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "proc_inst_id_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "task_id_",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "name_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "var_type_",
+          "data_type": "character varying",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "text_value_",
+          "data_type": "text",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "number_value_",
+          "data_type": "bigint",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "json_value_",
+          "data_type": "jsonb",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "create_time_",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "primary_key": [
+        "id_"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_wf_ru_variable_exec_id__fkey",
+          "column": "exec_id_",
+          "ref_table": "dtlms_wf_ru_execution",
+          "ref_column": "id_"
+        }
+      ]
+    },
+    "dtlms_written_exam_scores": {
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "bigint",
+          "is_nullable": "NO",
+          "default": "nextval('dtlms_written_exam_scores_id_seq'::regclass)"
+        },
+        {
+          "name": "application_id",
+          "data_type": "bigint",
+          "is_nullable": "NO",
+          "default": null
+        },
+        {
+          "name": "exam_date",
+          "data_type": "date",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "exam_score",
+          "data_type": "numeric",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "import_batch_no",
+          "data_type": "character varying",
+          "is_nullable": "YES",
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "default": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "constraint_name": "dtlms_written_exam_scores_application_id_fkey",
+          "column": "application_id",
+          "ref_table": "dtlms_recruitment_applications",
+          "ref_column": "id"
+        }
+      ]
+    }
+  }
+}

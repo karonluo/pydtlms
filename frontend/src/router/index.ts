@@ -8,6 +8,7 @@ import AppLayout from '../layouts/AppLayout.vue'
 
 const DashboardView = () => import('../views/dashboard/DashboardView.vue')
 const RecruitmentWorkbenchView = () => import('../views/recruitment/RecruitmentWorkbenchView.vue')
+const NewsManagementView = () => import('../views/recruitment/NewsManagementView.vue')
 const StudentsView = () => import('../views/students/StudentsView.vue')
 const TrainingView = () => import('../views/training/TrainingView.vue')
 const DegreeView = () => import('../views/degree/DegreeView.vue')
@@ -38,12 +39,13 @@ const router = createRouter({
         { path: 'dashboard', component: DashboardView, meta: { title: '经营总览', requiredPermission: 'dashboard:read' } },
         { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划', section: 'plans', requiredPermission: 'recruitment_plan:read' } },
         { path: 'recruitment/registered-students', component: StudentsView, meta: { title: '注册学生管理', section: 'portal-registrations', requiredPermission: 'recruitment_registered_students:read' } },
+        { path: 'recruitment/news', component: NewsManagementView, meta: { title: '新闻管理', requiredPermission: 'news_management:read' } },
         { path: 'recruitment/advisor-screening', component: RecruitmentWorkbenchView, meta: { title: '导师初筛', section: 'advisor-screening', requiredPermission: 'recruitment_advisor_screening:read' } },
         { path: 'recruitment/initial-screening-confirmation', component: RecruitmentWorkbenchView, meta: { title: '初筛确认', section: 'initial-screening-confirmation', requiredPermission: 'recruitment_initial_screening_confirmation:read' } },
         { path: 'students', redirect: '/students/records' },
         { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records', requiredPermission: 'students:read' } },
         { path: 'students/portal-registrations', redirect: '/recruitment/registered-students' },
-        { path: 'students/centers', component: StudentsView, meta: { title: '研究中心管理', section: 'centers', requiredPermission: 'students:read' } },
+        { path: 'students/centers', component: StudentsView, meta: { title: '研究中心管理', section: 'centers', requiredPermission: 'research_center:read' } },
         { path: 'training', redirect: '/training/plans' },
         { path: 'training/plans', component: TrainingView, meta: { title: '培养方案管理', section: 'plans', requiredPermission: 'training:read' } },
         { path: 'training/reports', component: TrainingView, meta: { title: '科研报告管理', section: 'reports', requiredPermission: 'training:read' } },

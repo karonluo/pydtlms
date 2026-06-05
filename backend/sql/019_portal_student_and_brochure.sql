@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     phone_number VARCHAR(32) NOT NULL UNIQUE,
     email VARCHAR(128) NOT NULL UNIQUE,
     id_number VARCHAR(64) NOT NULL UNIQUE,
+    candidate_no VARCHAR(64),
     graduation_school VARCHAR(255),
     highest_degree VARCHAR(64),
     intended_field VARCHAR(128),
@@ -18,7 +19,6 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_students (
     selected_team_name VARCHAR(128),
     selected_advisor_name VARCHAR(128),
     self_evaluation TEXT,
-    application_draft JSONB,
     submitted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
