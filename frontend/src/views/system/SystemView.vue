@@ -14,6 +14,7 @@ import {
   batchDeleteIntegrations,
   batchDeleteRoles,
   batchDeleteSystemUsers,
+  batchInitSystemUserPasswords,
   createAuditPolicy,
   createIntegration,
   createRole,
@@ -54,10 +55,13 @@ import {
   type SyncLogRecord,
   type SystemOptions,
   type SystemStats,
+  type SystemUserBatchInitPasswordRequest,
+  type SystemUserBatchInitPasswordResponse,
   type SystemUserImportIssue,
   type SystemUserImportRow,
   type SystemUserImportParseResult,
   type SystemUserImportResult,
+  type SystemUserPasswordInitRecord,
   type SystemUserRecord,
   type SystemUserUpsert,
 } from '../../api/system'
@@ -73,6 +77,8 @@ const templateSubmitting = ref(false)
 const dialogVisible = ref(false)
 const userSaveResultDialogVisible = ref(false)
 const userImportDialogVisible = ref(false)
+const batchInitPasswordConfirmDialogVisible = ref(false)
+const batchInitPasswordResultDialogVisible = ref(false)
 const roleDeleteDialogVisible = ref(false)
 const roleBatchDeleteDialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
@@ -81,10 +87,12 @@ const selectedIds = ref<number[]>([])
 const userImportInputRef = ref<HTMLInputElement | null>(null)
 const systemTagColors = ref<DictColorMap>({})
 const userSaveResult = ref<{ title: string; actionLabel: string; username: string; message: string } | null>(null)
+const batchInitPasswordResult = ref<{ title: string; message: string; items: SystemUserPasswordInitRecord[] } | null>(null)
 const deletingRole = ref<RoleRecord | null>(null)
 const roleDeletionPreview = ref<RoleDeletionPreviewResponse | null>(null)
 const roleDeleteSubmitting = ref(false)
 const roleBatchDeleteSubmitting = ref(false)
+const batchInitPasswordSubmitting = ref(false)
 const USER_IMPORT_BATCH_SIZE = 20
 
 const userImportState = reactive<{
@@ -931,6 +939,37 @@ async function handleUserExport(mode: 'filtered' | 'selected') {
   }
 }
 
+async function handleBatchInitUserPasswords() {
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning('请先选择要初始化密码的系统用户')
+    return
+  }
+  batchInitPasswordConfirmDialogVisible.value = true
+}
+
+async function submitBatchInitPasswordDialog() {
+  batchInitPasswordSubmitting.value = true
+  try {
+    const payload: SystemUserBatchInitPasswordRequest = { ids: selectedIds.value }
+    const response = await batchInitSystemUserPasswords(payload)
+    const result: SystemUserBatchInitPasswordResponse = response.data
+    batchInitPasswordResult.value = {
+      title: '批量初始化密码结果',
+      message: result.message,
+      items: result.items,
+    }
+    batchInitPasswordConfirmDialogVisible.value = false
+    batchInitPasswordResultDialogVisible.value = true
+    resetSelection()
+    await refreshAfterMutation(true)
+    ElMessage.success(result.message)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    batchInitPasswordSubmitting.value = false
+  }
+}
+
 function handleUserImport(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -1130,6 +1169,43 @@ function handleSelectionChange(rows: Array<{ id: number }>) {
   selectedIds.value = rows.map((item) => item.id)
 }
 
+function buildBatchInitPasswordText() {
+  const items = batchInitPasswordResult.value?.items || []
+  return ['账号名\t姓名\t密码', ...items.map((item) => [item.username, item.full_name, item.password].join('\t'))].join('\n')
+}
+
+function downloadBatchInitPasswordExcel() {
+  const items = batchInitPasswordResult.value?.items || []
+  if (items.length === 0) {
+    ElMessage.warning('当前没有可下载的密码结果')
+    return
+  }
+
+  const workbook = utils.book_new()
+  const worksheet = utils.aoa_to_sheet([
+    ['账号名', '姓名', '密码'],
+    ...items.map((item) => [item.username, item.full_name, item.password]),
+  ])
+  utils.book_append_sheet(workbook, worksheet, '批量初始化密码')
+  writeFileXLSX(workbook, `系统用户批量初始化密码_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}.xlsx`)
+  ElMessage.success('Excel 已下载')
+}
+
+async function copyBatchInitPasswordContent() {
+  const text = buildBatchInitPasswordText()
+  if (!batchInitPasswordResult.value || batchInitPasswordResult.value.items.length === 0) {
+    ElMessage.warning('当前没有可复制的密码结果')
+    return
+  }
+
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('结果内容已复制')
+  } catch {
+    ElMessage.error('复制失败，请检查浏览器剪贴板权限')
+  }
+}
+
 function getTagType(status: string) {
   return resolveDictTagType(status, systemTagColors.value)
 }
@@ -1145,6 +1221,7 @@ watch(
     resetSelection()
     dialogVisible.value = false
     userImportDialogVisible.value = false
+    batchInitPasswordResultDialogVisible.value = false
     resetUserImportState()
     await loadSectionData()
   },
@@ -1155,6 +1232,15 @@ watch(
   (visible) => {
     if (!visible && !importSubmitting.value) {
       resetUserImportState()
+    }
+  },
+)
+
+watch(
+  () => batchInitPasswordResultDialogVisible.value,
+  (visible) => {
+    if (!visible) {
+      batchInitPasswordResult.value = null
     }
   },
 )
@@ -1218,6 +1304,16 @@ onMounted(async () => {
             @click="handleUserExport('selected')"
           >
             导出选中
+          </el-button>
+          <el-button
+            v-if="activeSection === 'users'"
+            plain
+            type="warning"
+            :disabled="selectedIds.length === 0"
+            :loading="batchInitPasswordSubmitting"
+            @click="handleBatchInitUserPasswords"
+          >
+            批量初始化密码
           </el-button>
           <el-button v-if="editableSection" type="danger" plain :disabled="selectedIds.length === 0" @click="handleBatchDelete">
             {{ sectionConfig.batchDeleteLabel }}
@@ -1503,7 +1599,7 @@ onMounted(async () => {
       </el-table>
 
       <div v-if="editableSection && selectedIds.length > 0" class="selection-summary">
-        已选择 {{ selectedIds.length }} 条记录，可执行批量删除。
+        已选择 {{ selectedIds.length }} 条记录，可执行批量删除和批量初始化密码。
       </div>
 
       <input ref="userImportInputRef" type="file" accept=".xlsx" class="hidden-input" @change="handleUserImport" />
@@ -1784,7 +1880,7 @@ onMounted(async () => {
     <el-dialog v-model="userSaveResultDialogVisible" :title="userSaveResult?.title || '保存结果'" width="640px" destroy-on-close>
       <div class="dialog-form reset-password-dialog">
         <template v-if="userSaveResult">
-          <div class="reset-password-summary system-save-result-summary">
+          <div class="reset-password-summary">
             <div>
               <span class="reset-password-summary__label">操作</span>
               <strong>{{ userSaveResult.actionLabel }}</strong>
@@ -1801,6 +1897,70 @@ onMounted(async () => {
       </div>
       <template #footer>
         <el-button type="primary" @click="userSaveResultDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+      <el-dialog v-model="batchInitPasswordConfirmDialogVisible" title="批量初始化密码确认" width="640px" destroy-on-close>
+        <div class="dialog-form reset-password-dialog">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">已选数量</span>
+              <strong>{{ selectedIds.length }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">操作对象</span>
+              <strong>系统用户</strong>
+            </div>
+            <div style="grid-column: span 2;">
+              <span class="reset-password-summary__label">密码规则</span>
+              <strong>初始化后将生成 8 位随机密码，并可复制结果或下载 Excel。</strong>
+            </div>
+          </div>
+          <p class="reset-password-hint">确认后系统将立即批量重置所选账号密码。初始化结果仅展示一次，请及时复制或下载保存。</p>
+        </div>
+        <template #footer>
+          <el-button @click="batchInitPasswordConfirmDialogVisible = false">取消</el-button>
+          <el-button type="warning" :loading="batchInitPasswordSubmitting" @click="submitBatchInitPasswordDialog">确认初始化</el-button>
+        </template>
+      </el-dialog>
+
+    <el-dialog
+      v-model="batchInitPasswordResultDialogVisible"
+      :title="batchInitPasswordResult?.title || '批量初始化密码结果'"
+      width="760px"
+      destroy-on-close
+      @closed="batchInitPasswordResult = null"
+    >
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="batchInitPasswordResult">
+          <div class="password-batch-result-dialog__notice">
+            <el-result
+              icon="warning"
+              title="密码仅展示一次"
+              sub-title="请及时复制或下载 Excel 保存初始化后的密码结果。"
+            />
+          </div>
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">操作结果</span>
+              <strong>{{ batchInitPasswordResult.message }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">初始化条数</span>
+              <strong>{{ batchInitPasswordResult.items.length }}</strong>
+            </div>
+          </div>
+          <el-table :data="batchInitPasswordResult.items" size="small" border stripe class="password-batch-result-table">
+            <el-table-column prop="username" label="账号名" min-width="140" />
+            <el-table-column prop="full_name" label="姓名" min-width="140" />
+            <el-table-column prop="password" label="密码" min-width="160" />
+          </el-table>
+        </template>
+      </div>
+      <template #footer>
+        <el-button :disabled="!batchInitPasswordResult || batchInitPasswordResult.items.length === 0" @click="copyBatchInitPasswordContent">复制内容</el-button>
+        <el-button :disabled="!batchInitPasswordResult || batchInitPasswordResult.items.length === 0" @click="downloadBatchInitPasswordExcel">下载 Excel</el-button>
+        <el-button type="primary" @click="batchInitPasswordResultDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -2258,16 +2418,17 @@ onMounted(async () => {
   word-break: break-word;
 }
 
-.reset-password-result {
-  display: grid;
-  gap: 14px;
-}
-
+.reset-password-hint,
 .reset-password-result__message {
   margin: 0;
   color: #606266;
   line-height: 1.7;
   white-space: pre-line;
+}
+
+.reset-password-result {
+  display: grid;
+  gap: 14px;
 }
 
 @media (max-width: 980px) {

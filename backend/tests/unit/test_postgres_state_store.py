@@ -522,7 +522,7 @@ def test_dashboard_advisor_choice_queries_prefer_selected_plan_application(monke
     distribution_sql = distribution_cursor.executed[0][0]
     assert "dtlms_portal_application_preferences" in distribution_sql
     assert "jsonb_array_elements" not in distribution_sql
-    assert "latest_application" not in distribution_sql
+    assert "ORDER BY CASE WHEN ra.plan_id = ps.selected_plan_id THEN 0 ELSE 1 END" in distribution_sql
 
     students_cursor = FakeCursor(fetchall_results=[[]])
     students_connection = FakeConnection(students_cursor)
@@ -532,7 +532,7 @@ def test_dashboard_advisor_choice_queries_prefer_selected_plan_application(monke
     students_sql = students_cursor.executed[0][0]
     assert "dtlms_portal_application_preferences" in students_sql
     assert "jsonb_array_elements" not in students_sql
-    assert "latest_application" not in students_sql
+    assert "ORDER BY CASE WHEN ra.plan_id = ps.selected_plan_id THEN 0 ELSE 1 END" in students_sql
 
 
 def test_dashboard_advisor_choice_students_keeps_rows_without_application_id(monkeypatch) -> None:

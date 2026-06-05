@@ -32,6 +32,8 @@ from app.schemas.system import (
     SystemArchitecture,
     SystemOptionsResponse,
     SystemStats,
+    SystemUserBatchInitPasswordRequest,
+    SystemUserBatchInitPasswordResponse,
     SystemUserExportRequest,
     SystemUserImportBatchRequest,
     SystemUserImportParseResult,
@@ -80,6 +82,7 @@ from app.services.dashboard_service import (
     update_role,
     update_system_user,
 )
+from app.services.management_service import store
 from app.services.system_user_excel_service import parse_system_user_import_template
 
 
@@ -374,6 +377,19 @@ def delete_system_user_record(user_id: int, principal: Principal = Depends(requi
 def batch_delete_system_user_records(payload: BulkDeleteRequest, principal: Principal = Depends(require_permissions("system:write"))) -> BulkActionResponse:
     try:
         return delete_system_users(payload.ids, current_username=principal.username)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+    except ValueError as exc:
+        _handle_service_error(exc)
+
+
+@router.post("/users/batch-init-password", response_model=SystemUserBatchInitPasswordResponse)
+def batch_init_system_user_password_records(
+    payload: SystemUserBatchInitPasswordRequest,
+    principal: Principal = Depends(require_permissions("system:write")),
+) -> SystemUserBatchInitPasswordResponse:
+    try:
+        return store.batch_init_system_user_passwords(payload.ids, operator_username=principal.username)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ValueError as exc:

@@ -137,6 +137,11 @@ export type SystemUserExportRequest = {
 }
 
 
+export type SystemUserBatchInitPasswordRequest = {
+  ids: number[]
+}
+
+
 export type SystemUserImportIssue = {
   row_number: number
   full_name?: string | null
@@ -175,6 +180,21 @@ export type SystemUserImportResult = {
   updated_count: number
   failed_count: number
   issues: SystemUserImportIssue[]
+  message: string
+}
+
+
+export type SystemUserPasswordInitRecord = {
+  id: number
+  username: string
+  full_name: string
+  password: string
+}
+
+
+export type SystemUserBatchInitPasswordResponse = {
+  items: SystemUserPasswordInitRecord[]
+  success_count: number
   message: string
 }
 
@@ -362,6 +382,11 @@ export function deleteSystemUser(id: number) {
 
 export function batchDeleteSystemUsers(ids: number[]) {
   return http.post<BulkActionResponse>('/system/users/batch-delete', { ids })
+}
+
+
+export function batchInitSystemUserPasswords(payload: SystemUserBatchInitPasswordRequest) {
+  return http.post<SystemUserBatchInitPasswordResponse>('/system/users/batch-init-password', payload)
 }
 
 

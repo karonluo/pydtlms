@@ -542,7 +542,6 @@ def delete_scientific_report(report_id: int) -> None:
 def delete_scientific_reports(report_ids: list[int]) -> BulkActionResponse:
     return store.delete_scientific_reports(report_ids)
 
-
 def get_outbound_study_list(
     keyword: str | None = None,
     status: str | None = None,
@@ -595,6 +594,10 @@ def create_thesis(payload: ThesisUpsert, principal: Principal | None = None):
 
 def update_thesis(thesis_id: int, payload: ThesisUpsert):
     return store.update_thesis(thesis_id, payload)
+
+
+
+
 
 
 def get_thesis_review_list(

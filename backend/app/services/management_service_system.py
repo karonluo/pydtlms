@@ -12,6 +12,7 @@ from pypinyin import lazy_pinyin
 from .management_service_shared import *
 from .system_user_excel_service import build_system_user_import_template
 from app.schemas.news import NewsArticleListResponse, NewsArticleRecord, NewsArticleUpsert
+from app.schemas.system import SystemUserBatchInitPasswordResponse, SystemUserPasswordInitRecord
 
 
 SYSTEM_USER_EXPORT_COLUMNS: list[tuple[str, str]] = [
@@ -759,6 +760,11 @@ class RuntimeManagementStoreSystemMixin:
             normalized.append(user_id)
         return normalized
 
+    @staticmethod
+    def _generate_system_user_init_password(length: int = 8) -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+        return "".join(secrets.choice(alphabet) for _ in range(max(1, int(length))))
+
     def _load_all_system_user_rows(
         self,
         *,
@@ -850,6 +856,65 @@ class RuntimeManagementStoreSystemMixin:
         stream = BytesIO()
         workbook.save(stream)
         return stream.getvalue()
+
+    def batch_init_system_user_passwords(
+        self,
+        ids: list[int] | None = None,
+        *,
+        operator_username: str = "admin",
+    ) -> SystemUserBatchInitPasswordResponse:
+        normalized_ids = self._normalize_system_user_export_ids(ids)
+        if not normalized_ids:
+            raise ValueError("请选择要初始化密码的系统用户")
+
+        result_items: list[SystemUserPasswordInitRecord] = []
+        sync_targets: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+        with self._lock:
+            for user_id in normalized_ids:
+                index, item = self._get_system_user_for_write(user_id)
+                role = self._ensure_role_exists(str(item.get("role_code") or ""))
+                password = self._generate_system_user_init_password()
+                updated = {**item, "id": user_id, "password_hash": PASSWORD_CONTEXT.hash(password)}
+                self._list("system_users")[index] = updated
+
+                profile_store = self.state.setdefault("profiles", {})
+                current_profile = profile_store.get(updated["username"], {})
+                profile = self._build_system_user_profile_payload(updated, role["role_name"], current_profile)
+                profile_store[updated["username"]] = profile
+
+                sync_targets.append((updated, profile))
+                result_items.append(
+                    SystemUserPasswordInitRecord(
+                        id=int(user_id),
+                        username=str(updated["username"]),
+                        full_name=str(updated["full_name"]),
+                        password=password,
+                    )
+                )
+
+            operation_log = self._record_operation(
+                "系统治理",
+                "系统用户",
+                f"batch-init:{','.join(str(user_id) for user_id in normalized_ids[:8])}",
+                "批量初始化密码",
+                f"批量初始化系统用户密码 {len(result_items)} 条",
+                operator_username=operator_username,
+            )
+
+            try:
+                for user_payload, profile_payload in sync_targets:
+                    self._postgres_store.sync_system_user(user_payload, profile_payload)
+                    self._invalidate_system_user_cache(str(user_payload.get("username") or ""), bump_list_version=False)
+                self._postgres_store.sync_operation_log(operation_log, counters={"operation_logs": int(self._counters.get("operation_logs", 0))})
+            except Exception:
+                self._save()
+
+        return SystemUserBatchInitPasswordResponse(
+            items=result_items,
+            success_count=len(result_items),
+            message=f"已初始化 {len(result_items)} 个系统用户的密码",
+        )
 
     def export_system_user_blank_template(self) -> bytes:
         return build_system_user_import_template()

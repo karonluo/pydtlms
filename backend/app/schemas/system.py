@@ -116,6 +116,23 @@ class SystemUserExportRequest(BaseModel):
     department_name: str | None = None
 
 
+class SystemUserBatchInitPasswordRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class SystemUserPasswordInitRecord(BaseModel):
+    id: int
+    username: str
+    full_name: str
+    password: str
+
+
+class SystemUserBatchInitPasswordResponse(BaseModel):
+    items: list[SystemUserPasswordInitRecord] = Field(default_factory=list)
+    success_count: int
+    message: str
+
+
 class SystemUserImportIssue(BaseModel):
     row_number: int
     full_name: str | None = None
