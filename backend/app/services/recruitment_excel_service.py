@@ -66,10 +66,8 @@ REGISTERED_PORTAL_STUDENT_EXPORT_BASE_COLUMNS: list[tuple[str, str]] = [
     ("application_form_status", "报名状态"),
     ("selected_plan_id", "招生计划ID"),
     ("selected_plan_name", "招生计划"),
-    ("selected_team_id", "意向研究中心ID"),
-    ("selected_center_name", "意向研究中心"),
-    ("selected_advisor_user_id", "意向导师ID"),
-    ("selected_advisor_name", "意向导师"),
+    ("first_choice_advisor_name", "第一志愿导师"),
+    ("second_choice_advisor_name", "第二志愿导师"),
     ("recruitment_application_business_key", "报名业务编号"),
     ("recruitment_application_id", "报名记录ID"),
     ("recruitment_application_status", "申请流转状态"),
@@ -117,18 +115,6 @@ REGISTERED_PORTAL_STUDENT_EXPORT_BASE_COLUMNS: list[tuple[str, str]] = [
 ]
 
 REGISTERED_PORTAL_STUDENT_EXPORT_DYNAMIC_COLUMN_DEFINITIONS: list[tuple[str, str, list[tuple[str, str]]]] = [
-    (
-        "preference",
-        "志愿",
-        [
-            ("order", "顺序"),
-            ("team_id", "研究中心ID"),
-            ("research_center_name", "研究中心"),
-            ("advisor_user_id", "导师ID"),
-            ("advisor_name", "导师"),
-            ("is_optional", "是否调剂"),
-        ],
-    ),
     (
         "education",
         "教育经历",

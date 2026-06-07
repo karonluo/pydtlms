@@ -29,6 +29,7 @@ PERMISSION_GROUPS: dict[str, list[str]] = {
         "news_management:read",
         "recruitment_plan:read",
         "recruitment_registered_students:read",
+        "recruitment_registered_students:write",
         "recruitment_initial_screening_confirmation:read",
         "research_center:read",
         "research_center:write",

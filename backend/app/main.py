@@ -9,6 +9,8 @@ from app.api.v1 import auth, dashboard, degree, news, portal, recruitment, stude
 from app.core.config import settings
 from app.core.exceptions import DatabaseUnavailableError
 from app.core.logging import configure_logging
+from app.core.security import decode_token
+from app.services.management_service import store
 from app.services.management_service import warm_up_runtime_management_store
 
 
@@ -25,6 +27,23 @@ _HOP_BY_HOP_HEADERS = {
     "trailer",
     "transfer-encoding",
     "upgrade",
+}
+
+_AUDIT_METHOD_TO_ACTION = {
+    "POST": "新增",
+    "PUT": "编辑",
+    "PATCH": "编辑",
+    "DELETE": "删除",
+}
+
+_AUDIT_MODULE_BY_SEGMENT = {
+    "system": "系统治理",
+    "students": "学生管理",
+    "recruitment": "招生管理",
+    "training": "培养管理",
+    "degree": "学位管理",
+    "workflow": "流程中心",
+    "news": "招生宣传",
 }
 
 app = FastAPI(
@@ -54,6 +73,123 @@ api_router.include_router(degree.router)
 api_router.include_router(system.router)
 api_router.include_router(workflow.router)
 app.include_router(api_router)
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    authorization = str(request.headers.get("authorization") or "").strip()
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token.strip()
+
+
+def _resolve_operator_username(request: Request) -> str:
+    token = _extract_bearer_token(request)
+    if not token:
+        return "anonymous"
+    try:
+        payload = decode_token(token)
+    except Exception:
+        return "anonymous"
+    username = payload.get("sub")
+    return str(username or "anonymous")
+
+
+def _is_backoffice_write_request(request: Request) -> bool:
+    if request.method.upper() not in _AUDIT_METHOD_TO_ACTION:
+        return False
+
+    prefix = settings.api_v1_prefix.rstrip("/")
+    path = request.url.path
+    if not path.startswith(f"{prefix}/"):
+        return False
+
+    excluded_prefixes = (
+        f"{prefix}/portal",
+        f"{prefix}/auth",
+    )
+    if any(path == item or path.startswith(f"{item}/") for item in excluded_prefixes):
+        return False
+    return True
+
+
+def _resolve_audit_module_entity(path: str) -> tuple[str, str, str]:
+    relative_path = path.removeprefix(settings.api_v1_prefix).strip("/")
+    segments = [segment for segment in relative_path.split("/") if segment]
+    if not segments:
+        return "后台管理", "接口", "-"
+
+    module_segment = segments[0]
+    module_name = _AUDIT_MODULE_BY_SEGMENT.get(module_segment, "后台管理")
+    entity_name = segments[1] if len(segments) > 1 else module_segment
+    entity_id = "/".join(segments[2:]) if len(segments) > 2 else "-"
+    return module_name, entity_name, entity_id
+
+
+def _resolve_business_audit_descriptor(request: Request) -> tuple[str, str, str, str, str] | None:
+    prefix = settings.api_v1_prefix.rstrip("/")
+    path = request.url.path
+    method = request.method.upper()
+
+    if method == "POST" and path == f"{prefix}/students/portal-registrations/export-jobs":
+        return "学生管理", "注册学生", "-", "导出", "导出注册学生"
+
+    news_prefix = f"{prefix}/recruitment/news/"
+    if method == "POST" and path.startswith(news_prefix) and path.endswith("/publish"):
+        entity_id = path[len(news_prefix):-len("/publish")].strip("/") or "-"
+        return "招生宣传", "新闻", entity_id, "发布", "发布新闻"
+
+    if method == "POST" and path == f"{prefix}/recruitment/news/batch-publish":
+        return "招生宣传", "新闻", "批量", "发布", "批量发布新闻"
+
+    return None
+
+
+@app.middleware("http")
+async def record_backoffice_operation_audit(request: Request, call_next):
+    should_audit = _is_backoffice_write_request(request)
+    operation_log_count_before = int(getattr(store, "_counters", {}).get("operation_logs", 0)) if should_audit else 0
+    started_at = perf_counter()
+    status_code = 500
+    response: Response | None = None
+    raised_exc: Exception | None = None
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception as exc:
+        raised_exc = exc
+        raise
+    finally:
+        if should_audit:
+            operation_log_count_after = int(getattr(store, "_counters", {}).get("operation_logs", 0))
+            if operation_log_count_after <= operation_log_count_before:
+                elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+                business_descriptor = _resolve_business_audit_descriptor(request)
+                if business_descriptor is None:
+                    module_name, entity_name, entity_id = _resolve_audit_module_entity(request.url.path)
+                    action = _AUDIT_METHOD_TO_ACTION.get(request.method.upper(), "操作")
+                    summary = f"管理端接口 {request.method.upper()} {request.url.path}；状态码 {status_code}；耗时 {elapsed_ms} ms"
+                else:
+                    module_name, entity_name, entity_id, action, summary = business_descriptor
+                result = "success" if status_code < 400 and raised_exc is None else "failed"
+                operator_username = _resolve_operator_username(request)
+
+                try:
+                    store.record_operation_event(
+                        module_name,
+                        entity_name,
+                        entity_id,
+                        action,
+                        summary,
+                        operator_username=operator_username,
+                        result=result,
+                    )
+                except Exception as exc:
+                    logger.warning("Record backoffice operation audit failed: %s", exc)
 
 
 @app.exception_handler(DatabaseUnavailableError)

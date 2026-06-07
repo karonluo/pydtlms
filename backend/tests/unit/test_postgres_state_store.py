@@ -270,7 +270,7 @@ def test_list_registered_portal_students_page_returns_application_identifiers(mo
     assert items[0]["recruitment_application_business_key"] == "RECRUIT-20260420-0015"
     assert items[0]["candidate_no"] == "SH20260420"
     assert items[0]["application_form_status"] == "已填写报名"
-    assert "ps.candidate_no" in cursor.executed[1][0]
+    assert "latest_application.candidate_no AS recruitment_application_candidate_no" in cursor.executed[1][0]
 
 
 def test_list_registered_portal_students_page_marks_returned_forms(monkeypatch) -> None:
@@ -346,6 +346,47 @@ def test_list_registered_portal_students_page_filters_by_multiple_advisor_names(
     count_sql, count_params = cursor.executed[0]
     assert "selected_advisor_name" in count_sql
     assert count_params == [["刘亚", "何琳"]]
+
+
+def test_list_registered_portal_students_page_filters_first_choice_from_preferences(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[{"total": 1}],
+        fetchall_results=[[{
+            "id": 11,
+            "full_name": "王六",
+            "phone_number": "13800004444",
+            "email": "wangliu@example.com",
+            "id_number": "320000199901011235",
+            "account_status": "启用",
+            "selected_plan_name": "2026博士招生",
+            "selected_team_name": "前沿探索中心",
+            "selected_advisor_name": "周伯文",
+            "created_at": "2026-04-01 10:00:00",
+            "submitted_at": "2026-04-20 10:00:00",
+            "recruitment_application_id": 35,
+            "recruitment_application_business_key": "RECRUIT-20260420-0035",
+            "application_status": "submitted",
+            "applied_at": "2026-04-20 10:00:00",
+        }]],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    items, total = store.list_registered_portal_students_page(
+        first_choice_advisor_names=["周伯文"],
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 1
+    assert items[0]["selected_advisor_name"] == "周伯文"
+    count_sql, count_params = cursor.executed[0]
+    assert "pref1.advisor_name" in count_sql
+    assert "pref2.advisor_name" in count_sql
+    assert count_params == [["周伯文"]]
 
 
 def test_list_registered_portal_students_page_filters_by_recruitment_application_status(monkeypatch) -> None:
@@ -522,7 +563,9 @@ def test_dashboard_advisor_choice_queries_prefer_selected_plan_application(monke
     distribution_sql = distribution_cursor.executed[0][0]
     assert "dtlms_portal_application_preferences" in distribution_sql
     assert "jsonb_array_elements" not in distribution_sql
-    assert "ORDER BY CASE WHEN ra.plan_id = ps.selected_plan_id THEN 0 ELSE 1 END" in distribution_sql
+    assert "ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC" in distribution_sql
+    assert "latest_application.selected_advisor_name" not in distribution_sql
+    assert "latest_application.intended_advisor_name" not in distribution_sql
 
     students_cursor = FakeCursor(fetchall_results=[[]])
     students_connection = FakeConnection(students_cursor)
@@ -532,7 +575,10 @@ def test_dashboard_advisor_choice_queries_prefer_selected_plan_application(monke
     students_sql = students_cursor.executed[0][0]
     assert "dtlms_portal_application_preferences" in students_sql
     assert "jsonb_array_elements" not in students_sql
-    assert "ORDER BY CASE WHEN ra.plan_id = ps.selected_plan_id THEN 0 ELSE 1 END" in students_sql
+    assert "ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC" in students_sql
+    assert "COALESCE(first_choice_advisor_name" not in students_sql
+    assert "selected_advisor_name AS" not in students_sql
+    assert "intended_advisor_name AS" not in students_sql
 
 
 def test_dashboard_advisor_choice_students_keeps_rows_without_application_id(monkeypatch) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING
+
 from app.schemas.portal import PortalApplicationDeclarationData, PortalPersonalStatementData
 from app.schemas.dashboard import (
     DashboardRecruitmentAdvisorChoiceDistributionResponse,
@@ -12,6 +14,9 @@ from .management_service_shared import *
 
 
 class RuntimeManagementStoreRecruitmentMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
     @staticmethod
     def _normalize_screening_actor_values(principal_summary: dict[str, Any]) -> tuple[str, str]:
         return str(principal_summary.get("username") or "").strip(), str(principal_summary.get("full_name") or "").strip()
@@ -674,6 +679,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                     action_label,
                     f'{principal_summary["full_name"]} 提交导师初筛',
                     operator_username=principal_summary["username"],
+                    target_name=str(entity.get("student_name") or ""),
                 )
 
                 self._list("recruitment_applications")[entity_index] = updated_entity
@@ -792,6 +798,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                 action_label,
                 f'{principal_summary["full_name"]} 执行初筛确认',
                 operator_username=principal_summary["username"],
+                target_name=str(entity.get("student_name") or ""),
             )
             notification_payloads = [
                 {

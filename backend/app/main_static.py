@@ -12,6 +12,7 @@ FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 FRONTEND_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public"
 PORTAL_ATTACHMENTS_DIR = FRONTEND_PUBLIC_DIR / "portal-attachments"
 PORTAL_BROCHURES_DIR = FRONTEND_PUBLIC_DIR / "portal-brochures"
+NEWS_UPLOADS_DIR = FRONTEND_PUBLIC_DIR / "recruitment" / "news" / "uploads"
 
 
 class SPAStaticFiles(StaticFiles):
@@ -38,6 +39,12 @@ def favicon() -> FileResponse:
 def configure_static_frontend(target_app: FastAPI) -> None:
     if not FRONTEND_DIST_DIR.exists():
         return
+
+    target_app.mount(
+        "/recruitment/news/uploads",
+        StaticFiles(directory=NEWS_UPLOADS_DIR, check_dir=False),
+        name="news-uploads",
+    )
 
     if PORTAL_ATTACHMENTS_DIR.exists():
         target_app.mount(

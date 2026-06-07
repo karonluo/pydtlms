@@ -971,6 +971,7 @@ class RuntimeManagementStoreWorkflowMixin:
                     action_definition["label"],
                     f'{principal_summary["full_name"]} 执行 {definition["workflow_name"]} - {action_definition["label"]}',
                     operator_username=principal_summary["username"],
+                    target_name=self._workflow_applicant_name(flow_code, updated_entity),
                 )
                 sync_background_assessment = getattr(self._postgres_store, "sync_recruitment_background_assessment", None)
                 if not callable(sync_background_assessment):
@@ -1032,6 +1033,7 @@ class RuntimeManagementStoreWorkflowMixin:
                 action_definition["label"],
                 f'{principal_summary["full_name"]} 执行 {definition["workflow_name"]} - {action_definition["label"]}',
                 operator_username=principal_summary["username"],
+                target_name=self._workflow_applicant_name(flow_code, updated_entity),
             )
             qualification_review_payload = None
             if flow_code == "recruitment_application" and node_key == "qualification_review":

@@ -89,6 +89,8 @@ def registered_portal_student_list(
     recruitment_application_status: str | None = Query(default=None),
     show_all_background_assessed: bool = Query(default=False),
     advisor_names: str | None = Query(default=None),
+    first_choice_advisor_names: str | None = Query(default=None),
+    second_choice_advisor_names: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("students:read")),
@@ -99,6 +101,8 @@ def registered_portal_student_list(
         recruitment_application_status=recruitment_application_status,
         show_all_background_assessed=show_all_background_assessed,
         advisor_names=_normalize_multi_value_filter(advisor_names),
+        first_choice_advisor_names=_normalize_multi_value_filter(first_choice_advisor_names),
+        second_choice_advisor_names=_normalize_multi_value_filter(second_choice_advisor_names),
         page=page,
         page_size=page_size,
         principal=principal,
@@ -119,6 +123,8 @@ def export_registered_portal_student_records(
             recruitment_application_status=payload.recruitment_application_status,
             show_all_background_assessed=payload.show_all_background_assessed,
             advisor_names=payload.advisor_names,
+            first_choice_advisor_names=payload.first_choice_advisor_names,
+            second_choice_advisor_names=payload.second_choice_advisor_names,
             export_scope=payload.export_scope,
             principal=principal,
         )
@@ -238,7 +244,7 @@ def send_registered_portal_student_email_record(
 def rollback_registered_portal_student_stage_record(
     student_id: int,
     payload: RegisteredPortalStudentRollbackStageRequest,
-    principal: Principal = Depends(require_permissions("students:write")),
+    principal: Principal = Depends(require_permissions("recruitment_registered_students:write")),
 ) -> RegisteredPortalStudentActionResponse:
     try:
         return rollback_registered_portal_student_stage(student_id, payload, principal=principal)

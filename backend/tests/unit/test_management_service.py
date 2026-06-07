@@ -68,9 +68,13 @@ class FakePostgresStateStore:
         self.integration_rows: list[dict] | None = None
         self.system_stats_snapshot: dict[str, int] | None = None
         self.missing_permission_codes_result: list[str] = []
+        self.operation_log_max_id = 0
 
     def load_state(self) -> dict | None:
         return build_runtime_seed_state()
+
+    def get_operation_log_max_id(self) -> int:
+        return int(self.operation_log_max_id)
 
     def load_team_state(self):
         raise AttributeError("load_team_state")
@@ -1194,6 +1198,16 @@ def test_get_student_options_registered_portal_advisor_filter_scopes_advisor_sel
     options = store.get_student_options(principal={"username": "liu.ya", "full_name": "刘亚", "roles": ["advisor"]})
 
     assert [item.value for item in options.registered_portal_advisor_filter_options] == ["刘亚"]
+
+
+def test_runtime_store_initializes_operation_log_counter_from_postgres(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_postgres.operation_log_max_id = 365
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+
+    assert store._counters["operation_logs"] == 365
 
 
 def test_get_registered_portal_students_scopes_advisor_to_self(monkeypatch) -> None:
@@ -2526,17 +2540,72 @@ def test_rollback_registered_portal_student_stage_rejects_non_platform_admin(mon
 
     store = RuntimeManagementStore()
 
-    with pytest.raises(PermissionError, match="仅平台管理员可退回注册学生报名环节"):
+    with pytest.raises(PermissionError, match="仅平台管理员或书院管理员可退回注册学生报名环节"):
         store.rollback_registered_portal_student_stage(
             88,
             RegisteredPortalStudentRollbackStageRequest(target_stage="background_assessment"),
             principal={
                 "username": "academy.admin",
                 "full_name": "书院管理员",
-                "roles": ["academy_admin"],
-                "permissions": ["students:write"],
+                "roles": ["advisor"],
+                "permissions": [],
             },
         )
+
+
+def test_rollback_registered_portal_student_stage_allows_academy_admin(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 92,
+            "full_name": "书院退回学生",
+            "email": "academy-rollback@example.com",
+            "account_status": "启用",
+            "phone_number": "13800008892",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "academy-rollback@example.com",
+                "portal_student_id": 92,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    current_task = store.state["workflow_tasks"][0]
+    current_task["node_key"] = "background_assessment"
+    current_task["current_node"] = "背景评估"
+    current_task["current_handler"] = "书院管理员"
+    current_task["status"] = "处理中"
+    current_task["business_key"] = str(application.business_key)
+    application.application_status = "待背景评估"
+
+    response = store.rollback_registered_portal_student_stage(
+        92,
+        RegisteredPortalStudentRollbackStageRequest(target_stage="qualification_review", comment="补充核验"),
+        principal={
+            "username": "academy.admin",
+            "full_name": "书院管理员",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment_registered_students:write"],
+        },
+    )
+
+    current_task = store.state["workflow_tasks"][0]
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert response.message == "已退回至资格审核"
+    assert current_task["node_key"] == "qualification_review"
+    assert current_application["application_status"] == "报名已提交"
 
 
 def test_submit_advisor_screening_batch_below_threshold_moves_to_second_choice(monkeypatch) -> None:
@@ -3721,6 +3790,62 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
     assert exported_row["声明内容"] == "我已知悉报名要求"
     assert '"profile": true' in str(exported_row["声明进度快照JSON"])
     assert '"source_channel_other": "老师推荐"' in str(exported_row["报名草稿JSON"])
+
+
+def test_export_registered_portal_students_maps_returned_to_rejected_status(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.portal import PortalApplicationUpsert, PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+
+    registration = store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009988",
+            email="returned-export@example.com",
+            full_name="退回状态学生",
+            id_number="320000199909099918",
+            password="Secret123!",
+        )
+    )
+    payload = _build_portal_application_payload(
+        available_plan.id,
+        available_team.team_name,
+        available_team.lead_advisor_name,
+    )
+    store.submit_portal_application(registration.student.id, PortalApplicationUpsert.model_validate(payload.model_dump(mode="python")))
+
+    runtime_student = next(item for item in store.state["portal_students"] if item["id"] == registration.student.id)
+    runtime_student["submitted_at"] = None
+
+    for application in store.state["recruitment_applications"]:
+        if int(application.get("portal_student_id") or 0) == registration.student.id:
+            application["application_status"] = "returned"
+
+    def _get_portal_student_detail(_: int) -> dict:
+        return runtime_student
+
+    fake_postgres.get_portal_student_detail = _get_portal_student_detail
+
+    monkeypatch.setattr(
+        store,
+        "get_registered_portal_students",
+        lambda **kwargs: SimpleNamespace(items=[SimpleNamespace(id=registration.student.id)], total=1),
+    )
+
+    content = store.export_registered_portal_students([registration.student.id])
+
+    workbook = load_workbook(BytesIO(content), data_only=True)
+    worksheet = workbook.active
+    assert worksheet is not None
+    rows = list(worksheet.iter_rows(values_only=True))
+    exported_row = dict(zip(rows[0], rows[1], strict=False))
+
+    assert exported_row["姓名"] == "退回状态学生"
+    assert exported_row["报名状态"] == "驳回重填"
 
 
 def test_build_registered_portal_student_export_row_does_not_truncate_repeated_groups(monkeypatch) -> None:

@@ -1266,6 +1266,7 @@ class RuntimeManagementStoreSystemMixin:
         self,
         keyword: str | None = None,
         module_name: str | None = None,
+        log_scope: str = "management",
         result: str | None = None,
         page: int = 1,
         page_size: int = 10,
@@ -1274,6 +1275,7 @@ class RuntimeManagementStoreSystemMixin:
             items, total = self._postgres_store.list_operation_logs_page(
                 keyword=keyword,
                 module_name=module_name,
+                log_scope=log_scope,
                 result=result,
                 page=page,
                 page_size=page_size,

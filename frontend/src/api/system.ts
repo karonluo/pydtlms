@@ -524,6 +524,7 @@ export function batchDeleteIntegrations(ids: number[]) {
 export function listOperationLogs(params?: PaginationParams & {
   keyword?: string
   module_name?: string
+  log_scope?: 'all' | 'management' | 'portal'
   result?: string
 }) {
   return http.get<PagedResponse<OperationLogRecord>>('/system/operation-logs', { params })

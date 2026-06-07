@@ -1,9 +1,11 @@
+from datetime import datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas.news import NewsArticleRecord
 from app.schemas.student import (
     RegisteredPortalStudentExportJobCreateResponse,
     RegisteredPortalStudentExportJobListResponse,
@@ -116,6 +118,117 @@ def test_create_registered_portal_student_export_job_endpoint_returns_job(monkey
     assert response.status_code == 200
     assert response.json()["message"] == "开始导出，请等待完成"
     assert response.json()["job"]["job_id"] == "job-1"
+
+
+def test_create_registered_portal_student_export_job_endpoint_uses_business_audit_summary(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "student-admin", ["students:read"])
+    monkeypatch.setattr(
+        "app.api.v1.students.create_registered_portal_student_export_job",
+        lambda payload, principal: RegisteredPortalStudentExportJobCreateResponse(
+            message="开始导出，请等待完成",
+            job=RegisteredPortalStudentExportJobRecord(
+                job_id="job-2",
+                status="pending",
+                file_name="注册学生导出_20260514153000.xlsx",
+                created_at="2026-05-14 15:30:00",
+                is_read=True,
+            ),
+        ),
+    )
+    captured: dict[str, Any] = {}
+
+    def capture_audit(module_name, entity_name, entity_id, action, summary, **kwargs):
+        captured.update(
+            {
+                "module_name": module_name,
+                "entity_name": entity_name,
+                "entity_id": entity_id,
+                "action": action,
+                "summary": summary,
+                **kwargs,
+            }
+        )
+        return {
+            "module_name": module_name,
+            "entity_name": entity_name,
+            "entity_id": entity_id,
+            "action": action,
+            "summary": summary,
+            **kwargs,
+        }
+
+    monkeypatch.setattr("app.main.store.record_operation_event", capture_audit)
+
+    response = client.post(
+        "/api/v1/students/portal-registrations/export-jobs",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"ids": [11, 12]},
+    )
+
+    assert response.status_code == 200
+    assert captured["summary"] == "导出注册学生"
+    assert captured["action"] == "导出"
+    assert captured["entity_name"] == "注册学生"
+
+
+def test_publish_news_endpoint_uses_business_audit_summary(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "news-admin", ["recruitment:write"])
+    monkeypatch.setattr(
+        "app.api.v1.news.publish_news_article",
+        lambda news_article_id, principal: NewsArticleRecord(
+            id=news_article_id,
+            news_code="NEWS202606070001",
+            news_title="示例新闻",
+            news_content="示例内容",
+            news_type="通知",
+            publisher_user_id=1,
+            publisher_username="news-admin",
+            publisher_name="测试用户",
+            reviewer_user_id=None,
+            reviewer_username=None,
+            reviewer_name=None,
+            published_at=datetime(2026, 6, 7, 12, 0, 0),
+            status="已发布",
+            is_pinned=False,
+            display_order=0,
+            created_at=datetime(2026, 6, 7, 11, 59, 0),
+            updated_at=datetime(2026, 6, 7, 12, 0, 0),
+        ),
+    )
+    captured: dict[str, Any] = {}
+
+    def capture_audit(module_name, entity_name, entity_id, action, summary, **kwargs):
+        captured.update(
+            {
+                "module_name": module_name,
+                "entity_name": entity_name,
+                "entity_id": entity_id,
+                "action": action,
+                "summary": summary,
+                **kwargs,
+            }
+        )
+        return {
+            "module_name": module_name,
+            "entity_name": entity_name,
+            "entity_id": entity_id,
+            "action": action,
+            "summary": summary,
+            **kwargs,
+        }
+
+    monkeypatch.setattr("app.main.store.record_operation_event", capture_audit)
+
+    response = client.post(
+        "/api/v1/recruitment/news/1/publish",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert captured["summary"] == "发布新闻"
+    assert captured["action"] == "发布"
+    assert captured["entity_name"] == "新闻"
+    assert captured["entity_id"] == "1"
 
 
 def test_list_registered_portal_student_export_jobs_endpoint_returns_jobs(monkeypatch, client: TestClient) -> None:

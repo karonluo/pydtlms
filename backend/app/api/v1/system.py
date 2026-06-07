@@ -481,12 +481,13 @@ def batch_delete_integration_records(payload: BulkDeleteRequest, principal: Prin
 def operation_logs(
     keyword: str | None = None,
     module_name: str | None = None,
+    log_scope: str = Query(default="management", pattern="^(all|management|portal)$"),
     result: str | None = None,
     page: int = 1,
     page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("audit:read")),
 ) -> OperationLogListResponse:
-    return get_operation_log_list(keyword=keyword, module_name=module_name, result=result, page=page, page_size=page_size)
+    return get_operation_log_list(keyword=keyword, module_name=module_name, log_scope=log_scope, result=result, page=page, page_size=page_size)
 
 
 @router.get("/sync-logs", response_model=SyncLogListResponse)

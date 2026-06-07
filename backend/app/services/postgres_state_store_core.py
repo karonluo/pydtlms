@@ -445,6 +445,16 @@ class PostgresStateStoreCoreMixin:
     def _sync_runtime_counters_in_tx(cur: psycopg.Cursor[Any], counters: dict[str, int] | None) -> None:
         del cur, counters
 
+    def get_operation_log_max_id(self) -> int:
+        """Return the current maximum operation log id from PostgreSQL."""
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM dtlms_operation_logs")
+                row = cur.fetchone()
+                return int(row["max_id"] if row else 0)
+
     def _sync_operation_log_in_tx(self, cur: psycopg.Cursor[Any], operation_log: dict[str, Any] | None) -> None:
         if not operation_log:
             return
@@ -463,6 +473,7 @@ class PostgresStateStoreCoreMixin:
                 new_value = EXCLUDED.new_value,
                 request_ip = EXCLUDED.request_ip,
                 result = EXCLUDED.result,
+                created_at = EXCLUDED.created_at,
                 updated_at = EXCLUDED.updated_at
             """,
             (
@@ -1119,6 +1130,7 @@ class PostgresStateStoreCoreMixin:
             "selected_center_name": row.get("selected_team_name"),
             "selected_advisor_name": row.get("selected_advisor_name"),
             "recruitment_application_id": int(row.get("recruitment_application_id") or 0) or None,
+            "candidate_no": (str(row.get("candidate_no") or row.get("recruitment_application_candidate_no") or "") or None),
             "recruitment_application_candidate_no": (str(row.get("recruitment_application_candidate_no") or "") or None),
             "recruitment_application_business_key": (str(row.get("recruitment_application_business_key") or "") or None),
             "recruitment_application_status": recruitment_application_status,

@@ -169,6 +169,7 @@ const integrationFilters = reactive({
 })
 const operationLogFilters = reactive({
   keyword: '',
+  log_scope: 'management' as 'all' | 'management' | 'portal',
   module_name: '',
   result: '',
 })
@@ -259,6 +260,11 @@ const operationModuleOptions = computed(() => {
   const values = Array.from(new Set(operationLogs.value.map((item) => item.module_name).filter(Boolean)))
   return values.map((item) => ({ label: item, value: item }))
 })
+const operationLogScopeOptions = [
+  { label: '后端管理', value: 'management' as const },
+  { label: '学生门户', value: 'portal' as const },
+  { label: '全部', value: 'all' as const },
+]
 const syncSourceOptions = computed(() => {
   const values = Array.from(new Set(syncLogs.value.map((item) => item.source_system).filter(Boolean)))
   return values.map((item) => ({ label: item, value: item }))
@@ -432,6 +438,7 @@ function resetFilters() {
   Object.assign(auditFilters, { keyword: '', status: '' })
   Object.assign(integrationFilters, { keyword: '', status: '', direction: '' })
   Object.assign(operationLogFilters, { keyword: '', module_name: '', result: '' })
+  operationLogFilters.log_scope = 'management'
   Object.assign(syncLogFilters, { keyword: '', sync_status: '', source_system: '' })
 }
 
@@ -524,6 +531,7 @@ async function loadSectionData() {
     if (activeSection.value === 'operation-logs') {
       const response = await listOperationLogs({
         keyword: operationLogFilters.keyword || undefined,
+        log_scope: operationLogFilters.log_scope,
         module_name: operationLogFilters.module_name || undefined,
         result: operationLogFilters.result || undefined,
         page: operationLogPager.pagination.currentPage,
@@ -1407,6 +1415,11 @@ onMounted(async () => {
       <el-form v-else-if="activeSection === 'operation-logs'" class="filter-form" :inline="true">
         <el-form-item label="关键字">
           <el-input v-model="operationLogFilters.keyword" placeholder="操作账号 / 对象 / 摘要" clearable />
+        </el-form-item>
+        <el-form-item label="日志范围">
+          <el-select v-model="operationLogFilters.log_scope" style="width: 160px">
+            <el-option v-for="item in operationLogScopeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="业务模块">
           <el-select v-model="operationLogFilters.module_name" placeholder="全部模块" clearable filterable style="width: 180px">

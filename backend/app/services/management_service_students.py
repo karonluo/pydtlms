@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 from uuid import uuid4
+from typing import Any, TYPE_CHECKING
 
 from app.core.config import settings
 from app.services.recruitment_excel_service import build_registered_portal_students_template
@@ -13,6 +14,9 @@ from .management_service_shared import *
 
 
 class RuntimeManagementStoreStudentsMixin:
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any: ...
+
     _registered_portal_export_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="registered-portal-export")
     _registered_portal_export_jobs: dict[str, dict[str, Any]] = {}
     _registered_portal_export_jobs_lock = RLock()
@@ -61,6 +65,11 @@ class RuntimeManagementStoreStudentsMixin:
     def _principal_role_codes(cls, principal: Principal | dict[str, Any] | None) -> set[str]:
         raw_roles = cls._principal_field_value(principal, "roles") or []
         return {str(item).strip() for item in raw_roles if str(item).strip()}
+
+    @classmethod
+    def _principal_permission_codes(cls, principal: Principal | dict[str, Any] | None) -> set[str]:
+        raw_permissions = cls._principal_field_value(principal, "permissions") or []
+        return {str(item).strip() for item in raw_permissions if str(item).strip()}
 
     @classmethod
     def _registered_portal_scope_advisor_name(cls, principal: Principal | dict[str, Any] | None) -> str | None:
@@ -162,6 +171,8 @@ class RuntimeManagementStoreStudentsMixin:
                 application_form_status=job.get("application_form_status"),
                 recruitment_application_status=job.get("recruitment_application_status"),
                 advisor_names=list(job.get("advisor_names") or []),
+                first_choice_advisor_names=list(job.get("first_choice_advisor_names") or []),
+                second_choice_advisor_names=list(job.get("second_choice_advisor_names") or []),
                 export_scope=job.get("export_scope"),
                 principal=job.get("principal_snapshot"),
             )
@@ -217,6 +228,8 @@ class RuntimeManagementStoreStudentsMixin:
             "application_form_status": payload.application_form_status,
             "recruitment_application_status": payload.recruitment_application_status,
             "advisor_names": list(payload.advisor_names),
+            "first_choice_advisor_names": list(payload.first_choice_advisor_names),
+            "second_choice_advisor_names": list(payload.second_choice_advisor_names),
             "export_scope": payload.export_scope,
             "principal_snapshot": self._build_registered_portal_principal_snapshot(principal),
         }
@@ -396,12 +409,17 @@ class RuntimeManagementStoreStudentsMixin:
         principal: Principal | dict[str, Any] | None = None,
     ) -> RegisteredPortalStudentActionResponse:
         principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": []})
-        if "platform_admin" not in {str(item).strip() for item in principal_summary.get("roles", []) if str(item).strip()}:
-            raise PermissionError("仅平台管理员可退回注册学生报名环节")
+        role_codes = {str(item).strip() for item in principal_summary.get("roles", []) if str(item).strip()}
+        permission_codes = self._principal_permission_codes(principal_summary)
+        if "platform_admin" not in role_codes and "recruitment_registered_students:write" not in permission_codes:
+            raise PermissionError("仅平台管理员或书院管理员可退回注册学生报名环节")
 
         with self._lock:
             _, student = self._find_required("portal_students", student_id)
-            application = self._get_latest_registered_portal_application_item(student_id)
+            application = self._get_latest_registered_portal_application_item(
+                student_id,
+                selected_plan_id=int(student.get("selected_plan_id") or 0) or None,
+            )
             if application is None:
                 raise ValueError("当前注册学生尚未生成报名申请")
             if not str(application.get("business_key") or "").strip():
@@ -571,18 +589,40 @@ class RuntimeManagementStoreStudentsMixin:
         )
 
     @staticmethod
-    def _registered_portal_application_sort_key(application: dict[str, Any]) -> tuple[str, int]:
+    def _registered_portal_application_sort_key(
+        application: dict[str, Any],
+        *,
+        selected_plan_id: int | None = None,
+    ) -> tuple[int, str, int]:
+        plan_matched = 0
+        if selected_plan_id is not None:
+            try:
+                plan_matched = 1 if int(application.get("plan_id") or 0) == int(selected_plan_id) else 0
+            except Exception:
+                plan_matched = 0
         return (
+            plan_matched,
             str(application.get("applied_at") or application.get("created_at") or ""),
             int(application.get("id") or 0),
         )
 
-    def _get_latest_registered_portal_application_item(self, student_id: int) -> dict[str, Any] | None:
+    def _get_latest_registered_portal_application_item(
+        self,
+        student_id: int,
+        *,
+        selected_plan_id: int | None = None,
+    ) -> dict[str, Any] | None:
         latest_application: dict[str, Any] | None = None
         for application in self._list("recruitment_applications"):
             if int(application.get("portal_student_id") or 0) != int(student_id):
                 continue
-            if latest_application is None or self._registered_portal_application_sort_key(application) >= self._registered_portal_application_sort_key(latest_application):
+            if latest_application is None or self._registered_portal_application_sort_key(
+                application,
+                selected_plan_id=selected_plan_id,
+            ) >= self._registered_portal_application_sort_key(
+                latest_application,
+                selected_plan_id=selected_plan_id,
+            ):
                 latest_application = application
         return latest_application
 
@@ -599,7 +639,8 @@ class RuntimeManagementStoreStudentsMixin:
     @staticmethod
     def _registered_portal_application_form_status(submitted_at: Any, application_status: str | None) -> tuple[str, str | None]:
         normalized_submitted_at = RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(submitted_at)
-        if application_status == "驳回重填":
+        normalized_application_status = str(application_status or "").strip()
+        if normalized_application_status in {"驳回重填", "returned"}:
             return "驳回重填", None
         if normalized_submitted_at:
             return "已填写报名", normalized_submitted_at
@@ -615,6 +656,8 @@ class RuntimeManagementStoreStudentsMixin:
         recruitment_application_status: str | None,
         show_all_background_assessed: bool,
         advisor_names: list[str] | None,
+        first_choice_advisor_names: list[str] | None,
+        second_choice_advisor_names: list[str] | None,
         export_scope: str | None = None,
         principal: Principal | dict[str, Any] | None = None,
     ) -> list[int]:
@@ -646,6 +689,8 @@ class RuntimeManagementStoreStudentsMixin:
                 recruitment_application_status=recruitment_application_status,
                 show_all_background_assessed=show_all_background_assessed,
                 advisor_names=advisor_names,
+                first_choice_advisor_names=first_choice_advisor_names,
+                second_choice_advisor_names=second_choice_advisor_names,
                 page=1,
                 page_size=total_hint,
                 principal=principal,
@@ -658,6 +703,8 @@ class RuntimeManagementStoreStudentsMixin:
                 recruitment_application_status=recruitment_application_status,
                 show_all_background_assessed=show_all_background_assessed,
                 advisor_names=advisor_names,
+                first_choice_advisor_names=first_choice_advisor_names,
+                second_choice_advisor_names=second_choice_advisor_names,
                 principal=principal,
             )
 
@@ -669,11 +716,15 @@ class RuntimeManagementStoreStudentsMixin:
         recruitment_application_status: str | None,
         show_all_background_assessed: bool,
         advisor_names: list[str] | None,
+        first_choice_advisor_names: list[str] | None,
+        second_choice_advisor_names: list[str] | None,
         principal: Principal | dict[str, Any] | None,
     ) -> list[int]:
         effective_advisor_names, force_empty = self._resolve_registered_portal_advisor_filter(advisor_names, principal)
         if force_empty:
             return []
+        normalized_first_choice_advisor_names = [str(item).strip() for item in (first_choice_advisor_names or []) if str(item).strip()]
+        normalized_second_choice_advisor_names = [str(item).strip() for item in (second_choice_advisor_names or []) if str(item).strip()]
 
         keyword_text = str(keyword or "").strip().lower()
         plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
@@ -688,7 +739,16 @@ class RuntimeManagementStoreStudentsMixin:
             if effective_advisor_names and selected_advisor_name not in effective_advisor_names:
                 continue
 
-            latest_application = self._get_latest_registered_portal_application_item(student_id)
+            latest_application = self._get_latest_registered_portal_application_item(
+                student_id,
+                selected_plan_id=int(student.get("selected_plan_id") or 0) or None,
+            )
+            latest_first_choice_name = str((latest_application.get("first_choice") if latest_application else student.get("first_choice")) or "").strip()
+            latest_second_choice_name = str((latest_application.get("second_choice") if latest_application else student.get("second_choice")) or "").strip()
+            if normalized_first_choice_advisor_names and latest_first_choice_name not in normalized_first_choice_advisor_names:
+                continue
+            if normalized_second_choice_advisor_names and latest_second_choice_name not in normalized_second_choice_advisor_names:
+                continue
             application_status, _ = self._registered_portal_application_form_status(
                 student.get("submitted_at"),
                 str(latest_application.get("application_status") or "") if latest_application else None,
@@ -773,10 +833,13 @@ class RuntimeManagementStoreStudentsMixin:
         application_business_key: str | None,
         registered_at: str | None,
         plan_name: str | None,
+        first_choice_advisor_name: str | None = None,
+        second_choice_advisor_name: str | None = None,
+        preference_overrides: list[Any] | None = None,
     ) -> dict[str, Any]:
         profile = student.profile
         draft = student.application_draft
-        preferences = list((draft.preferences if draft else []) or [])
+        preferences = list(preference_overrides or ((draft.preferences if draft else []) or []))
         education_experiences = list((draft.education_experiences if draft else []) or [])
         practice_experiences = list((draft.practice_experiences if draft else []) or [])
         english_proficiencies = list((draft.english_proficiencies if draft else []) or [])
@@ -804,10 +867,8 @@ class RuntimeManagementStoreStudentsMixin:
             "application_form_status": application_form_status,
             "selected_plan_id": student.selected_plan_id,
             "selected_plan_name": plan_name,
-            "selected_team_id": student.selected_team_id,
-            "selected_center_name": self._registered_portal_student_export_text(student.selected_team_name),
-            "selected_advisor_user_id": student.selected_advisor_user_id,
-            "selected_advisor_name": self._registered_portal_student_export_text(student.selected_advisor_name),
+            "first_choice_advisor_name": self._registered_portal_student_export_text(first_choice_advisor_name),
+            "second_choice_advisor_name": self._registered_portal_student_export_text(second_choice_advisor_name),
             "recruitment_application_business_key": self._registered_portal_student_export_text(application_business_key),
             "recruitment_application_id": application_id,
             "recruitment_application_status": self._registered_portal_student_export_text(application_status) or "未提交",
@@ -904,11 +965,7 @@ class RuntimeManagementStoreStudentsMixin:
         for index, preference in enumerate(preferences, start=1):
             record[f"preference_{index}_order"] = getattr(preference, "preference_order", None)
             record[f"preference_{index}_team_id"] = getattr(preference, "team_id", None)
-            record[f"preference_{index}_research_center_name"] = self._registered_portal_student_export_text(
-                getattr(preference, "research_center_name", None)
-            )
             record[f"preference_{index}_advisor_user_id"] = getattr(preference, "advisor_user_id", None)
-            record[f"preference_{index}_advisor_name"] = self._registered_portal_student_export_text(getattr(preference, "advisor_name", None))
             record[f"preference_{index}_is_optional"] = self._registered_portal_bool_text(getattr(preference, "is_optional", None))
 
         for index, education in enumerate(education_experiences, start=1):
@@ -1165,6 +1222,8 @@ class RuntimeManagementStoreStudentsMixin:
         recruitment_application_status: str | None = None,
         show_all_background_assessed: bool = False,
         advisor_names: list[str] | None = None,
+        first_choice_advisor_names: list[str] | None = None,
+        second_choice_advisor_names: list[str] | None = None,
         page: int = 1,
         page_size: int = 10,
         principal: Principal | dict[str, Any] | None = None,
@@ -1183,6 +1242,8 @@ class RuntimeManagementStoreStudentsMixin:
                 recruitment_application_status=recruitment_application_status,
                 exclude_background_assessed_username=academy_admin_background_assessment_username,
                 advisor_names=effective_advisor_names,
+                first_choice_advisor_names=first_choice_advisor_names,
+                second_choice_advisor_names=second_choice_advisor_names,
                 page=page,
                 page_size=page_size,
             )
@@ -1202,6 +1263,8 @@ class RuntimeManagementStoreStudentsMixin:
         recruitment_application_status: str | None = None,
         show_all_background_assessed: bool = False,
         advisor_names: list[str] | None = None,
+        first_choice_advisor_names: list[str] | None = None,
+        second_choice_advisor_names: list[str] | None = None,
         export_scope: str | None = None,
         principal: Principal | dict[str, Any] | None = None,
     ) -> bytes:
@@ -1213,6 +1276,8 @@ class RuntimeManagementStoreStudentsMixin:
             recruitment_application_status=recruitment_application_status,
             show_all_background_assessed=show_all_background_assessed,
             advisor_names=advisor_names,
+            first_choice_advisor_names=first_choice_advisor_names,
+            second_choice_advisor_names=second_choice_advisor_names,
             export_scope=export_scope,
             principal=principal,
         )
@@ -1226,13 +1291,25 @@ class RuntimeManagementStoreStudentsMixin:
             if student_detail is None:
                 continue
             portal_student = self._registered_portal_export_namespace(student_detail)
-            latest_application_item = self._get_latest_registered_portal_application_item(student_id)
+            latest_application_item = self._get_latest_registered_portal_application_item(
+                student_id,
+                selected_plan_id=int(getattr(portal_student, "selected_plan_id", 0) or 0) or None,
+            )
             application_id = int(latest_application_item.get("id") or 0) if latest_application_item is not None else None
             application_status = self._registered_portal_student_export_text(
                 latest_application_item.get("application_status") if latest_application_item else getattr(portal_student, "application_status", None)
             )
             application_business_key = self._registered_portal_student_export_text(
                 latest_application_item.get("business_key") if latest_application_item else getattr(portal_student, "business_key", None)
+            )
+            preference_items = list(((self._postgres_store.get_recruitment_application_detail(application_id) or {}).get("preferences") or [])) if application_id else []
+            first_choice_advisor_name = self._registered_portal_student_export_text(
+                (latest_application_item.get("first_choice") if latest_application_item else None)
+                or (preference_items[0].get("advisor_name") if len(preference_items) > 0 else None)
+            )
+            second_choice_advisor_name = self._registered_portal_student_export_text(
+                (latest_application_item.get("second_choice") if latest_application_item else None)
+                or (preference_items[1].get("advisor_name") if len(preference_items) > 1 else None)
             )
             plan_id = getattr(portal_student, "selected_plan_id", None)
             plan_name = plan_name_map.get(int(plan_id or 0)) if plan_id is not None else None
@@ -1244,6 +1321,11 @@ class RuntimeManagementStoreStudentsMixin:
                     application_business_key,
                     self._registered_portal_student_export_text(getattr(portal_student, "created_at", None)),
                     plan_name,
+                    first_choice_advisor_name=first_choice_advisor_name,
+                    second_choice_advisor_name=second_choice_advisor_name,
+                    preference_overrides=(
+                        [self._registered_portal_export_namespace(item) for item in preference_items] if preference_items else None
+                    ),
                 )
             )
         return build_registered_portal_students_template(records)

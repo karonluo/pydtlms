@@ -166,6 +166,8 @@ def get_registered_portal_student_list(
     recruitment_application_status: str | None = None,
     show_all_background_assessed: bool = False,
     advisor_names: list[str] | None = None,
+    first_choice_advisor_names: list[str] | None = None,
+    second_choice_advisor_names: list[str] | None = None,
     page: int = 1,
     page_size: int = 10,
     principal=None,
@@ -176,6 +178,8 @@ def get_registered_portal_student_list(
         recruitment_application_status=recruitment_application_status,
         show_all_background_assessed=show_all_background_assessed,
         advisor_names=advisor_names,
+        first_choice_advisor_names=first_choice_advisor_names,
+        second_choice_advisor_names=second_choice_advisor_names,
         page=page,
         page_size=page_size,
         principal=principal,
@@ -752,8 +756,22 @@ def delete_integrations(integration_ids: list[int]) -> BulkActionResponse:
     return store.delete_integrations(integration_ids)
 
 
-def get_operation_log_list(keyword: str | None = None, module_name: str | None = None, result: str | None = None, page: int = 1, page_size: int = 10) -> OperationLogListResponse:
-    return store.get_operation_logs(keyword=keyword, module_name=module_name, result=result, page=page, page_size=page_size)
+def get_operation_log_list(
+    keyword: str | None = None,
+    module_name: str | None = None,
+    log_scope: str = "management",
+    result: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> OperationLogListResponse:
+    return store.get_operation_logs(
+        keyword=keyword,
+        module_name=module_name,
+        log_scope=log_scope,
+        result=result,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def get_sync_log_list(keyword: str | None = None, sync_status: str | None = None, source_system: str | None = None, page: int = 1, page_size: int = 10) -> SyncLogListResponse:

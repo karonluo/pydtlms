@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.core.operation_audit_context import mark_manual_operation_log
+
 from .management_service_shared import *
 
 
@@ -149,6 +151,9 @@ class RuntimeManagementStoreCoreMixin:
             int(self._counters.get("workflow_tasks", 0)),
             max([item.get("id", 0) for item in self.state.setdefault("workflow_tasks", [])], default=0),
         )
+        postgres_operation_log_max_id = self._load_operation_log_max_id_from_postgres()
+        if postgres_operation_log_max_id is not None:
+            self._counters["operation_logs"] = max(int(self._counters.get("operation_logs", 0)), postgres_operation_log_max_id)
         for portal_student in self.state["portal_students"]:
             portal_student["account_status"] = self._normalize_portal_account_status(portal_student.get("account_status"))
             portal_student.setdefault("password_hash", None)
@@ -452,6 +457,13 @@ class RuntimeManagementStoreCoreMixin:
                     changed = True
         return changed
 
+    def _load_operation_log_max_id_from_postgres(self) -> int | None:
+        try:
+            return int(self._postgres_store.get_operation_log_max_id())
+        except Exception as exc:
+            logger.warning("Load operation log counter from PostgreSQL failed, fallback to in-memory counter: %s", exc)
+            return None
+
     def _next_id(self, key: str) -> int:
         self._counters[key] = int(self._counters.get(key, 0)) + 1
         return self._counters[key]
@@ -465,8 +477,13 @@ class RuntimeManagementStoreCoreMixin:
         summary: str,
         operator_username: str = "admin",
         *,
+        target_name: str | None = None,
         result: str = "success",
     ) -> dict[str, Any]:
+        normalized_summary = str(summary or "").strip()
+        normalized_target_name = str(target_name or "").strip()
+        if normalized_target_name:
+            normalized_summary = f"{normalized_summary} - {normalized_target_name}" if normalized_summary else normalized_target_name
         entry = {
             "id": self._next_id("operation_logs"),
             "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -476,8 +493,9 @@ class RuntimeManagementStoreCoreMixin:
             "entity_id": entity_id,
             "action": action,
             "result": result,
-            "summary": summary,
+            "summary": normalized_summary,
         }
+        mark_manual_operation_log()
         self._list("operation_logs").insert(0, entry)
         return entry
 
@@ -499,6 +517,7 @@ class RuntimeManagementStoreCoreMixin:
         summary: str,
         operator_username: str = "admin",
         *,
+        target_name: str | None = None,
         result: str = "success",
     ) -> dict[str, Any]:
         operation_log = self._record_operation(
@@ -508,6 +527,7 @@ class RuntimeManagementStoreCoreMixin:
             action,
             summary,
             operator_username=operator_username,
+            target_name=target_name,
             result=result,
         )
         self._persist_operation_log(operation_log)
@@ -661,6 +681,12 @@ class RuntimeManagementStoreCoreMixin:
             label_suffix = "/".join(statuses)
             options.append(SelectOption(label=f"{full_name}（{label_suffix}）", value=full_name))
         return options
+
+    def _registered_portal_first_choice_advisor_filter_options(self) -> list[SelectOption]:
+        return self._registered_portal_advisor_filter_options()
+
+    def _registered_portal_second_choice_advisor_filter_options(self) -> list[SelectOption]:
+        return self._registered_portal_advisor_filter_options()
 
     def _resolve_portal_advisor_selection(
         self,
@@ -1239,9 +1265,13 @@ class RuntimeManagementStoreCoreMixin:
     def get_student_options(self, *, principal: Principal | dict[str, Any] | None = None) -> StudentOptionsResponse:
         advisor_options = self._advisor_select_options()
         registered_portal_advisor_filter_options = self._registered_portal_advisor_filter_options()
+        registered_portal_first_choice_advisor_filter_options = self._registered_portal_first_choice_advisor_filter_options()
+        registered_portal_second_choice_advisor_filter_options = self._registered_portal_second_choice_advisor_filter_options()
         scoped_advisor_name = self._registered_portal_scope_advisor_name(principal) if hasattr(self, "_registered_portal_scope_advisor_name") else None
         if scoped_advisor_name:
             registered_portal_advisor_filter_options = [item for item in registered_portal_advisor_filter_options if str(item.value or "") == scoped_advisor_name]
+            registered_portal_first_choice_advisor_filter_options = [item for item in registered_portal_first_choice_advisor_filter_options if str(item.value or "") == scoped_advisor_name]
+            registered_portal_second_choice_advisor_filter_options = [item for item in registered_portal_second_choice_advisor_filter_options if str(item.value or "") == scoped_advisor_name]
         advisor_option_map = {item.value: item for item in advisor_options}
         centers = self.get_centers(page=1, page_size=1000).items
         political_values = {
@@ -1253,6 +1283,8 @@ class RuntimeManagementStoreCoreMixin:
             degree_options=self._dict_options("student_degree_type"),
             advisor_options=advisor_options,
             registered_portal_advisor_filter_options=registered_portal_advisor_filter_options,
+            registered_portal_first_choice_advisor_filter_options=registered_portal_first_choice_advisor_filter_options,
+            registered_portal_second_choice_advisor_filter_options=registered_portal_second_choice_advisor_filter_options,
             registered_portal_application_status_options=self._registered_portal_application_status_options(),
             center_options=[SelectOption(label=item.center_name, value=item.center_name) for item in centers if item.is_enabled],
             political_status_options=self._select_options_from_values(political_values),

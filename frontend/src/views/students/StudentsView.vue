@@ -110,6 +110,8 @@ const options = ref<StudentOptions>({
   degree_options: [],
   advisor_options: [],
   registered_portal_advisor_filter_options: [],
+  registered_portal_first_choice_advisor_filter_options: [],
+  registered_portal_second_choice_advisor_filter_options: [],
   registered_portal_application_status_options: [],
   center_options: [],
   political_status_options: [],
@@ -135,7 +137,8 @@ const registeredPortalFilters = reactive({
   application_form_status: '',
   recruitment_application_status: '',
   show_all_background_assessed: false,
-  advisor_names: [] as string[],
+  first_choice_advisor_names: [] as string[],
+  second_choice_advisor_names: [] as string[],
 })
 const portalEmailForm = reactive<RegisteredPortalStudentEmailRequest>({
   subject: '',
@@ -375,7 +378,8 @@ async function loadRegisteredPortalStudents() {
     application_form_status: registeredPortalFilters.application_form_status || undefined,
     recruitment_application_status: registeredPortalFilters.recruitment_application_status || undefined,
     show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
-    advisor_names: registeredPortalFilters.advisor_names.length ? registeredPortalFilters.advisor_names.join(',') : undefined,
+    first_choice_advisor_names: registeredPortalFilters.first_choice_advisor_names.length ? registeredPortalFilters.first_choice_advisor_names.join(',') : undefined,
+    second_choice_advisor_names: registeredPortalFilters.second_choice_advisor_names.length ? registeredPortalFilters.second_choice_advisor_names.join(',') : undefined,
     page: registeredStudentPager.pagination.currentPage,
     page_size: registeredStudentPager.pagination.pageSize,
   })
@@ -626,7 +630,7 @@ async function handleSearch() {
 async function handleReset() {
   Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
   Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
-  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '', recruitment_application_status: '', show_all_background_assessed: false, advisor_names: [] })
+  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '', recruitment_application_status: '', show_all_background_assessed: false, first_choice_advisor_names: [], second_choice_advisor_names: [] })
   selectedCenterIds.value = []
   selectedRegisteredPortalStudentIds.value = []
   studentPager.reset()
@@ -671,7 +675,8 @@ function buildRegisteredPortalExportFilters() {
     application_form_status: registeredPortalFilters.application_form_status || undefined,
     recruitment_application_status: registeredPortalFilters.recruitment_application_status || undefined,
     show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
-    advisor_names: registeredPortalFilters.advisor_names.length ? [...registeredPortalFilters.advisor_names] : undefined,
+    first_choice_advisor_names: registeredPortalFilters.first_choice_advisor_names.length ? [...registeredPortalFilters.first_choice_advisor_names] : undefined,
+    second_choice_advisor_names: registeredPortalFilters.second_choice_advisor_names.length ? [...registeredPortalFilters.second_choice_advisor_names] : undefined,
   }
 }
 
@@ -689,8 +694,11 @@ function buildRegisteredPortalExportFilterSummary() {
   if (isRegisteredPortalAcademyAdmin.value) {
     items.push(`背景评估视图：${registeredPortalFilters.show_all_background_assessed ? '查看全部' : '隐藏本人已完成背景评估'}`)
   }
-  if (registeredPortalFilters.advisor_names.length) {
-    items.push(`导师：${registeredPortalFilters.advisor_names.join('、')}`)
+  if (registeredPortalFilters.first_choice_advisor_names.length) {
+    items.push(`第一志愿导师：${registeredPortalFilters.first_choice_advisor_names.join('、')}`)
+  }
+  if (registeredPortalFilters.second_choice_advisor_names.length) {
+    items.push(`第二志愿导师：${registeredPortalFilters.second_choice_advisor_names.join('、')}`)
   }
   return items.join('；') || '当前未设置筛选条件'
 }
@@ -922,7 +930,7 @@ function canReviewRegisteredPortalApplication(row: RegisteredPortalStudentRecord
 }
 
 function canRollbackRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
-  return isPlatformAdmin.value
+  return hasGrantedPermission(authStore.permissions, 'recruitment_registered_students:write')
     && canViewRegisteredPortalApplication(row)
     && !!row.recruitment_application_id
     && !!String(row.recruitment_application_status || '').trim()
@@ -1428,19 +1436,38 @@ onMounted(() => {
             @change="handleSearch"
           />
         </el-form-item>
-        <el-form-item label="导师姓名">
+        <el-form-item label="第一志愿导师">
           <el-select
-            v-model="registeredPortalFilters.advisor_names"
+            v-model="registeredPortalFilters.first_choice_advisor_names"
             multiple
             collapse-tags
             collapse-tags-tooltip
             filterable
             clearable
-            placeholder="全部导师"
+            placeholder="全部第一志愿导师"
             style="width: 260px"
           >
             <el-option
-              v-for="item in options.registered_portal_advisor_filter_options"
+              v-for="item in options.registered_portal_first_choice_advisor_filter_options"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="第二志愿导师">
+          <el-select
+            v-model="registeredPortalFilters.second_choice_advisor_names"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            clearable
+            placeholder="全部第二志愿导师"
+            style="width: 260px"
+          >
+            <el-option
+              v-for="item in options.registered_portal_second_choice_advisor_filter_options"
               :key="item.value"
               :label="item.label"
               :value="item.value"

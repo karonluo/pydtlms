@@ -54,3 +54,21 @@ WHERE r.role_code IN ('AILABMGT')
 ON CONFLICT DO NOTHING;
 
 COMMIT;
+
+-- 4) 新增注册学生退回环节权限，并授权给书院管理员
+BEGIN;
+
+INSERT INTO dtlms_permissions (permission_code, permission_name, module_name, is_deleted, created_at, updated_at)
+SELECT 'recruitment_registered_students:write', '退回注册学生环节', 'recruitment', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (
+  SELECT 1 FROM dtlms_permissions WHERE permission_code = 'recruitment_registered_students:write'
+);
+
+INSERT INTO dtlms_role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM dtlms_roles r
+JOIN dtlms_permissions p ON p.permission_code = 'recruitment_registered_students:write'
+WHERE r.role_code IN ('AILABMGT')
+ON CONFLICT DO NOTHING;
+
+COMMIT;

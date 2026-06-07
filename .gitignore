@@ -10,5 +10,7 @@ backend/.env
 frontend/node_modules/
 frontend/dist/
 frontend/public/portal-attachments/uploads/
+frontend/public/recruitment/news/uploads/
 documents/UI设计/
 .DS_Store
+backend/app*.zip
