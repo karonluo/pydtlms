@@ -11,6 +11,7 @@ import {
   listPortalPlans,
   savePortalApplicationDraft,
   submitPortalApplication,
+  updatePortalStudentApplication,
   uploadPortalAttachment,
   type PortalAdvisorRecord,
   type PortalAchievementRecordItem,
@@ -41,6 +42,8 @@ import PortalStatementSection from './sections/PortalStatementSection.vue'
 
 const props = defineProps<{
   activeSectionId: string
+  adminMode?: boolean
+  initialStudent?: PortalStudentRecord | null
 }>()
 
 const router = useRouter()
@@ -56,6 +59,7 @@ const selectedPlanId = ref<number | null>(null)
 const attachmentUploading = reactive<Record<string, boolean>>({})
 const isSubmitted = computed(() => Boolean(student.value?.submitted_at))
 const submittedRegistrationNo = computed(() => trimText(student.value?.candidate_no) || trimText(student.value?.business_key))
+const isAdminMode = computed(() => Boolean(props.adminMode))
 
 type PortalSectionStatus = {
   id: string
@@ -138,8 +142,6 @@ function createProfile(): PortalApplicantProfileData {
 function createPreference(order: number, isOptional: boolean): PortalApplicationPreferenceItem {
   return {
     preference_order: order,
-    team_id: null,
-    research_center_name: '',
     advisor_user_id: null,
     advisor_name: '',
     is_optional: isOptional,
@@ -948,10 +950,6 @@ function createEmptyForm(): PortalApplicationUpsert {
     recommendation_notes: '',
     personal_statement_text: '',
     signed_agreement: false,
-    selected_team_id: null,
-    selected_team_name: '',
-    selected_advisor_user_id: null,
-    selected_advisor_name: '',
     self_evaluation: '',
   }
 }
@@ -1008,8 +1006,6 @@ function findAdvisorByUserId(advisorUserId: number | null | undefined) {
 
 function handlePreferenceAdvisorChange(item: PortalApplicationPreferenceItem) {
   const matchedAdvisor = findAdvisorByUserId(item.advisor_user_id)
-  item.team_id = null
-  item.research_center_name = ''
   item.advisor_name = matchedAdvisor?.full_name || ''
   if (!matchedAdvisor && item.advisor_user_id !== null) {
     item.advisor_user_id = null
@@ -1026,6 +1022,20 @@ function resolveAdvisorIntroduction(item: PortalApplicationPreferenceItem) {
     return ''
   }
   return trimText(advisorOptions.value.find((option) => trimText(option.full_name) === advisorName)?.introduction)
+}
+
+function resolveCommittedAdvisorName(index: number) {
+  if (!isSubmitted.value) {
+    return ''
+  }
+  const submitted = student.value as Record<string, unknown> | null
+  if (!submitted) {
+    return ''
+  }
+  if (index === 0) {
+    return trimText(submitted.first_choice as string | null | undefined) || trimText(submitted.intended_advisor_name as string | null | undefined)
+  }
+  return trimText(submitted.second_choice as string | null | undefined)
 }
 
 function validatePreferenceRules() {
@@ -1243,7 +1253,6 @@ function applyProfile(profile: PortalStudentRecord) {
   const fallbackPractice = parseLegacyList<PortalPracticeExperienceItem>(profile.practice_experience)
   const fallbackFamily = parseLegacyList<PortalFamilyMemberItem>(profile.family_info)
   const fallbackAchievements = parseLegacyList<PortalAchievementRecordItem>(profile.recommendation_notes)
-
   selectedPlanId.value = draft?.selected_plan_id || profile.selected_plan_id || null
 
   Object.assign(form, createEmptyForm(), {
@@ -1268,19 +1277,10 @@ function applyProfile(profile: PortalStudentRecord) {
     preferences: ensureTwoPreferences(
       draft?.preferences?.length
         ? draft.preferences.map((item) => ({
-            team_id: item.team_id ?? null,
-            research_center_name: item.research_center_name || '',
             advisor_user_id: item.advisor_user_id ?? null,
             advisor_name: item.advisor_name || '',
           }))
-        : [
-            {
-            team_id: profile.selected_team_id ?? null,
-              research_center_name: profile.selected_team_name || '',
-            advisor_user_id: profile.selected_advisor_user_id ?? null,
-              advisor_name: profile.selected_advisor_name || '',
-            },
-          ],
+        : [createPreference(1, false)],
     ),
     education_experiences: ensureEducationExperienceShape(
       draft?.education_experiences?.length
@@ -1552,8 +1552,6 @@ function buildSubmitPayload(): PortalApplicationUpsert {
   const orderedPreferences = (form.preferences || [])
     .map((item, index) => ({
       preference_order: index + 1,
-      team_id: null,
-      research_center_name: null,
       advisor_user_id: item.advisor_user_id ?? null,
       advisor_name: trimText(item.advisor_name) || null,
       is_optional: index > 0,
@@ -1639,7 +1637,6 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     })
     .filter((item) => item.achievement_type)
 
-  const primaryPreferenceItem = orderedPreferences[0]
   const primaryEducationItem = orderedEducation[0]
   const declaration = {
     ...(form.declaration || createDeclaration()),
@@ -1702,10 +1699,6 @@ function buildSubmitPayload(): PortalApplicationUpsert {
     material_list_attachment: trimText(form.personal_statement?.supporting_material_attachment_url) || null,
     personal_statement_text: buildPersonalStatementSummary(form.personal_statement) || null,
     signed_agreement: declaration.has_read_declaration,
-    selected_team_id: null,
-    selected_team_name: null,
-    selected_advisor_user_id: primaryPreferenceItem?.advisor_user_id ?? null,
-    selected_advisor_name: primaryPreferenceItem?.advisor_name || null,
     self_evaluation: trimText(form.personal_statement?.ai_industry_opinion) || null,
   }
 }
@@ -1718,25 +1711,38 @@ function buildDraftPayload(): PortalApplicationUpsert {
 }
 
 async function submitForm() {
-  if (isSubmitted.value) {
+  if (isSubmitted.value && !isAdminMode.value) {
     await showPortalAlert('报名申请已提交，当前仅支持只读浏览，不能再修改信息', '提交受阻', 'warning')
     return
   }
   if (!await validateApplicationForSubmit('提交受阻')) {
     return
   }
-  const confirmed = await showPortalConfirm(
-    '申请材料一旦提交将不可修改，请确认所填写的内容是否完整、准确。',
-    '确认提交',
-    '确认提交',
-    '返回修改',
-  )
-  if (!confirmed) {
-    return
+  if (!isAdminMode.value) {
+    const confirmed = await showPortalConfirm(
+      '申请材料一旦提交将不可修改，请确认所填写的内容是否完整、准确。',
+      '确认提交',
+      '确认提交',
+      '返回修改',
+    )
+    if (!confirmed) {
+      return
+    }
   }
 
   submitting.value = true
   try {
+    if (isAdminMode.value) {
+      if (!student.value?.id) {
+        await showPortalAlert('缺少学生标识，无法保存', '保存失败', 'error')
+        return
+      }
+      const response = await updatePortalStudentApplication(student.value.id, buildSubmitPayload())
+      student.value = response.data
+      applyProfile(response.data)
+      await showPortalAlert('学生资料已保存并即时生效。', '保存成功', 'success')
+      return
+    }
     const response = await submitPortalApplication(buildSubmitPayload())
     student.value = response.data.student
     applyProfile(response.data.student)
@@ -1791,6 +1797,27 @@ watch(
 )
 
 onMounted(async () => {
+  if (isAdminMode.value) {
+    const initialStudent = props.initialStudent
+    if (!initialStudent) {
+      initializing.value = false
+      await showPortalAlert('缺少待编辑学生信息', '加载失败', 'error')
+      return
+    }
+    student.value = initialStudent
+    plans.value = (await listPortalPlans()).data.items
+    const optionsResponse = await getPortalProfileOptions()
+    politicalStatusOptions.value = optionsResponse.data.political_status_options
+    ethnicGroupOptions.value = optionsResponse.data.ethnic_group_options
+    advisorOptions.value = optionsResponse.data.advisor_options || []
+    applyProfile(initialStudent)
+    if (!selectedPlanId.value && plans.value[0]) {
+      choosePlan(plans.value[0].id)
+    }
+    initializing.value = false
+    return
+  }
+
   if (!getPortalToken()) {
     await router.replace('/portal')
     return
@@ -1837,6 +1864,7 @@ defineExpose({
   getSectionStatuses: buildSectionStatuses,
   getSavingDraft: () => savingDraft.value,
   getIsSubmitted: () => isSubmitted.value,
+  submitForm,
 })
 </script>
 
@@ -1873,6 +1901,7 @@ defineExpose({
           :source-channel-options="sourceChannelOptions"
           :resolve-advisor-introduction="resolveAdvisorIntroduction"
           :handle-preference-advisor-change="handlePreferenceAdvisorChange"
+          :resolve-committed-advisor-name="resolveCommittedAdvisorName"
         />
 
         <PortalEducationSection

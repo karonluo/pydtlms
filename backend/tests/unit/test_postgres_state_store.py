@@ -114,6 +114,69 @@ def test_normalize_system_user_row_preserves_email() -> None:
     assert row["email"] == "ops.user@example.com"
 
 
+def test_save_state_reseeds_system_user_profiles(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(fetchall_results=[[{"id": 2, "key": "advisor"}]])
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name, autocommit=False: connection)
+
+    state = {
+        "system_users": [
+            {
+                "id": 11,
+                "username": "mentor.one",
+                "full_name": "导师一号",
+                "role_code": "advisor",
+                "department_name": "智能制造学院",
+                "phone_number": "13800001111",
+                "account_status": "启用",
+            }
+        ],
+        "profiles": {
+            "mentor.one": {
+                "username": "mentor.one",
+                "full_name": "导师一号",
+                "role_name": "导师",
+                "department_name": "智能制造学院",
+                "introduction": "负责博士生培养与科研指导。",
+                "phone_number": "13800001111",
+                "email": "mentor.one@example.com",
+                "theme_color": "#13795b",
+            }
+        },
+        "roles": [],
+        "teams": [],
+        "students": [],
+        "recruitment_plans": [],
+        "portal_students": [],
+        "recruitment_applications": [],
+        "training_plans": [],
+        "scientific_reports": [],
+        "outbound_studies": [],
+        "theses": [],
+        "operation_logs": [],
+        "sync_logs": [],
+        "notification_delivery_logs": [],
+        "system_configs": [],
+    }
+
+    store.save_state(state)
+
+    profile_sql, profile_params = next(
+        (sql, params)
+        for sql, params in cursor.executed
+        if "INSERT INTO dtlms_user_profiles" in sql
+    )
+
+    assert connection.committed is True
+    assert profile_sql.count("%s") == len(profile_params)
+    assert profile_params[0] == "mentor.one"
+    assert profile_params[4] == "负责博士生培养与科研指导。"
+    assert profile_params[6] == "mentor.one@example.com"
+
+
 def test_seed_portal_application_structures_uses_application_id_for_personal_statement_attachment() -> None:
     store = PostgresStateStore()
     cursor = FakeCursor()
@@ -749,6 +812,94 @@ def test_get_portal_student_detail_prefers_saved_draft_over_existing_application
     assert item["application_draft"]["personal_statement"]["resume_attachment_name"] == "resume-new.pdf"
 
 
+def test_get_portal_student_detail_falls_back_to_application_choices_when_preferences_missing(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "id": 329,
+                "full_name": "张卜凡",
+                "phone_number": "19301330315",
+                "email": "zhangbf2023@shanghaitech.edu.cn",
+                "id_number": "340103200508136013",
+                "account_status": "启用",
+                "selected_plan_id": 5,
+                "selected_team_id": None,
+                "selected_team_name": None,
+                "selected_advisor_user_id": None,
+                "selected_advisor_name": None,
+                "submitted_at": None,
+                "signed_agreement": True,
+                "application_draft": None,
+            },
+            {
+                "id": 926,
+                "plan_id": 5,
+                "business_key": "SH20270894",
+                "candidate_no": "SH20270894",
+                "source_channel": "学长学姐推荐",
+                "source_channel_other": None,
+                "intended_advisor_name": "徐旭东",
+                "application_status": "background_review",
+                "applied_at": None,
+                "first_choice_team_id": 101,
+                "second_choice_team_id": 202,
+                "intended_advisor_user_id": None,
+                "first_choice": "徐旭东",
+                "second_choice": "于沐霖",
+                "personal_statement_attachment": "/api/v1/portal/attachments/student-329/resume/resume-c8db1ac694ac4d0c90346430f18311e1.pdf",
+                "material_list_attachment": None,
+                "advisor_screening_status": None,
+                "advisor_screening_round": None,
+                "initial_screening_status": None,
+                "initial_screening_result": None,
+            },
+            {
+                "personal_statement_text": "个人陈述",
+                "growth_experience_text": None,
+                "program_application_reason_text": None,
+                "career_plan_text": None,
+                "resume_attachment_url": None,
+                "supporting_material_attachment_url": None,
+                "ai_problem_statement": None,
+                "ai_industry_opinion": None,
+            },
+            {
+                "has_read_declaration": True,
+                "declaration_text": None,
+                "progress_snapshot": None,
+            },
+        ],
+        fetchall_results=[
+            [],
+            [],
+            [],
+            [
+                {
+                    "exam_name": "CET-6",
+                    "score_text": "",
+                    "certificate_attachment_url": None,
+                }
+            ],
+            [],
+            [],
+            [],
+            [],
+        ],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    item = store.get_portal_student_detail(329)
+
+    assert item is not None
+    assert item["application_draft"]["preferences"][0]["advisor_name"] == "徐旭东"
+    assert item["application_draft"]["preferences"][1]["advisor_name"] == "于沐霖"
+    assert item["selected_advisor_name"] == "徐旭东"
+
+
 def test_sync_recruitment_application_status_updates_relational_status(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor()
@@ -802,6 +953,25 @@ def test_sync_recruitment_application_status_clears_portal_submission_for_resubm
     assert update_params[-1] == 15
     assert "UPDATE dtlms_portal_students" in portal_update_sql
     assert portal_update_params == (7,)
+
+
+def test_derive_portal_application_draft_restores_ai_personal_statement_fields() -> None:
+    draft = PostgresStateStore._derive_portal_application_draft(
+        {
+            "selected_plan_id": 3,
+            "research_problem": "关键科研问题",
+            "dissenting_view": "行业不同观点",
+            "application_draft": {
+                "personal_statement": {
+                    "personal_statement_text": "汇总陈述",
+                }
+            },
+        }
+    )
+
+    assert draft is not None
+    assert draft["personal_statement"]["ai_problem_statement"] == "关键科研问题"
+    assert draft["personal_statement"]["ai_industry_opinion"] == "行业不同观点"
 
 
 def test_sync_portal_student_persists_application_draft_json(monkeypatch) -> None:
@@ -924,7 +1094,7 @@ def test_get_recruitment_application_detail_returns_full_portal_v2_sections(monk
         ],
         fetchall_results=[
             [],
-            [{"preference_order": 1, "research_center_name": "具身智能中心", "advisor_name": "刘亚", "is_optional": False}],
+            [{"preference_order": 1, "advisor_name": "刘亚", "is_optional": False}],
             [],
             [],
             [{"id": 31, "exam_name": "IELTS", "score_text": "7.0", "certificate_attachment_url": "/api/v1/portal/attachments/ielts.pdf"}],
@@ -1135,6 +1305,101 @@ def test_seed_portal_students_persists_application_draft_payload() -> None:
 
     assert "application_draft" not in insert_sql
     assert len(params) == 34
+
+
+def test_get_portal_student_detail_falls_back_to_attachment_rows_for_personal_statement_urls(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "id": 7,
+                "selected_plan_id": 3,
+                "selected_team_id": None,
+                "selected_advisor_user_id": None,
+                "selected_advisor_name": None,
+                "selected_team_name": None,
+                "submitted_at": None,
+                "application_draft": None,
+                "personal_statement_text": None,
+                "education_experience": None,
+                "practice_experience": None,
+                "family_info": None,
+                "recommendation_notes": None,
+                "english_level": None,
+                "signed_agreement": False,
+            },
+            {
+                "id": 18,
+                "plan_id": 3,
+                "business_key": "SH20270894",
+                "candidate_no": "SH20270894",
+                "source_channel": "官网",
+                "source_channel_other": None,
+                "intended_advisor_name": "张老师",
+                "application_status": "submitted",
+                "applied_at": "2026-06-01 10:00:00",
+                "advisor_screening_status": None,
+                "advisor_screening_round": None,
+                "initial_screening_status": None,
+                "initial_screening_result": None,
+                "first_choice_team_id": None,
+                "second_choice_team_id": None,
+                "intended_advisor_user_id": None,
+            },
+            {
+                "personal_statement_text": "正文",
+                "growth_experience_text": None,
+                "program_application_reason_text": None,
+                "career_plan_text": None,
+                "resume_attachment_url": None,
+                "supporting_material_attachment_url": None,
+                "ai_problem_statement": None,
+                "ai_industry_opinion": None,
+            },
+            {
+                "has_read_declaration": True,
+                "declaration_text": None,
+                "progress_snapshot": None,
+            },
+        ],
+        fetchall_results=[
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [
+                {
+                    "owner_type": "personal_statement",
+                    "owner_id": 18,
+                    "attachment_category": "resume",
+                    "file_name": "resume.pdf",
+                    "file_url": "/api/v1/portal/attachments/student-7/resume/resume.pdf",
+                },
+                {
+                    "owner_type": "portal_application",
+                    "owner_id": 18,
+                    "attachment_category": "materials",
+                    "file_name": "materials.zip",
+                    "file_url": "/api/v1/portal/attachments/student-7/materials/materials.zip",
+                },
+            ],
+            [],
+        ],
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name: connection)
+
+    item = store.get_portal_student_detail(7)
+
+    assert item is not None
+    assert item["application_draft"]["personal_statement"]["resume_attachment_url"] == "/api/v1/portal/attachments/student-7/resume/resume.pdf"
+    assert item["application_draft"]["personal_statement"]["resume_attachment_name"] == "resume.pdf"
+    assert item["application_draft"]["personal_statement"]["supporting_material_attachment_url"] == "/api/v1/portal/attachments/student-7/materials/materials.zip"
+    assert item["application_draft"]["personal_statement"]["supporting_material_attachment_name"] == "materials.zip"
 
 
 def test_seed_recruitment_normalizes_academic_year_range_for_plan_dates() -> None:

@@ -35,6 +35,7 @@ class PostgresStateStoreSeedMixin:
 
     def _seed_relational_tables(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
         self._seed_users_and_roles(cur, state)
+        self._seed_user_profiles(cur, state)
         advisor_map = self._seed_advisors(cur, state)
         team_map = self._seed_teams(cur, state, advisor_map)
         student_map = self._seed_students(cur, state, advisor_map, team_map)
@@ -84,6 +85,30 @@ class PostgresStateStoreSeedMixin:
                     "INSERT INTO dtlms_user_roles (user_id, role_id, grant_source) VALUES (%s, %s, %s)",
                     (int(item["id"]), int(role_id), "runtime_seed"),
                 )
+
+    def _seed_user_profiles(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> None:
+        cur.execute("TRUNCATE TABLE dtlms_user_profiles RESTART IDENTITY CASCADE")
+        profiles = state.get("profiles", {})
+
+        for item in state.get("system_users", []):
+            profile = profiles.get(item["username"], {})
+            cur.execute(
+                """
+                INSERT INTO dtlms_user_profiles (
+                    username, full_name, role_name, department_name, introduction, phone_number, email, theme_color
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(item["username"]),
+                    profile.get("full_name") or item.get("full_name"),
+                    profile.get("role_name") or item.get("role_code") or "未分配角色",
+                    profile.get("department_name") or item.get("department_name") or "",
+                    profile.get("introduction"),
+                    profile.get("phone_number") or item.get("phone_number"),
+                    profile.get("email") or item.get("email"),
+                    profile.get("theme_color") or "#0f4cbd",
+                ),
+            )
 
     def _seed_advisors(self, cur: psycopg.Cursor[Any], state: dict[str, Any]) -> dict[str, int]:
         cur.execute("TRUNCATE TABLE dtlms_student_advisor_history, dtlms_advisors RESTART IDENTITY CASCADE")
@@ -479,6 +504,7 @@ class PostgresStateStoreSeedMixin:
         cur.execute("TRUNCATE TABLE dtlms_portal_students RESTART IDENTITY CASCADE")
         for item in state.get("portal_students", []):
             selected_plan_id = item.get("selected_plan_id")
+            application_draft = item.get("application_draft") or {}
             cur.execute(
                 """
                 INSERT INTO dtlms_portal_students (
@@ -521,7 +547,7 @@ class PostgresStateStoreSeedMixin:
                     item.get("selected_team_name"),
                     item.get("selected_advisor_name"),
                     item.get("self_evaluation"),
-                    self._json_payload(item.get("application_draft")) if item.get("application_draft") else None,
+                    self._json_payload(application_draft),
                     item.get("submitted_at"),
                     self._normalize_portal_account_status(item.get("account_status")),
                     item.get("created_at"),
@@ -593,13 +619,12 @@ class PostgresStateStoreSeedMixin:
                 cur.execute(
                     """
                     INSERT INTO dtlms_portal_application_preferences (
-                        application_id, preference_order, research_center_name, advisor_name, is_optional
-                    ) VALUES (%s, %s, %s, %s, %s)
+                        application_id, preference_order, advisor_name, is_optional
+                    ) VALUES (%s, %s, %s, %s)
                     """,
                     (
                         application_id,
                         int(preference.get("preference_order") or 1),
-                        preference.get("research_center_name"),
                         preference.get("advisor_name"),
                         bool(preference.get("is_optional")),
                     ),

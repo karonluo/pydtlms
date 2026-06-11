@@ -903,11 +903,10 @@ class PostgresStateStoreCoreMixin:
     def _derive_portal_application_draft(cls, student: dict[str, Any]) -> dict[str, Any] | None:
         draft: dict[str, Any] = cast(dict[str, Any], student.get("application_draft")) if isinstance(student.get("application_draft"), dict) else {}
         preferences = draft.get("preferences") if isinstance(draft.get("preferences"), list) else []
-        if not preferences and student.get("selected_team_name"):
+        if not preferences and student.get("selected_advisor_name"):
             preferences = [
                 {
                     "preference_order": 1,
-                    "research_center_name": student.get("selected_team_name"),
                     "advisor_name": student.get("selected_advisor_name"),
                     "is_optional": False,
                 }
@@ -920,6 +919,10 @@ class PostgresStateStoreCoreMixin:
         personal_statement: dict[str, Any] = cast(dict[str, Any], draft.get("personal_statement")) if isinstance(draft.get("personal_statement"), dict) else {}
         if student.get("personal_statement_text") and not personal_statement.get("personal_statement_text"):
             personal_statement["personal_statement_text"] = student.get("personal_statement_text")
+        if student.get("research_problem") and not personal_statement.get("ai_problem_statement"):
+            personal_statement["ai_problem_statement"] = student.get("research_problem")
+        if student.get("dissenting_view") and not personal_statement.get("ai_industry_opinion"):
+            personal_statement["ai_industry_opinion"] = student.get("dissenting_view")
         declaration: dict[str, Any] = cast(dict[str, Any], draft.get("declaration")) if isinstance(draft.get("declaration"), dict) else {}
         declaration.setdefault("has_read_declaration", bool(student.get("signed_agreement")))
         derived = {
@@ -1173,10 +1176,10 @@ class PostgresStateStoreCoreMixin:
             "candidate_no": row.get("candidate_no"),
             "review_round": row.get("review_round"),
             "student_name": str(row.get("student_name") or ""),
-            "first_choice_team_id": int(row.get("first_choice_team_id") or 0) or None,
             "first_choice": row.get("first_choice"),
-            "second_choice_team_id": int(row.get("second_choice_team_id") or 0) or None,
             "second_choice": row.get("second_choice"),
+            "first_choice_id": int(row.get("first_choice_id") or 0) or None,
+            "second_choice_id": int(row.get("second_choice_id") or 0) or None,
             "full_name_pinyin": row.get("full_name_pinyin"),
             "profile_photo_url": row.get("profile_photo_url"),
             "id_card_collage_url": row.get("id_card_collage_url"),
@@ -1606,9 +1609,6 @@ class PostgresStateStoreCoreMixin:
             "待导师初筛-第二志愿": "initial_screening_second",
             "待初筛确认": "initial_screening_confirmation",
             "入营面试": "camp_interview",
-            "待中心考核": "center_assessment",
-            "待中心考核-第一志愿": "center_assessment_first",
-            "待中心考核-第二志愿": "center_assessment_second",
             "结果公布": "result_published",
             "材料评分中": "scoring",
             "面试完成": "interviewed",
@@ -1631,9 +1631,6 @@ class PostgresStateStoreCoreMixin:
             "initial_screening_second": "待导师初筛-第二志愿",
             "initial_screening_confirmation": "待初筛确认",
             "camp_interview": "入营面试",
-            "center_assessment": "待中心考核",
-            "center_assessment_first": "待中心考核-第一志愿",
-            "center_assessment_second": "待中心考核-第二志愿",
             "result_published": "结果公布",
             "scoring": "材料评分中",
             "interviewed": "面试完成",

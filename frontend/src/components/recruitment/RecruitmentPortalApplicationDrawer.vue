@@ -627,16 +627,27 @@ onBeforeUnmount(() => {
       <section class="detail-section">
         <h3 class="dialog-section__title">报名信息</h3>
         <div v-if="hidePreferenceDetails" class="empty-inline section-spacing-top">当前场景仅供查看学生填报内容，志愿与导师指向信息已隐藏。</div>
-        <div v-else-if="detail.preferences?.length" class="detail-record-stack section-spacing-top">
-          <article v-for="(item, index) in detail.preferences" :key="`detail-preference-${index}`" class="detail-record-card">
+        <div v-else-if="hasDisplayValue(detail.first_choice) || hasDisplayValue(detail.second_choice)" class="detail-record-stack section-spacing-top">
+          <article class="detail-record-card">
             <div class="detail-record-card__header detail-record-card__header--with-meta">
               <div>
-                <strong>{{ index === 0 ? '第一志愿' : '第二志愿' }}</strong>
-                <span>{{ index === 0 ? '必填' : '选填' }}</span>
+                <strong>第一志愿</strong>
+                <span>必填</span>
               </div>
             </div>
             <div class="detail-grid">
-              <div class="detail-item"><span class="detail-item__label">意向导师</span><span class="detail-item__value">{{ displayDetailValue(item.advisor_name) }}</span></div>
+              <div class="detail-item"><span class="detail-item__label">意向导师</span><span class="detail-item__value">{{ displayDetailValue(detail.first_choice) }}</span></div>
+            </div>
+          </article>
+          <article class="detail-record-card" v-if="hasDisplayValue(detail.second_choice)">
+            <div class="detail-record-card__header detail-record-card__header--with-meta">
+              <div>
+                <strong>第二志愿</strong>
+                <span>选填</span>
+              </div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-item"><span class="detail-item__label">意向导师</span><span class="detail-item__value">{{ displayDetailValue(detail.second_choice) }}</span></div>
             </div>
           </article>
         </div>

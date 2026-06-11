@@ -24,9 +24,6 @@ class RuntimeManagementStoreStudentsMixin:
         "待导师初筛",
         "待导师初筛-第一志愿",
         "待导师初筛-第二志愿",
-        "待中心考核",
-        "待中心考核-第一志愿",
-        "待中心考核-第二志愿",
     }
     _REGISTERED_PORTAL_ROLLBACK_STAGE_CONFIG: dict[str, dict[str, Any]] = {
         "qualification_review": {"label": "资格审核", "node_key": "qualification_review", "application_status": "报名已提交", "rank": 1},
@@ -492,8 +489,8 @@ class RuntimeManagementStoreStudentsMixin:
             else:
                 self._list("workflow_tasks").insert(0, updated_task)
 
-        email_sent = bool(self._email_service.enabled() and str(updated_application.get("email") or "").strip())
-        if str(updated_application.get("email") or "").strip():
+        email_sent = bool(self._email_service.workflow_notifications_enabled() and str(updated_application.get("email") or "").strip())
+        if email_sent:
             self._email_service.send_recruitment_stage_rollback(
                 student_name=str(updated_application.get("student_name") or student.get("full_name") or ""),
                 email=str(updated_application.get("email") or ""),
@@ -1141,7 +1138,7 @@ class RuntimeManagementStoreStudentsMixin:
                 self._save()
 
         email_sent = False
-        if self._email_service.enabled():
+        if self._email_service.workflow_notifications_enabled():
             self._email_service.send_message(to_email=str(student.get("email") or ""), subject=subject, text_body=content)
             email_sent = True
 

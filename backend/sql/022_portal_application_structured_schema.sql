@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS dtlms_portal_application_preferences (
     id BIGSERIAL PRIMARY KEY,
     application_id BIGINT NOT NULL REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE,
     preference_order INTEGER NOT NULL,
-    research_center_name VARCHAR(128),
     advisor_name VARCHAR(128),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -238,7 +237,6 @@ ON CONFLICT (portal_student_id) DO UPDATE SET
 INSERT INTO dtlms_portal_application_preferences (
     application_id,
     preference_order,
-    research_center_name,
     advisor_name,
     created_at,
     updated_at
@@ -246,21 +244,18 @@ INSERT INTO dtlms_portal_application_preferences (
 SELECT
     ra.id,
     1,
-    ra.first_choice,
-    ra.intended_advisor_name,
+    COALESCE(NULLIF(BTRIM(ra.intended_advisor_name), ''), NULLIF(BTRIM(ra.first_choice), '')),
     ra.created_at,
     ra.updated_at
 FROM dtlms_recruitment_applications AS ra
-WHERE NULLIF(ra.first_choice, '') IS NOT NULL
+WHERE COALESCE(NULLIF(BTRIM(ra.intended_advisor_name), ''), NULLIF(BTRIM(ra.first_choice), '')) IS NOT NULL
 ON CONFLICT (application_id, preference_order) DO UPDATE SET
-    research_center_name = EXCLUDED.research_center_name,
     advisor_name = EXCLUDED.advisor_name,
     updated_at = EXCLUDED.updated_at;
 
 INSERT INTO dtlms_portal_application_preferences (
     application_id,
     preference_order,
-    research_center_name,
     advisor_name,
     created_at,
     updated_at
@@ -268,14 +263,12 @@ INSERT INTO dtlms_portal_application_preferences (
 SELECT
     ra.id,
     2,
-    ra.second_choice,
-    NULL,
+    NULLIF(BTRIM(ra.second_choice), ''),
     ra.created_at,
     ra.updated_at
 FROM dtlms_recruitment_applications AS ra
-WHERE NULLIF(ra.second_choice, '') IS NOT NULL
+WHERE NULLIF(BTRIM(ra.second_choice), '') IS NOT NULL
 ON CONFLICT (application_id, preference_order) DO UPDATE SET
-    research_center_name = EXCLUDED.research_center_name,
     advisor_name = EXCLUDED.advisor_name,
     updated_at = EXCLUDED.updated_at;
 

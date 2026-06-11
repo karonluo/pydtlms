@@ -184,9 +184,61 @@ class PostgresStateStoreQueryStudentsMixin:
                         pp.profile_photo_url,
                         pp.id_card_collage_url,
                         pp.emergency_contact_name,
-                        pp.emergency_contact_phone
+                        pp.emergency_contact_phone,
+                        latest_application.id AS recruitment_application_id,
+                        latest_application.business_key AS business_key,
+                        latest_application.candidate_no AS candidate_no,
+                        latest_application.application_status AS recruitment_application_status,
+                        latest_application.applied_at AS recruitment_application_applied_at,
+                        COALESCE(resume_attachment.resume_attachment_url, psm.resume_attachment_url) AS resume_attachment_url,
+                        resume_attachment.resume_attachment_name,
+                        COALESCE(supporting_material_attachment.supporting_material_attachment_url, psm.supporting_material_attachment_url) AS supporting_material_attachment_url,
+                        supporting_material_attachment.supporting_material_attachment_name
                     FROM dtlms_portal_students ps
                     LEFT JOIN dtlms_portal_student_profiles pp ON pp.portal_student_id = ps.id
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            ra.id,
+                            ra.business_key,
+                            ra.candidate_no,
+                            ra.application_status,
+                            ra.applied_at
+                        FROM dtlms_recruitment_applications ra
+                        WHERE ra.is_deleted = FALSE
+                          AND ra.portal_student_id = ps.id
+                        ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC,
+                                 ra.id DESC
+                        LIMIT 1
+                    ) latest_application ON TRUE
+                    LEFT JOIN dtlms_portal_application_personal_statements psm ON psm.application_id = latest_application.id
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            attachment.file_url AS resume_attachment_url,
+                            attachment.file_name AS resume_attachment_name
+                        FROM dtlms_portal_application_attachments attachment
+                        WHERE latest_application.id IS NOT NULL
+                          AND attachment.application_id = latest_application.id
+                          AND attachment.owner_type = 'personal_statement'
+                          AND attachment.owner_id = latest_application.id
+                          AND attachment.attachment_category = 'resume'
+                          AND COALESCE(NULLIF(BTRIM(attachment.file_url), ''), NULL) IS NOT NULL
+                        ORDER BY attachment.id DESC
+                        LIMIT 1
+                    ) resume_attachment ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            attachment.file_url AS supporting_material_attachment_url,
+                            attachment.file_name AS supporting_material_attachment_name
+                        FROM dtlms_portal_application_attachments attachment
+                        WHERE latest_application.id IS NOT NULL
+                          AND attachment.application_id = latest_application.id
+                          AND attachment.owner_type = 'portal_application'
+                          AND attachment.owner_id = latest_application.id
+                          AND attachment.attachment_category = 'materials'
+                          AND COALESCE(NULLIF(BTRIM(attachment.file_url), ''), NULL) IS NOT NULL
+                        ORDER BY attachment.id DESC
+                        LIMIT 1
+                    ) supporting_material_attachment ON TRUE
                     ORDER BY ps.id DESC
                     """
                 )
@@ -201,6 +253,37 @@ class PostgresStateStoreQueryStudentsMixin:
             student.pop("application_draft", None)
             results.append(student)
         return results
+
+    def _build_portal_application_draft_from_tables(self, student: dict[str, Any], application: dict[str, Any] | None) -> dict[str, Any] | None:
+        draft: dict[str, Any] = {
+            "selected_plan_id": int((application or {}).get("plan_id") or student.get("selected_plan_id") or 0) or None,
+            "source_channel": (application or {}).get("source_channel"),
+            "source_channel_other": (application or {}).get("source_channel_other"),
+            "preferences": [],
+            "education_experiences": self._parse_json_list(student.get("education_experience")),
+            "practice_experiences": self._parse_json_list(student.get("practice_experience")),
+            "english_proficiencies": self._parse_json_list(student.get("english_level")),
+            "family_members": self._parse_json_list(student.get("family_info")),
+            "achievement_records": self._parse_json_list(student.get("recommendation_notes")),
+            "personal_statement": {
+                "personal_statement_text": student.get("personal_statement_text"),
+                "ai_problem_statement": student.get("research_problem"),
+                "ai_industry_opinion": student.get("dissenting_view"),
+                "growth_experience_text": student.get("personal_statement_text"),
+                "program_application_reason_text": student.get("research_problem"),
+                "career_plan_text": student.get("dissenting_view"),
+                "resume_attachment_url": None,
+                "resume_attachment_name": None,
+                "supporting_material_attachment_url": student.get("material_list_attachment"),
+                "supporting_material_attachment_name": None,
+            },
+            "declaration": {
+                "has_read_declaration": bool(student.get("signed_agreement")),
+            },
+            "submitted_at": student.get("submitted_at"),
+        }
+        has_content = any(value not in (None, "", [], {}) for key, value in draft.items() if key != "selected_plan_id") or draft.get("selected_plan_id") is not None
+        return draft if has_content else None
 
     def get_portal_student_detail(self, student_id: int) -> dict[str, Any] | None:
         """Execute query logic for `get_portal_student_detail`."""
@@ -227,7 +310,6 @@ class PostgresStateStoreQueryStudentsMixin:
                 if not row:
                     return None
                 student = dict(row)
-                saved_draft = dict(student.get("application_draft")) if isinstance(student.get("application_draft"), dict) else None
                 profile = self._derive_portal_profile(student)
                 if profile is not None:
                     student["profile"] = profile
@@ -236,10 +318,11 @@ class PostgresStateStoreQueryStudentsMixin:
                 cur.execute(
                     """
                     SELECT id, plan_id, business_key, candidate_no, source_channel, source_channel_other,
-                           intended_advisor_name, application_status, applied_at,
+                              intended_advisor_name, application_status, applied_at,
                            advisor_screening_status, advisor_screening_round,
                            initial_screening_status, initial_screening_result,
-                           first_choice_team_id, second_choice_team_id, intended_advisor_user_id
+                              first_choice, second_choice,
+                                        intended_advisor_user_id
                     FROM dtlms_recruitment_applications
                     WHERE is_deleted = FALSE AND portal_student_id = %s
                     ORDER BY CASE WHEN plan_id = %s THEN 0 ELSE 1 END,
@@ -251,15 +334,22 @@ class PostgresStateStoreQueryStudentsMixin:
                 )
                 application = cur.fetchone()
                 if not application:
-                    draft = self._derive_portal_application_draft(student)
-                    if draft is not None:
-                        student["application_draft"] = draft
+                    student["application_draft"] = self._build_portal_application_draft_from_tables(student, None)
                     return student
 
                 application_id = int(application["id"])
+                student["recruitment_application_id"] = application_id
+                student["recruitment_application_business_key"] = application.get("business_key")
+                student["recruitment_application_candidate_no"] = application.get("candidate_no")
+                student["recruitment_application_status"] = application.get("application_status")
+                student["recruitment_application_applied_at"] = application.get("applied_at")
+                student["first_choice"] = application.get("first_choice")
+                student["second_choice"] = application.get("second_choice")
+                student["intended_advisor_user_id"] = application.get("intended_advisor_user_id")
+                student["intended_advisor_name"] = application.get("intended_advisor_name")
                 cur.execute(
                     """
-                    SELECT preference_order, team_id, research_center_name, advisor_user_id, advisor_name, is_optional
+                    SELECT preference_order, advisor_user_id, advisor_name, is_optional
                     FROM dtlms_portal_application_preferences
                     WHERE application_id = %s
                     ORDER BY preference_order ASC, id ASC
@@ -267,6 +357,27 @@ class PostgresStateStoreQueryStudentsMixin:
                     (application_id,),
                 )
                 preferences = [dict(item) for item in cur.fetchall()]
+                if not preferences:
+                    first_choice_name = str(application.get("first_choice") or "").strip()
+                    second_choice_name = str(application.get("second_choice") or "").strip()
+                    if first_choice_name:
+                        preferences.append(
+                            {
+                                "preference_order": 1,
+                                "advisor_user_id": application.get("intended_advisor_user_id"),
+                                "advisor_name": first_choice_name,
+                                "is_optional": False,
+                            }
+                        )
+                    if second_choice_name:
+                        preferences.append(
+                            {
+                                "preference_order": 2,
+                                "advisor_user_id": None,
+                                "advisor_name": second_choice_name,
+                                "is_optional": True,
+                            }
+                        )
                 cur.execute(
                     """
                     SELECT sort_order, education_stage, start_month, end_month, school_name, major_name,
@@ -396,8 +507,6 @@ class PostgresStateStoreQueryStudentsMixin:
                 ]
                 student["application_draft"] = {
                     "selected_plan_id": int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None,
-                    "selected_team_id": int(student.get("selected_team_id") or 0) or None,
-                    "selected_advisor_user_id": int(student.get("selected_advisor_user_id") or 0) or None,
                     "source_channel": application.get("source_channel"),
                     "source_channel_other": application.get("source_channel_other"),
                     "preferences": preferences,
@@ -410,8 +519,31 @@ class PostgresStateStoreQueryStudentsMixin:
                     "declaration": dict(declaration_row) if declaration_row else {"has_read_declaration": bool(student.get("signed_agreement"))},
                     "submitted_at": None if self._portal_resubmittable_application_status(application.get("application_status")) else self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at"),
                 }
-                student["application_draft"] = self._merge_portal_application_draft(student.get("application_draft"), saved_draft) or student["application_draft"]
                 personal_statement = student["application_draft"]["personal_statement"]
+                if not personal_statement.get("resume_attachment_url"):
+                    personal_statement["resume_attachment_url"] = next(
+                        (
+                            str(item.get("file_url") or "")
+                            for item in attachment_rows
+                            if str(item.get("owner_type") or "") == "personal_statement"
+                            and int(item.get("owner_id") or 0) == application_id
+                            and str(item.get("attachment_category") or "") == "resume"
+                            and item.get("file_url")
+                        ),
+                        None,
+                    )
+                if not personal_statement.get("supporting_material_attachment_url"):
+                    personal_statement["supporting_material_attachment_url"] = next(
+                        (
+                            str(item.get("file_url") or "")
+                            for item in attachment_rows
+                            if str(item.get("owner_type") or "") == "portal_application"
+                            and int(item.get("owner_id") or 0) == application_id
+                            and str(item.get("attachment_category") or "") == "materials"
+                            and item.get("file_url")
+                        ),
+                        None,
+                    )
                 personal_statement["resume_attachment_name"] = self._resolve_attachment_name(
                     attachment_rows,
                     "personal_statement",
@@ -437,8 +569,6 @@ class PostgresStateStoreQueryStudentsMixin:
                 student["initial_screening_result"] = application.get("initial_screening_result")
                 student["background_assessments"] = background_assessments
                 if preferences:
-                    student["selected_team_id"] = int(preferences[0].get("team_id") or application.get("first_choice_team_id") or student.get("selected_team_id") or 0) or None
-                    student["selected_team_name"] = preferences[0].get("research_center_name") or student.get("selected_team_name")
                     student["selected_advisor_user_id"] = int(preferences[0].get("advisor_user_id") or application.get("intended_advisor_user_id") or student.get("selected_advisor_user_id") or 0) or None
                     student["selected_advisor_name"] = preferences[0].get("advisor_name") or application.get("intended_advisor_name") or student.get("selected_advisor_name")
                 student["selected_plan_id"] = int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None

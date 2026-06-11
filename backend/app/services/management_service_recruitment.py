@@ -67,6 +67,12 @@ class RuntimeManagementStoreRecruitmentMixin:
         advisor_candidates = {item for item in advisor_candidates if item}
         return bool(advisor_candidates.intersection(expected_values))
 
+    @staticmethod
+    def _advisor_screening_submission_locked(application: dict[str, Any], screening_round: str) -> bool:
+        if screening_round == "second_choice":
+            return bool(application.get("second_choice_screening_batch_id") or application.get("second_choice_screening_submitted_at"))
+        return bool(application.get("first_choice_screening_batch_id") or application.get("first_choice_screening_submitted_at"))
+
     def _build_workflow_transition_record(
         self,
         task: dict[str, Any],
@@ -116,6 +122,9 @@ class RuntimeManagementStoreRecruitmentMixin:
                     "supporting_material_attachment_name": application.material_list_attachment_name,
                 }
             )
+        preferences = list(application.preferences or [])
+        first_choice = application.first_choice or (preferences[0].advisor_name if len(preferences) > 0 else None)
+        second_choice = application.second_choice or (preferences[1].advisor_name if len(preferences) > 1 else None)
         return RecruitPortalApplicationDetail(
             application_id=application.id,
             plan_id=application.plan_id,
@@ -131,6 +140,10 @@ class RuntimeManagementStoreRecruitmentMixin:
             advisor_screening_round=application.advisor_screening_round,
             advisor_screening_submitted_at=application.advisor_screening_submitted_at,
             advisor_signature_base64=application.advisor_signature_base64,
+            first_choice=first_choice,
+            second_choice=second_choice,
+            first_choice_id=application.first_choice_id,
+            second_choice_id=application.second_choice_id,
             first_choice_screening_score=application.first_choice_screening_score,
             second_choice_screening_score=application.second_choice_screening_score,
             initial_screening_status=application.initial_screening_status,
@@ -143,7 +156,7 @@ class RuntimeManagementStoreRecruitmentMixin:
             profile=application.profile,
             source_channel=application.source_channel or application.discovery_channel,
             source_channel_other=application.source_channel_other,
-            preferences=list(application.preferences or []),
+            preferences=preferences,
             education_experiences=list(application.education_experiences or []),
             practice_experiences=list(application.practice_experiences or []),
             english_proficiencies=list(application.english_proficiencies or []),
@@ -282,9 +295,14 @@ class RuntimeManagementStoreRecruitmentMixin:
         principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": [], "permissions": []})
         role_codes = {str(item) for item in principal_summary["roles"] if str(item).strip()}
         advisor_name = None
+        advisor_user_id = None
         normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
         if "advisor" in role_codes and not role_codes.intersection({"platform_admin", "AILABMGT", "academy_admin"}):
             advisor_name = str(principal_summary.get("full_name") or "").strip() or None
+            try:
+                advisor_user_id = int(principal_summary.get("user_id") or 0) or None
+            except Exception:
+                advisor_user_id = None
             if normalized_advisor_names and advisor_name not in normalized_advisor_names:
                 return RecruitApplicationListResponse(items=[], total=0, page=page, page_size=page_size)
             normalized_advisor_names = [advisor_name] if advisor_name else []
@@ -296,6 +314,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                 portal_student_only=portal_student_only,
                 advisor_name=advisor_name,
                 advisor_names=normalized_advisor_names or None,
+                advisor_user_id=advisor_user_id,
                 page=page,
                 page_size=page_size,
             )
@@ -588,6 +607,53 @@ class RuntimeManagementStoreRecruitmentMixin:
                 self._save()
             return RecruitApplicationRecord(**updated)
 
+    def update_recruitment_application_advisor_choices(
+        self,
+        application_id: int,
+        *,
+        first_choice: str | None,
+        first_choice_id: int | None,
+        second_choice: str | None,
+        second_choice_id: int | None,
+        principal: Principal | None = None,
+    ) -> RecruitApplicationRecord:
+        del principal
+        with self._lock:
+            index, item = self._find_required("recruitment_applications", application_id)
+            updated = dict(item)
+            updated["first_choice"] = str(first_choice).strip() if first_choice is not None else None
+            updated["first_choice_id"] = int(first_choice_id) if first_choice_id is not None else None
+            updated["second_choice"] = str(second_choice).strip() if second_choice is not None else None
+            updated["second_choice_id"] = int(second_choice_id) if second_choice_id is not None else None
+            updated["intended_advisor_name"] = updated["first_choice"]
+            updated["intended_advisor_user_id"] = updated["first_choice_id"]
+            workflow_located = self._workflow_task_index_by_business_key(str(item.get("business_key") or updated.get("business_key") or ""))
+            workflow_task = None
+            if workflow_located is not None:
+                if str(updated.get("application_status") or "").strip() in {"待导师初筛-第一志愿", "待导师初筛-第二志愿"}:
+                    updated["advisor_screening_status"] = "pending"
+                    updated["advisor_screening_round"] = "first_choice" if str(updated.get("application_status") or "").strip() != "待导师初筛-第二志愿" else "second_choice"
+                workflow_task, task_changed = self._sync_managed_workflow_task("recruitment_application", updated, existing_task=workflow_located[1])
+                if task_changed:
+                    self._list("workflow_tasks")[workflow_located[0]] = workflow_task
+            self._list("recruitment_applications")[index] = updated
+            operation_log = self._record_operation("招生管理", "报名申请", str(application_id), "编辑导师", f'更新报名申请导师志愿 {updated["student_name"]}')
+            try:
+                sync_advisor_choices = getattr(self._postgres_store, "sync_recruitment_application_advisor_choices", None)
+                if not callable(sync_advisor_choices):
+                    raise DatabaseUnavailableError("导师志愿更新当前仅允许写入数据库，缺少正式持久化能力")
+                sync_advisor_choices(
+                    int(application_id),
+                    updated,
+                    workflow_task,
+                    operation_log,
+                    counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+                )
+            except Exception:
+                logger.exception("Persist recruitment advisor choice change failed")
+                raise
+            return RecruitApplicationRecord(**updated)
+
     def submit_advisor_screening_batch(
         self,
         payload: AdvisorScreeningBatchSubmitRequest,
@@ -616,6 +682,8 @@ class RuntimeManagementStoreRecruitmentMixin:
                 screening_rounds.add(screening_round)
                 if len(screening_rounds) > 1:
                     raise ValueError("一次只允许提交同一轮次的导师初筛记录")
+                if self._advisor_screening_submission_locked(entity, screening_round):
+                    raise ValueError("当前申请该轮导师初筛已提交，不能重复提交")
                 if not self._principal_matches_screening_advisor(entity, screening_round, principal_summary):
                     raise PermissionError("当前账号不是该申请当前轮次的责任导师")
 
@@ -702,6 +770,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                 raise DatabaseUnavailableError("导师初筛当前仅允许写入数据库，缺少正式持久化能力")
 
             screening_round = next(iter(screening_rounds))
+            signature_base64 = str(payload.signature_base64 or "").strip()
             batch_id = int(
                 sync_advisor_screening(
                     {
@@ -710,7 +779,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                         "advisor_name": principal_summary["full_name"],
                         "advisor_role_code": "advisor",
                         "screening_round": screening_round,
-                        "signature_base64": payload.signature_base64,
+                        "signature_base64": signature_base64,
                         "submitted_at": submitted_at,
                     },
                     updated_applications,
@@ -728,10 +797,9 @@ class RuntimeManagementStoreRecruitmentMixin:
 
             if self._email_service.enabled():
                 for application in updated_applications:
+                    # 终止类结果不再发送邮件通知；仅保留资料审核驳回重填等非终止邮件。
                     if str(application.get("application_status") or "") == "报名终止":
-                        payload_data = self._build_recruitment_email_notification(application)
-                        if payload_data is not None:
-                            self._email_service.send_recruitment_status_update(**payload_data)
+                        continue
 
         return AdvisorScreeningBatchSubmitResponse(
             batch_id=batch_id,
@@ -858,7 +926,7 @@ class RuntimeManagementStoreRecruitmentMixin:
             self._list("recruitment_applications")[entity_index] = updated_entity
             self._list("workflow_tasks")[task_index] = updated_task
 
-            if self._email_service.enabled():
+            if self._email_service.workflow_notifications_enabled():
                 recruitment_notification = self._build_recruitment_email_notification(updated_entity, review_comment=payload.comment)
                 if recruitment_notification is not None:
                     self._email_service.send_recruitment_status_update(**recruitment_notification)

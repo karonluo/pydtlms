@@ -139,6 +139,23 @@ function resolveWorkflowStageDescription(status: WorkflowStageCard['status']): s
   return '待开始'
 }
 
+const workflowInitialScreeningStepLabel = computed(() => {
+  const status = trimText(workflowSummary.value?.recruitment_application_status)
+  if (status === '待导师初筛-第一志愿') {
+    //return '当前在第一志愿老师评估中'
+    return '等待初筛完成'
+  }
+  if (status === '待导师初筛-第二志愿') {
+    // return '当前在第二志愿老师评估中'
+    return '等待初筛完成'
+  }
+  if (status === '待初筛确认') {
+    // return '书院确认中'
+    return '等待初筛完成'
+  }
+  return ''
+})
+
 const progressCards = computed<ProgressCard[]>(() => {
   const student = portalStudent.value
   const draft = student?.application_draft
@@ -177,7 +194,7 @@ const progressCards = computed<ProgressCard[]>(() => {
     || trimText(firstPreference?.advisor_name)
     || student?.selected_plan_id,
   )
-  const applicationCompleted = Boolean(trimText(firstPreference?.advisor_name) || student?.selected_advisor_name)
+  const applicationCompleted = Boolean(trimText(firstPreference?.advisor_name))
 
   const practiceCount = resolveProgressCount(snapshot?.practice_count)
   const practiceStarted = practiceCount > 0 || Boolean((draft?.practice_experiences || []).some((item) => trimText(item.organization_name)))
@@ -506,6 +523,9 @@ onMounted(() => {
                 <span class="portal-home-workflow__stage-index">{{ String(index + 1).padStart(2, '0') }}</span>
                 <strong>{{ stage.label }}</strong>
                 <p>{{ stage.description }}</p>
+                <p v-if="stage.key === 'initial_screening' && workflowInitialScreeningStepLabel" class="portal-home-workflow__stage-step">
+                  {{ workflowInitialScreeningStepLabel }}
+                </p>
               </article>
               <span v-if="index < workflowStageCards.length - 1" class="portal-home-workflow__arrow"
                 aria-hidden="true">→</span>

@@ -190,6 +190,11 @@ a {
   background: #f8fafc;
 }
 
+.management-confirm-dialog__summary--warning {
+  border-color: rgba(217, 119, 6, 0.32);
+  background: #fff8eb;
+}
+
 .management-confirm-dialog__label {
   display: block;
   margin-bottom: 6px;

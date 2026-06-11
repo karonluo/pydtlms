@@ -7,11 +7,13 @@ from fastapi.responses import StreamingResponse
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
 from app.schemas.portal import PortalImpersonationLaunchResponse
+from app.schemas.recruitment import RecruitApplicationRecord
 from app.schemas.student import (
     CenterListResponse,
     CenterRecord,
     CenterUpsert,
     RegisteredPortalStudentActionResponse,
+    RegisteredPortalStudentAdvisorChoiceUpdateRequest,
     RegisteredPortalStudentExportJobCreateResponse,
     RegisteredPortalStudentExportJobListResponse,
     RegisteredPortalStudentExportRequest,
@@ -234,6 +236,36 @@ def send_registered_portal_student_email_record(
 ) -> RegisteredPortalStudentActionResponse:
     try:
         return send_registered_portal_student_email(student_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/portal-registrations/{student_id}/advisor-choices", response_model=RecruitApplicationRecord)
+def update_registered_portal_student_advisor_choices_record(
+    student_id: int,
+    payload: RegisteredPortalStudentAdvisorChoiceUpdateRequest,
+    principal: Principal = Depends(require_permissions("recruitment_registered_students:write")),
+) -> RecruitApplicationRecord:
+    try:
+        from app.services.dashboard_service import get_recruitment_application_detail, update_recruitment_application_advisor_choices
+        from app.services.dashboard_service import get_registered_portal_student_detail
+
+        target = get_registered_portal_student_detail(student_id)
+        recruitment_application_id = int(target.get("recruitment_application_id") or 0) if isinstance(target, dict) else int(getattr(target, "recruitment_application_id", 0) or 0)
+        if target is None or not recruitment_application_id:
+            raise KeyError("Portal student not found")
+
+        application = get_recruitment_application_detail(recruitment_application_id)
+        return update_recruitment_application_advisor_choices(
+            int(application.get("id") or recruitment_application_id),
+            first_choice=payload.first_choice,
+            first_choice_id=payload.first_choice_id,
+            second_choice=payload.second_choice,
+            second_choice_id=payload.second_choice_id,
+            principal=principal,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
     except ValueError as exc:

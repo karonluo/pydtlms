@@ -1,6 +1,7 @@
 from datetime import datetime
 from io import BytesIO
 from types import SimpleNamespace
+from threading import RLock
 
 from openpyxl import load_workbook
 import pytest
@@ -331,6 +332,20 @@ class FakePostgresStateStore:
         self.updated_recruitment_applications.append({"application_id": normalized_application_id, "payload": dict(application_payload)})
         self.synced_workflow_tasks.append({"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters})
 
+    def sync_recruitment_qualification_review(
+        self,
+        application_id,
+        review_payload,
+        application_payload,
+        workflow_task_payload,
+        operation_log=None,
+        *,
+        counters=None,
+    ) -> None:
+        normalized_application_id = int(application_id)
+        self.updated_recruitment_applications.append({"application_id": normalized_application_id, "payload": dict(application_payload)})
+        self.synced_workflow_tasks.append({"task_payload": dict(workflow_task_payload), "operation_log": operation_log, "counters": counters})
+
     def sync_advisor_screening_batch(
         self,
         batch_payload,
@@ -596,11 +611,16 @@ class FakeNotificationEmailService:
         self.portal_admin_password_reset_calls: list[dict] = []
         self.recruitment_status_calls: list[dict] = []
         self.recruitment_stage_rollback_calls: list[dict] = []
+        self.recruitment_material_review_rejection_calls: list[dict] = []
         self.custom_message_calls: list[dict] = []
         self.is_enabled = True
+        self.workflow_notifications_is_enabled = True
 
     def enabled(self) -> bool:
         return self.is_enabled
+
+    def workflow_notifications_enabled(self) -> bool:
+        return self.workflow_notifications_is_enabled
 
     def send_portal_registration_success(self, full_name: str, email: str) -> None:
         self.portal_registration_calls.append({"full_name": full_name, "email": email})
@@ -619,6 +639,9 @@ class FakeNotificationEmailService:
 
     def send_recruitment_stage_rollback(self, **payload) -> None:
         self.recruitment_stage_rollback_calls.append(payload)
+
+    def send_recruitment_material_review_rejection(self, **payload) -> None:
+        self.recruitment_material_review_rejection_calls.append(payload)
 
     def send_message(self, *, to_email: str, subject: str, text_body: str) -> None:
         self.custom_message_calls.append({"to_email": to_email, "subject": subject, "text_body": text_body})
@@ -663,6 +686,32 @@ def test_recruitment_reject_email_text_contains_review_comment() -> None:
     text_body = captured_messages[0]["text_body"]
     assert "当前状态：报名终止" in text_body
     assert "原因：科研背景与项目方向匹配不足" in text_body
+
+
+def test_recruitment_material_review_rejection_email_text_matches_template() -> None:
+    captured_messages: list[dict] = []
+
+    class CaptureEmailService(NotificationEmailService):
+        def send_message(self, **payload) -> None:  # type: ignore[override]
+            captured_messages.append(payload)
+
+    service = CaptureEmailService()
+    service.send_recruitment_material_review_rejection(
+        student_name="测试学生",
+        email="student@example.com",
+        business_key="SH202705110001",
+        plan_name="2027级联培博士生夏令营",
+        review_comment="材料缺失",
+    )
+
+    assert captured_messages
+    text_body = captured_messages[0]["text_body"]
+    assert "测试学生同学，您好:" in text_body
+    assert "业务编号: SH202705110001" in text_body
+    assert "当前状态：驳回" in text_body
+    assert "原因：材料缺失" in text_body
+    assert "您的申请已被驳回，请于 24H 内登录系统补充或修改信息后重新提交。" in text_body
+    assert "招生计划: 2027级联培博士生夏令营" in text_body
 
 
 class FakeCacheClient:
@@ -1297,7 +1346,7 @@ def test_get_recruitment_applications_scopes_advisor_screening_to_current_adviso
             "highest_degree": "硕士",
             "intended_field": "具身智能",
             "material_status": "通过",
-            "application_status": "待中心考核",
+            "application_status": "待导师初筛-第一志愿",
             "first_choice": "陈恺",
             "second_choice": None,
             "intended_advisor_name": "陈恺",
@@ -1313,7 +1362,7 @@ def test_get_recruitment_applications_scopes_advisor_screening_to_current_adviso
             "highest_degree": "硕士",
             "intended_field": "通用智能",
             "material_status": "通过",
-            "application_status": "待中心考核",
+            "application_status": "待导师初筛-第一志愿",
             "first_choice": "其他导师",
             "second_choice": None,
             "intended_advisor_name": "其他导师",
@@ -1325,7 +1374,7 @@ def test_get_recruitment_applications_scopes_advisor_screening_to_current_adviso
 
     store = RuntimeManagementStore()
     response = store.get_recruitment_applications(
-        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿",
         plan_id=5,
         principal={"username": "chenkai", "full_name": "陈恺", "roles": ["advisor"]},
         page=1,
@@ -2133,6 +2182,233 @@ def test_submit_advisor_screening_batch_first_choice_pass_moves_to_confirmation(
     assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "待导师初筛-第一志愿"
 
 
+def test_submit_advisor_screening_batch_rejects_duplicate_round_submission(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore.__new__(RuntimeManagementStore)
+    store._lock = RLock()
+    store._postgres_store = fake_postgres
+    store._email_service = NotificationEmailService()
+    store._loaded_state_from_postgres = False
+    store._hydrated_state_from_postgres = False
+    store._migrated_workflow_task_ids = set()
+    store._counters = {"operation_logs": 0}
+    store.state = {
+        "counters": store._counters,
+        "recruitment_applications": [
+            {
+                "id": 101,
+                "plan_id": 1,
+                "business_key": "BK-101",
+                "student_name": "张三",
+                "graduation_school": "江南大学",
+                "highest_degree": "硕士",
+                "material_status": "材料齐全",
+                "application_status": "待初筛确认",
+                "advisor_screening_status": "submitted",
+                "advisor_screening_round": "first_choice",
+                "portal_student_id": 7,
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+                "intended_advisor_name": "刘亚",
+                "first_choice_screening_batch_id": 1,
+                "first_choice_screening_submitted_at": "2026-06-09 10:00:00",
+            }
+        ],
+        "workflow_tasks": [
+            {
+                "id": 201,
+                "business_key": "BK-101",
+                "node_key": "advisor_screening",
+                "status": "处理中",
+            }
+        ],
+    }
+    store._find_required = lambda collection_name, entity_id: (
+        0,
+        store.state[collection_name][0],
+    )
+    store._workflow_task_index_by_business_key = lambda business_key: (
+        0,
+        store.state["workflow_tasks"][0],
+    )
+
+    with pytest.raises(ValueError, match="当前申请该轮导师初筛已提交，不能重复提交"):
+        store.submit_advisor_screening_batch(
+            AdvisorScreeningBatchSubmitRequest(
+                signature_base64="data:image/png;base64,abc123",
+                items=[
+                    {
+                        "application_id": 101,
+                        "advisor_score": 88,
+                    }
+                ],
+            ),
+            principal={
+                "username": "advisor.liu",
+                "full_name": "刘亚",
+                "roles": ["advisor"],
+                "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+            },
+        )
+
+
+def test_background_assessment_pass_twice_persists_choice_fields(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "screening-flow@example.com",
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    current_task = store.state["workflow_tasks"][0]
+    current_task.update(
+        {
+            "flow_code": "recruitment_application",
+            "node_key": "background_assessment",
+            "status": "处理中",
+            "current_node": "背景评估",
+            "current_handler": "书院管理员",
+        }
+    )
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    current_application.update(
+        {
+            "application_status": "待背景评估",
+            "advisor_screening_status": "pending",
+            "advisor_screening_round": None,
+            "first_choice_id": 11,
+            "second_choice_id": 12,
+        }
+    )
+    fake_postgres.updated_recruitment_applications.clear()
+
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "第一位书院管理员通过",
+        principal={"username": "reviewer.a", "full_name": "评估人甲", "roles": ["academy_admin"]},
+    )
+    store.execute_workflow_action(
+        task_id,
+        "approve",
+        "第二位书院管理员通过",
+        principal={"username": "reviewer.b", "full_name": "评估人乙", "roles": ["academy_admin"]},
+    )
+
+    synced_payload = fake_postgres.updated_recruitment_applications[-1]["payload"]
+    assert synced_payload["advisor_screening_round"] == "first_choice"
+    assert synced_payload["first_choice"] == "刘亚"
+    assert synced_payload["second_choice"] == "王青"
+    assert synced_payload["first_choice_id"] == 11
+    assert synced_payload["second_choice_id"] == 12
+
+
+def test_submit_advisor_screening_batch_allows_missing_signature(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore.__new__(RuntimeManagementStore)
+    store._lock = RLock()
+    store._postgres_store = fake_postgres
+    store._email_service = fake_mailer
+    store._loaded_state_from_postgres = False
+    store._hydrated_state_from_postgres = False
+    store._migrated_workflow_task_ids = set()
+    store._counters = {"operation_logs": 0}
+    store.state = {
+        "counters": store._counters,
+        "recruitment_applications": [
+            {
+                "id": 101,
+                "plan_id": 1,
+                "business_key": "BK-101",
+                "student_name": "张三",
+                "graduation_school": "江南大学",
+                "highest_degree": "硕士",
+                "material_status": "材料齐全",
+                "application_status": "待导师初筛-第一志愿",
+                "advisor_screening_status": "pending",
+                "advisor_screening_round": "first_choice",
+                "portal_student_id": 7,
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+                "intended_advisor_name": "刘亚",
+            }
+        ],
+        "workflow_tasks": [
+            {
+                "id": 201,
+                "business_key": "BK-101",
+                "node_key": "advisor_screening",
+                "status": "处理中",
+            }
+        ],
+    }
+    store._find_required = lambda collection_name, entity_id: (
+        0,
+        store.state[collection_name][0],
+    )
+    store._workflow_task_index_by_business_key = lambda business_key: (
+        0,
+        store.state["workflow_tasks"][0],
+    )
+    store._resolve_advisor_screening_round = lambda entity: "first_choice"
+    store._principal_matches_screening_advisor = lambda entity, screening_round, principal_summary: True
+    store._build_workflow_transition_record = lambda task, updated_entity, **kwargs: {
+        **task,
+        "node_key": kwargs.get("next_node"),
+        "status": kwargs.get("task_status"),
+        "latest_comment": kwargs.get("comment"),
+    }
+    store._record_operation = lambda *args, **kwargs: {
+        "category": args[0],
+        "object_type": args[1],
+        "target_key": args[2],
+        "action_label": args[3],
+        "description": args[4],
+        "operator_username": kwargs.get("operator_username"),
+        "target_name": kwargs.get("target_name"),
+    }
+
+    response = store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64=None,
+            items=[
+                {
+                    "application_id": 101,
+                    "advisor_score": 88,
+                }
+            ],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    assert response.submitted_count == 1
+    assert response.screening_round == "first_choice"
+    assert fake_postgres.advisor_screening_batches[0]["batch_payload"]["signature_base64"] == ""
+
+
 def test_portal_workflow_progress_summary_uses_scoring_based_screening_copy(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
@@ -2692,7 +2968,7 @@ def test_end_to_end_screening_flow_passes_across_student_advisor_and_academy_man
     _sync_recruitment_application_rows_from_state(store, fake_postgres)
 
     advisor_list = store.get_recruitment_applications(
-        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿",
         plan_id=available_plan.id,
         principal=advisor_principal,
         page=1,
@@ -2786,7 +3062,7 @@ def test_end_to_end_screening_flow_rejection_updates_second_choice_and_student_p
     _sync_recruitment_application_rows_from_state(store, fake_postgres)
 
     first_advisor_list = store.get_recruitment_applications(
-        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿",
         plan_id=available_plan.id,
         principal=first_advisor_principal,
         page=1,
@@ -2804,7 +3080,7 @@ def test_end_to_end_screening_flow_rejection_updates_second_choice_and_student_p
     _sync_recruitment_application_rows_from_state(store, fake_postgres)
 
     second_advisor_list = store.get_recruitment_applications(
-        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿,待中心考核,待中心考核-第一志愿,待中心考核-第二志愿",
+        status="待导师初筛,待导师初筛-第一志愿,待导师初筛-第二志愿",
         plan_id=available_plan.id,
         principal=second_advisor_principal,
         page=1,
@@ -2918,6 +3194,52 @@ def test_execute_workflow_action_qualification_approve_enters_background_assessm
         "application_status": "驳回重填",
         "plan_name": "2026 秋季博士招生",
         "review_comment": "材料信息不足",
+    }
+
+
+def test_execute_workflow_action_qualification_reject_ignores_student_notification_switch(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    fake_mailer.workflow_notifications_is_enabled = False
+    fake_mailer.is_enabled = True
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    available_plan = store.get_public_recruitment_plans().items[0]
+    available_team = store.get_public_teams().items[0]
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800007777",
+            email="reject-switch@example.com",
+            full_name="开关联调考生",
+            id_number="32000019990101123X",
+            password="Secret123!",
+        )
+    )
+    applicant_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "reject-switch@example.com")
+    application = store.submit_portal_application(
+        applicant_id,
+        _build_portal_application_payload(available_plan.id, available_team.team_name, available_team.lead_advisor_name),
+    )
+
+    approve_task_id = next(item["id"] for item in store.state["workflow_tasks"] if item["business_key"] == application.application_business_key)
+    store.execute_workflow_action(
+        approve_task_id,
+        "reject",
+        "资料信息不足，需要补充",
+        principal={"username": "academy.admin", "full_name": "书院管理员", "roles": ["academy_admin"]},
+    )
+
+    assert fake_mailer.recruitment_material_review_rejection_calls[-1] == {
+        "student_name": "开关联调考生",
+        "email": "reject-switch@example.com",
+        "business_key": application.application_business_key,
+        "application_status": "驳回重填",
+        "plan_name": "2026 智能制造联合培养",
+        "review_comment": "资料信息不足，需要补充",
     }
 
 
@@ -4621,6 +4943,72 @@ def test_send_registered_portal_student_email_skips_when_smtp_disabled(monkeypat
 
     assert response.email_sent is False
     assert fake_mailer.custom_message_calls == []
+
+
+def test_send_registered_portal_student_email_skips_when_workflow_notifications_disabled(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    fake_mailer.is_enabled = True
+    fake_mailer.workflow_notifications_is_enabled = False
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+    from app.schemas.student import RegisteredPortalStudentEmailRequest
+
+    store = RuntimeManagementStore()
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009996",
+            email="workflow-disabled-student@example.com",
+            full_name="流程邮件关闭学生",
+            id_number="320000199909099951",
+            password="Secret123!",
+        )
+    )
+
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "workflow-disabled-student@example.com")
+    response = store.send_registered_portal_student_email(
+        student_id,
+        RegisteredPortalStudentEmailRequest(subject="自定义通知", content="请尽快完善报名信息。"),
+    )
+
+    assert response.email_sent is False
+    assert fake_mailer.custom_message_calls == []
+
+
+def test_reset_registered_portal_student_password_still_sends_when_workflow_notifications_disabled(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    fake_mailer.is_enabled = True
+    fake_mailer.workflow_notifications_is_enabled = False
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    from app.schemas.portal import PortalRegistrationRequest
+
+    store = RuntimeManagementStore()
+    store.register_portal_student(
+        PortalRegistrationRequest(
+            phone_number="13800009997",
+            email="workflow-reset-disabled@example.com",
+            full_name="流程重置关闭学生",
+            id_number="320000199909099952",
+            password="Secret123!",
+        )
+    )
+
+    student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "workflow-reset-disabled@example.com")
+    response = store.reset_registered_portal_student_password(student_id)
+
+    assert response.email_sent is True
+    assert fake_mailer.portal_admin_password_reset_calls == [
+        {
+            "full_name": "流程重置关闭学生",
+            "email": "workflow-reset-disabled@example.com",
+            "temporary_password": response.temporary_password,
+        }
+    ]
 
 
 def test_recruitment_application_upsert_rejects_invalid_resident_id_number() -> None:

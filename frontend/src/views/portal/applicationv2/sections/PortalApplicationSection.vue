@@ -7,6 +7,7 @@ defineProps<{
   sourceChannelOptions: string[]
   resolveAdvisorIntroduction: (item: PortalApplicationPreferenceItem) => string
   handlePreferenceAdvisorChange: (item: PortalApplicationPreferenceItem) => void
+  resolveCommittedAdvisorName: (index: number) => string
 }>()
 </script>
 
@@ -31,20 +32,25 @@ defineProps<{
         <div class="preference-grid">
           <label>
             <span><span v-if="index === 0" class="required-mark">*</span>意向导师</span>
-            <el-select
-              v-model="item.advisor_user_id"
-              filterable
-              clearable
-              placeholder="请选择导师"
-              @change="handlePreferenceAdvisorChange(item)"
-            >
-              <el-option
-                v-for="advisor in advisorOptions"
-                :key="`${advisor.user_id ?? advisor.full_name}-${advisor.full_name}`"
-                :label="advisor.full_name"
-                :value="advisor.user_id ?? null"
-              />
-            </el-select>
+            <template v-if="!resolveCommittedAdvisorName(index)">
+              <el-select
+                v-model="item.advisor_user_id"
+                filterable
+                clearable
+                placeholder="请选择导师"
+                @change="handlePreferenceAdvisorChange(item)"
+              >
+                <el-option
+                  v-for="advisor in advisorOptions"
+                  :key="`${advisor.user_id ?? advisor.full_name}-${advisor.full_name}`"
+                  :label="advisor.full_name"
+                  :value="advisor.user_id ?? null"
+                />
+              </el-select>
+            </template>
+            <div v-else class="advisor-committed-value">
+              {{ resolveCommittedAdvisorName(index) }}
+            </div>
           </label>
 
           <div class="advisor-panel">
@@ -174,6 +180,18 @@ defineProps<{
 .preference-grid :deep(.el-select__wrapper) {
   min-height: 46px;
   border-radius: 14px;
+}
+
+.advisor-committed-value {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid #d6e0ee;
+  border-radius: 14px;
+  background: #f8fbff;
+  color: #173459;
+  font-weight: 600;
 }
 
 .advisor-panel {

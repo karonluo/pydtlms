@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     openapi_url: str = "/openapi.json"
 
     smtp_enabled: bool = False
+    smtp_student_notification_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 465
     smtp_username: str = ""

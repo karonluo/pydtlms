@@ -186,6 +186,11 @@ def get_registered_portal_student_list(
     )
 
 
+
+def get_registered_portal_student_detail(student_id: int):
+    return store._postgres_store.get_portal_student_detail(student_id)
+
+
 def export_registered_portal_students(
     student_ids: list[int] | None = None,
     *,
@@ -358,6 +363,17 @@ def create_recruitment_application(payload, principal: Principal | None = None):
 
 def update_recruitment_application(application_id: int, payload):
     return store.update_recruitment_application(application_id, payload)
+
+
+def update_recruitment_application_advisor_choices(application_id: int, *, first_choice, first_choice_id, second_choice, second_choice_id, principal=None):
+    return store.update_recruitment_application_advisor_choices(
+        application_id,
+        first_choice=first_choice,
+        first_choice_id=first_choice_id,
+        second_choice=second_choice,
+        second_choice_id=second_choice_id,
+        principal=principal,
+    )
 
 
 def submit_advisor_screening_batch(payload, principal: Principal):

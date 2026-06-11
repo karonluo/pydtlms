@@ -10,8 +10,12 @@ import TableRowActions, { type TableRowAction } from '../../components/table/Tab
 import { useServerPagination } from '../../composables/useServerPagination'
 import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
 import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
-import { getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail } from '../../api/recruitment'
+import {
+  getRecruitmentPortalApplicationDetail,
+  type RecruitPortalApplicationDetail,
+} from '../../api/recruitment'
 import { hasGrantedPermission } from '../../router/menuAccess'
+import PortalApplicationV2Form from '../portal/applicationv2/PortalApplicationV2Form.vue'
 import {
   activateRegisteredPortalStudent,
   batchDeleteCenters,
@@ -29,9 +33,9 @@ import {
   rollbackRegisteredPortalStudentStage,
   listStudents,
   resetRegisteredPortalStudentPassword,
+  updateStudent,
   sendRegisteredPortalStudentEmail,
   updateCenter,
-  updateStudent,
   type RegisteredPortalStudentActionResponse,
   type CenterRecord,
   type CenterUpsert,
@@ -44,6 +48,7 @@ import {
   type StudentStats,
   type StudentUpsert,
 } from '../../api/students'
+import type { PortalStudentRecord } from '../../api/portal'
 import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
 import { useAuthStore } from '../../stores/auth'
 import { useExportJobStore } from '../../stores/exportJobs'
@@ -69,6 +74,11 @@ const rollbackSubmitting = ref(false)
 const rollbackLoading = ref(false)
 const deleteCenterSubmitting = ref(false)
 const portalImpersonationSubmitting = ref(false)
+const portalStudentEditorVisible = ref(false)
+const portalStudentEditorLoading = ref(false)
+const portalStudentEditorSubmitting = ref(false)
+const portalStudentEditorRecord = ref<PortalStudentRecord | null>(null)
+const portalStudentEditorTitle = ref('编辑学生')
 const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const selectedCenterIds = ref<number[]>([])
@@ -92,6 +102,12 @@ const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
 const portalWorkflowComment = ref('')
 const exportJobResult = ref<{ message: string; scopeLabel: string; recordCount: number; filterSummary: string } | null>(null)
 const portalNotice = ref<{ title: string; message: string; type: 'success' | 'warning' | 'error' | 'info' } | null>(null)
+
+type PortalApplicationEditorExpose = {
+  submitForm: () => Promise<void>
+}
+
+const portalStudentEditorRef = ref<PortalApplicationEditorExpose | null>(null)
 
 const stats = ref<StudentStats>({
   total_students: 0,
@@ -1182,6 +1198,21 @@ function registeredPortalMainActions(row: RegisteredPortalStudentRecord): TableR
   ]
 }
 
+async function submitPortalStudentEditor() {
+  if (!portalStudentEditorRef.value) {
+    return
+  }
+  portalStudentEditorSubmitting.value = true
+  try {
+    await portalStudentEditorRef.value.submitForm()
+    portalStudentEditorVisible.value = false
+    await refreshAfterMutation()
+    showPortalNotice('学生资料已保存并即时生效', 'success')
+  } finally {
+    portalStudentEditorSubmitting.value = false
+  }
+}
+
 function registeredPortalMoreActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
   const actions: TableRowAction<RegisteredPortalStudentRecord>[] = [
     { key: 'reset-password', label: '重置密码', type: 'primary', disabled: row.account_status !== '启用', onClick: handleResetRegisteredPortalStudentPassword },
@@ -1609,6 +1640,32 @@ onMounted(() => {
       :action-loading="portalWorkflowActionSubmitting"
       @execute-action="handlePortalWorkflowAction"
     />
+
+    <el-dialog
+      v-model="portalStudentEditorVisible"
+      :title="portalStudentEditorTitle"
+      width="96vw"
+      top="2vh"
+      destroy-on-close
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div v-loading="portalStudentEditorLoading" class="portal-student-editor-shell">
+        <PortalApplicationV2Form
+          v-if="portalStudentEditorRecord"
+          ref="portalStudentEditorRef"
+          active-section-id="basic-section"
+          admin-mode
+          :initial-student="portalStudentEditorRecord"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="portalStudentEditorVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalStudentEditorSubmitting" :disabled="!portalStudentEditorRecord" @click="submitPortalStudentEditor">
+          保存并生效
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="portalWorkflowCommentDialogVisible"

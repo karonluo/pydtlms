@@ -60,6 +60,8 @@ export type RecruitApplicationRecord = {
   student_name: string
   first_choice?: string | null
   second_choice?: string | null
+  first_choice_id?: number | null
+  second_choice_id?: number | null
   gender?: string | null
   political_status?: string | null
   marital_status?: string | null
@@ -159,6 +161,8 @@ export type RecruitPortalApplicationDetail = {
   advisor_screening_round?: string | null
   advisor_screening_submitted_at?: string | null
   advisor_signature_base64?: string | null
+  first_choice?: string | null
+  second_choice?: string | null
   first_choice_screening_score?: number | null
   second_choice_screening_score?: number | null
   initial_screening_status?: string | null
@@ -221,6 +225,14 @@ export type AdvisorScreeningBatchSubmitResponse = {
   screening_round: string
   submitted_count: number
   applications: RecruitApplicationRecord[]
+}
+
+export type RecruitmentAttachmentUploadResponse = {
+  category: string
+  file_name: string
+  file_type?: string | null
+  file_size: number
+  url: string
 }
 
 
@@ -337,6 +349,16 @@ export function updateRecruitmentApplication(id: number, payload: RecruitApplica
 }
 
 
+export function updateRecruitmentApplicationAdvisorChoices(id: number, payload: {
+  first_choice: string
+  first_choice_id?: number | null
+  second_choice?: string | null
+  second_choice_id?: number | null
+}) {
+  return http.post<RecruitApplicationRecord>(`/students/portal-registrations/${id}/advisor-choices`, payload)
+}
+
+
 export function deleteRecruitmentApplication(id: number) {
   return http.delete(`/recruitment/applications/${id}`)
 }
@@ -391,5 +413,19 @@ export function uploadRecruitmentBrochureImage(file: File) {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+  })
+}
+
+
+export function uploadRecruitmentAttachment(studentId: number, file: File, category: string) {
+  const formData = new FormData()
+  formData.append('student_id', String(studentId))
+  formData.append('category', category)
+  formData.append('file', file)
+  return http.post<RecruitmentAttachmentUploadResponse>('/recruitment/attachments/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    timeout: 300000,
   })
 }

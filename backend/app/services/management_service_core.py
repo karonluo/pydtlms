@@ -29,12 +29,7 @@ class RuntimeManagementStoreCoreMixin:
         self._migrated_workflow_task_ids: set[int] = set()
         self.state = self._load_state()
         self._counters = self.state.setdefault("counters", {})
-        state_changed = self._migrate_state()
-        if (self._loaded_state_from_postgres or self._hydrated_state_from_postgres) and state_changed:
-            try:
-                self._persist_migrated_workflow_tasks()
-            except Exception as exc:
-                logger.warning("Persist migrated runtime state to PostgreSQL failed: %s", exc)
+        self._migrate_state()
 
     def _load_state(self) -> dict[str, Any]:
         postgres_state = self._postgres_store.load_state()
@@ -408,7 +403,7 @@ class RuntimeManagementStoreCoreMixin:
         for index, item in enumerate(self.state.setdefault("recruitment_applications", []), start=1):
             defaults = {
                 "review_round": f'{item.get("plan_id") or 0}轮次' if item.get("plan_id") else "默认轮次",
-                "first_choice": item.get("intended_field"),
+                "first_choice": item.get("intended_advisor_name") or item.get("selected_advisor_name"),
                 "second_choice": fallback_second_choices[(index - 1) % len(fallback_second_choices)],
                 "gender": "未知",
                 "political_status": fallback_political_statuses[(index - 1) % len(fallback_political_statuses)],

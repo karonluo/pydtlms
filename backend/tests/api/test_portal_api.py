@@ -51,6 +51,23 @@ def _portal_student_record(student_id: int = 7) -> PortalStudentRecord:
     return PortalStudentRecord(**_portal_student_payload(student_id))
 
 
+def test_portal_student_record_populates_personal_statement_attachments_from_root_fields() -> None:
+    payload = _portal_student_payload(7)
+    payload.pop('application_draft', None)
+    payload['resume_attachment_url'] = '/portal-attachments/uploads/student-7/resume/resume-a.pdf'
+    payload['resume_attachment_name'] = 'resume-a.pdf'
+    payload['supporting_material_attachment_url'] = '/api/v1/portal/attachments/student-7/supporting_material/materials.zip'
+    payload['supporting_material_attachment_name'] = 'materials.zip'
+
+    record = PortalStudentRecord(**payload)
+
+    assert record.application_draft is not None
+    assert record.application_draft.personal_statement.resume_attachment_url == '/api/v1/portal/attachments/student-7/resume/resume-a.pdf'
+    assert record.application_draft.personal_statement.resume_attachment_name == 'resume-a.pdf'
+    assert record.application_draft.personal_statement.supporting_material_attachment_url == '/api/v1/portal/attachments/student-7/supporting_material/materials.zip'
+    assert record.application_draft.personal_statement.supporting_material_attachment_name == 'materials.zip'
+
+
 def _build_personal_statement_payload(include_resume: bool = True, include_supporting_material: bool = False) -> dict[str, object]:
     payload: dict[str, object] = {
         'personal_statement_text': '个人成长经历、自我个性、申报动机与职业规划' + '甲' * 380,

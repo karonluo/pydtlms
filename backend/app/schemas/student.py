@@ -136,6 +136,13 @@ class RegisteredPortalStudentActionResponse(BaseModel):
     temporary_password: str | None = None
 
 
+class RegisteredPortalStudentAdvisorChoiceUpdateRequest(BaseModel):
+    first_choice: str
+    first_choice_id: int | None = None
+    second_choice: str | None = None
+    second_choice_id: int | None = None
+
+
 class CenterAdvisorMapItem(BaseModel):
     center_name: str
     advisors: list[SelectOption] = Field(default_factory=list)

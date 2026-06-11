@@ -282,6 +282,7 @@ def _validate_portal_education_rules(items: Sequence["PortalEducationExperienceI
     if third_item_started:
         if _first_non_empty(second_item.education_stage) != "本科毕业":
             raise ValueError("填写教育经历3前，教育经历2的教育阶段应为“本科毕业”")
+        assert third_item is not None
         if _first_non_empty(third_item.education_stage) not in {"硕士在读", "硕士毕业"}:
             raise ValueError("教育经历3的教育阶段应为“硕士在读”或“硕士毕业”")
 
@@ -365,6 +366,33 @@ def _populate_personal_statement_legacy_fields(personal_statement: "PortalPerson
     personal_statement.ai_industry_opinion = _first_non_empty(
         personal_statement.ai_industry_opinion,
         personal_statement.career_plan_text,
+    )
+    return personal_statement
+
+
+def _populate_personal_statement_attachment_fallbacks(
+    personal_statement: "PortalPersonalStatementData",
+    raw_data: dict[str, Any],
+) -> "PortalPersonalStatementData":
+    personal_statement.resume_attachment_url = _first_non_empty(
+        personal_statement.resume_attachment_url,
+        raw_data.get("resume_attachment_url"),
+        raw_data.get("personal_statement_resume_attachment_url"),
+    )
+    personal_statement.resume_attachment_name = _first_non_empty(
+        personal_statement.resume_attachment_name,
+        raw_data.get("resume_attachment_name"),
+        raw_data.get("personal_statement_resume_attachment_name"),
+    )
+    personal_statement.supporting_material_attachment_url = _first_non_empty(
+        personal_statement.supporting_material_attachment_url,
+        raw_data.get("supporting_material_attachment_url"),
+        raw_data.get("personal_statement_supporting_material_attachment_url"),
+    )
+    personal_statement.supporting_material_attachment_name = _first_non_empty(
+        personal_statement.supporting_material_attachment_name,
+        raw_data.get("supporting_material_attachment_name"),
+        raw_data.get("personal_statement_supporting_material_attachment_name"),
     )
     return personal_statement
 
@@ -548,13 +576,11 @@ class PortalApplicantProfileData(BaseModel):
 
 class PortalApplicationPreferenceItem(BaseModel):
     preference_order: int = 1
-    research_center_name: str | None = None
-    team_id: int | None = None
     advisor_name: str | None = None
     advisor_user_id: int | None = None
     is_optional: bool = False
 
-    @field_validator("team_id", "advisor_user_id", mode="before")
+    @field_validator("advisor_user_id", mode="before")
     @classmethod
     def normalize_optional_integer_fields(cls, value: Any) -> Any:
         return _normalize_optional_int(value)
@@ -784,6 +810,12 @@ class PortalStudentRecord(BaseModel):
     id_number: str
     business_key: str | None = None
     candidate_no: str | None = None
+    first_choice: str | None = None
+    second_choice: str | None = None
+    first_choice_id: int | None = None
+    second_choice_id: int | None = None
+    intended_advisor_user_id: int | None = None
+    intended_advisor_name: str | None = None
     account_status: str = "启用"
     gender: str | None = None
     birth_date: str | None = None
@@ -806,10 +838,6 @@ class PortalStudentRecord(BaseModel):
     personal_statement_text: str | None = None
     signed_agreement: bool = False
     selected_plan_id: int | None = None
-    selected_team_id: int | None = None
-    selected_team_name: str | None = None
-    selected_advisor_user_id: int | None = None
-    selected_advisor_name: str | None = None
     self_evaluation: str | None = None
     submitted_at: str | None = None
     application_form_status: str | None = None
@@ -844,24 +872,27 @@ class PortalStudentRecord(BaseModel):
 
         if data.get("application_draft") is None:
             preferences: list[dict[str, Any]] = []
-            if data.get("selected_advisor_user_id") is not None or _first_non_empty(data.get("selected_advisor_name")):
-                preferences.append(
-                    {
-                        "preference_order": 1,
-                        "team_id": data.get("selected_team_id"),
-                        "research_center_name": data.get("selected_team_name"),
-                        "advisor_user_id": data.get("selected_advisor_user_id"),
-                        "advisor_name": data.get("selected_advisor_name"),
-                        "is_optional": False,
-                    }
-                )
             education_experiences = _parse_model_list(data.get("education_experience"), PortalEducationExperienceItem)
             practice_experiences = _parse_model_list(data.get("practice_experience"), PortalPracticeExperienceItem)
             family_members = _parse_model_list(data.get("family_info"), PortalFamilyMemberItem)
             english_proficiencies = _parse_model_list(data.get("english_level"), PortalEnglishProficiencyItem)
             achievement_records = _parse_model_list(data.get("recommendation_notes"), PortalAchievementRecordItem)
-            personal_statement = PortalPersonalStatementData(
-                personal_statement_text=data.get("personal_statement_text"),
+            personal_statement = _populate_personal_statement_attachment_fallbacks(
+                _populate_personal_statement_legacy_fields(
+                    PortalPersonalStatementData(
+                        personal_statement_text=data.get("personal_statement_text"),
+                        ai_problem_statement=data.get("ai_problem_statement"),
+                        ai_industry_opinion=data.get("ai_industry_opinion"),
+                        growth_experience_text=data.get("growth_experience_text"),
+                        program_application_reason_text=data.get("program_application_reason_text"),
+                        career_plan_text=data.get("career_plan_text"),
+                        resume_attachment_url=data.get("resume_attachment_url"),
+                        resume_attachment_name=data.get("resume_attachment_name"),
+                        supporting_material_attachment_url=data.get("supporting_material_attachment_url"),
+                        supporting_material_attachment_name=data.get("supporting_material_attachment_name"),
+                    )
+                ),
+                data,
             )
             declaration = PortalApplicationDeclarationData(
                 has_read_declaration=bool(data.get("signed_agreement")),
@@ -875,6 +906,8 @@ class PortalStudentRecord(BaseModel):
                 or english_proficiencies
                 or achievement_records
                 or personal_statement.personal_statement_text
+                or personal_statement.resume_attachment_url
+                or personal_statement.supporting_material_attachment_url
                 or declaration.has_read_declaration
                 or data.get("submitted_at") is not None
             ):
@@ -890,6 +923,14 @@ class PortalStudentRecord(BaseModel):
                     "declaration": declaration,
                     "submitted_at": data.get("submitted_at"),
                 }
+        elif isinstance(data.get("application_draft"), dict):
+            draft_payload = dict(data.get("application_draft") or {})
+            draft_personal_statement = _populate_personal_statement_attachment_fallbacks(
+                PortalPersonalStatementData.model_validate(draft_payload.get("personal_statement") or {}),
+                data,
+            )
+            draft_payload["personal_statement"] = draft_personal_statement.model_dump(mode="python", exclude_none=False)
+            data["application_draft"] = draft_payload
         return data
 
 
@@ -997,7 +1038,7 @@ class PortalApplicationUpsert(BaseModel):
     selected_advisor_name: str | None = None
     self_evaluation: str | None = None
 
-    @field_validator("selected_team_id", "selected_advisor_user_id", mode="before")
+    @field_validator("plan_id", mode="before")
     @classmethod
     def normalize_optional_integer_fields(cls, value: Any) -> Any:
         return _normalize_optional_int(value)
@@ -1023,8 +1064,6 @@ class PortalApplicationUpsert(BaseModel):
         preferences = sorted(self.preferences, key=lambda item: item.preference_order)
         if preferences:
             primary_preference = preferences[0]
-            self.selected_team_id = self.selected_team_id or primary_preference.team_id
-            self.selected_team_name = self.selected_team_name or primary_preference.research_center_name
             self.selected_advisor_user_id = self.selected_advisor_user_id or primary_preference.advisor_user_id
             self.selected_advisor_name = self.selected_advisor_name or primary_preference.advisor_name
 
@@ -1159,8 +1198,6 @@ class PortalApplicationDraftUpsert(BaseModel):
         preferences = sorted(self.preferences, key=lambda item: item.preference_order)
         if preferences:
             primary_preference = preferences[0]
-            self.selected_team_id = self.selected_team_id or primary_preference.team_id
-            self.selected_team_name = self.selected_team_name or primary_preference.research_center_name
             self.selected_advisor_user_id = self.selected_advisor_user_id or primary_preference.advisor_user_id
             self.selected_advisor_name = self.selected_advisor_name or primary_preference.advisor_name
 

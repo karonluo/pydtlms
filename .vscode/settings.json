@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^d:\\\\pyproj\\\\pydtlms\\\\\\.venv\\\\Scripts\\\\python\\.exe -m py_compile backend\\\\scripts\\\\get_registered_student_profile\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

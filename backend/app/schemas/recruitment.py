@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Sequence, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -27,7 +27,7 @@ def _first_non_empty(*values: Any) -> str | None:
     return None
 
 
-def _serialize_models(items: list[BaseModel] | list[dict[str, Any]] | None) -> str | None:
+def _serialize_models(items: Sequence[BaseModel | dict[str, Any]] | None) -> str | None:
     if not items:
         return None
     payload: list[dict[str, Any]] = []
@@ -51,8 +51,11 @@ def _parse_json_list(value: Any) -> list[Any]:
     return parsed if isinstance(parsed, list) else []
 
 
-def _parse_model_list(value: Any, model_cls: type[BaseModel]) -> list[BaseModel]:
-    items: list[BaseModel] = []
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+def _parse_model_list(value: Any, model_cls: type[TModel]) -> list[TModel]:
+    items: list[TModel] = []
     for raw in _parse_json_list(value):
         if not isinstance(raw, dict):
             continue
@@ -165,10 +168,10 @@ class RecruitApplicationRecord(BaseModel):
     candidate_no: str | None = None
     review_round: str | None = None
     student_name: str
-    first_choice_team_id: int | None = None
     first_choice: str | None = None
-    second_choice_team_id: int | None = None
     second_choice: str | None = None
+    first_choice_id: int | None = None
+    second_choice_id: int | None = None
     gender: str | None = None
     political_status: str | None = None
     marital_status: str | None = None
@@ -282,8 +285,6 @@ class RecruitApplicationRecord(BaseModel):
                 preferences.append(
                     {
                         "preference_order": 1,
-                        "team_id": data.get("first_choice_team_id"),
-                        "research_center_name": data.get("first_choice"),
                         "advisor_user_id": data.get("intended_advisor_user_id"),
                         "advisor_name": data.get("intended_advisor_name"),
                         "is_optional": False,
@@ -293,8 +294,6 @@ class RecruitApplicationRecord(BaseModel):
                 preferences.append(
                     {
                         "preference_order": 2,
-                        "team_id": data.get("second_choice_team_id"),
-                        "research_center_name": data.get("second_choice"),
                         "advisor_name": None,
                         "is_optional": True,
                     }
@@ -341,6 +340,10 @@ class RecruitPortalApplicationDetail(BaseModel):
     advisor_screening_round: str | None = None
     advisor_screening_submitted_at: str | None = None
     advisor_signature_base64: str | None = None
+    first_choice: str | None = None
+    second_choice: str | None = None
+    first_choice_id: int | None = None
+    second_choice_id: int | None = None
     first_choice_screening_score: float | None = None
     second_choice_screening_score: float | None = None
     initial_screening_status: str | None = None
@@ -368,10 +371,10 @@ class RecruitApplicationUpsert(BaseModel):
     candidate_no: str | None = None
     review_round: str | None = None
     student_name: str
-    first_choice_team_id: int | None = None
     first_choice: str | None = None
-    second_choice_team_id: int | None = None
     second_choice: str | None = None
+    first_choice_id: int | None = None
+    second_choice_id: int | None = None
     gender: str | None = None
     political_status: str | None = None
     marital_status: str | None = None
@@ -471,14 +474,11 @@ class RecruitApplicationUpsert(BaseModel):
 
         preferences = sorted(self.preferences, key=lambda item: item.preference_order)
         if preferences:
-            self.first_choice_team_id = self.first_choice_team_id or preferences[0].team_id
-            self.first_choice = self.first_choice or preferences[0].research_center_name
+            self.first_choice = self.first_choice or preferences[0].advisor_name
             self.intended_advisor_user_id = self.intended_advisor_user_id or preferences[0].advisor_user_id
             self.intended_advisor_name = self.intended_advisor_name or preferences[0].advisor_name
-            self.intended_field = self.intended_field or preferences[0].research_center_name
             if len(preferences) > 1:
-                self.second_choice_team_id = self.second_choice_team_id or preferences[1].team_id
-                self.second_choice = self.second_choice or preferences[1].research_center_name
+                self.second_choice = self.second_choice or preferences[1].advisor_name
 
         if self.source_channel or self.source_channel_other:
             self.discovery_channel = self.discovery_channel or self.source_channel_other or self.source_channel
@@ -548,16 +548,14 @@ class AdvisorScreeningSubmitItem(BaseModel):
 
 
 class AdvisorScreeningBatchSubmitRequest(BaseModel):
-    signature_base64: str
+    signature_base64: str | None = None
     items: list[AdvisorScreeningSubmitItem] = Field(default_factory=list)
 
-    @field_validator("signature_base64")
+    @field_validator("signature_base64", mode="before")
     @classmethod
-    def validate_signature_base64(cls, value: str) -> str:
+    def validate_signature_base64(cls, value: str | None) -> str | None:
         normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("缺少导师签名数据")
-        return normalized
+        return normalized or None
 
     @model_validator(mode="after")
     def validate_items(self) -> "AdvisorScreeningBatchSubmitRequest":

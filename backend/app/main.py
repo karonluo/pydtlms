@@ -11,7 +11,6 @@ from app.core.exceptions import DatabaseUnavailableError
 from app.core.logging import configure_logging
 from app.core.security import decode_token
 from app.services.management_service import store
-from app.services.management_service import warm_up_runtime_management_store
 
 
 logger = configure_logging()
@@ -277,6 +276,5 @@ def on_startup() -> None:
     startup_begin = perf_counter()
     if settings.frontend_dev_proxy_enabled:
         logger.info("Frontend dev proxy enabled: %s", settings.frontend_dev_proxy_target)
-    warmup_elapsed = warm_up_runtime_management_store()
-    logger.info("Runtime management store warmed up in %.3fs", warmup_elapsed)
+    logger.info("Runtime management store will initialize lazily on first use; startup does not warm or persist runtime state")
     logger.info("DTLMS backend startup complete in %.3fs", perf_counter() - startup_begin)

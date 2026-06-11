@@ -26,6 +26,9 @@ class NotificationEmailService:
             and self._settings.smtp_from_email
         )
 
+    def workflow_notifications_enabled(self) -> bool:
+        return bool(self.enabled() and self._settings.smtp_student_notification_enabled)
+
     def send_portal_registration_success(self, full_name: str, email: str) -> None:
         subject = "申请系统注册成功通知"
         text_body = (
@@ -106,7 +109,6 @@ class NotificationEmailService:
             "待导师初筛-第二志愿": "您的申请已进入第二志愿导师初筛阶段，导师完成评分后系统将按 80 分阈值自动判定结果，请留意系统、邮件或电话通知。\n",
             "待初筛确认": "您的导师初筛已完成，当前正在等待书院管理员完成初筛确认，请留意系统通知。\n",
             "入营面试": "您的申请已通过初筛，已进入入营面试环节，请留意系统、邮件或电话通知。\n",
-            "待中心考核": "您的申请已通过背景评估，正在等待进入导师初筛环节，请留意系统、邮件或电话通知。\n",
             "预录取": "您的申请已进入预录取阶段，请关注后续确认通知。\n",
             "同意录取": "您的申请已确认录取，请按后续通知完成相关手续。\n",
             "驳回重填": "您的申请已被驳回重填，请登录系统补充或修改信息后重新提交。\n",
@@ -129,6 +131,37 @@ class NotificationEmailService:
             subject=subject,
             text_body=text_body,
             template_code="recruitment_status_update",
+            business_key=business_key,
+        )
+
+    def send_recruitment_material_review_rejection(
+        self,
+        *,
+        student_name: str,
+        email: str,
+        business_key: str,
+        application_status: str | None = None,
+        plan_name: str | None = None,
+        review_comment: str | None = None,
+    ) -> None:
+        subject = "招生申请状态更新通知：驳回"
+        normalized_comment = str(review_comment or "").strip()
+        plan_line = f"招生计划: {str(plan_name or '').strip()}\n" if str(plan_name or "").strip() else ""
+        text_body = (
+            f"{student_name}同学，您好:\n"
+            "您的招生申请状态已更新，请及时登录系统查看。\n"
+            f"业务编号: {business_key}\n"
+            "当前状态：驳回\n"
+            f"原因：{normalized_comment or '无'}\n"
+            "您的申请已被驳回，请于 24H 内登录系统补充或修改信息后重新提交。\n"
+            f"{plan_line}"
+            "此邮件为系统自动发送，请勿直接回复。"
+        )
+        self.send_message(
+            to_email=email,
+            subject=subject,
+            text_body=text_body,
+            template_code="recruitment_material_review_rejection",
             business_key=business_key,
         )
 

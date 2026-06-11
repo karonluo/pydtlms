@@ -918,6 +918,10 @@ class PostgresStateStoreSyncMixin:
                     SET application_status = %s,
                         advisor_screening_status = COALESCE(%s, advisor_screening_status),
                         advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                        first_choice = COALESCE(%s, first_choice),
+                        second_choice = COALESCE(%s, second_choice),
+                        first_choice_id = COALESCE(%s, first_choice_id),
+                        second_choice_id = COALESCE(%s, second_choice_id),
                         first_choice_screening_batch_id = COALESCE(%s, first_choice_screening_batch_id),
                         second_choice_screening_batch_id = COALESCE(%s, second_choice_screening_batch_id),
                         first_choice_screening_submitted_at = COALESCE(%s, first_choice_screening_submitted_at),
@@ -939,6 +943,10 @@ class PostgresStateStoreSyncMixin:
                         self._map_application_status(str(application_payload.get("application_status") or "")),
                         application_payload.get("advisor_screening_status"),
                         application_payload.get("advisor_screening_round"),
+                        application_payload.get("first_choice"),
+                        application_payload.get("second_choice"),
+                        application_payload.get("first_choice_id"),
+                        application_payload.get("second_choice_id"),
                         application_payload.get("first_choice_screening_batch_id"),
                         application_payload.get("second_choice_screening_batch_id"),
                         application_payload.get("first_choice_screening_submitted_at"),
@@ -1075,6 +1083,50 @@ class PostgresStateStoreSyncMixin:
                 self._sync_operation_log_in_tx(cur, operation_log)
             conn.commit()
 
+    def sync_recruitment_application_advisor_choices(
+        self,
+        application_id: int,
+        application_payload: dict[str, Any],
+        workflow_task_payload: dict[str, Any] | None = None,
+        operation_log: dict[str, Any] | None = None,
+        *,
+        counters: dict[str, int] | None = None,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_runtime_counters_in_tx(cur, counters)
+                cur.execute(
+                    """
+                    UPDATE dtlms_recruitment_applications
+                    SET first_choice = %s,
+                        second_choice = %s,
+                        first_choice_id = %s,
+                        second_choice_id = %s,
+                        intended_advisor_name = %s,
+                        intended_advisor_user_id = %s,
+                        advisor_screening_status = COALESCE(%s, advisor_screening_status),
+                        advisor_screening_round = COALESCE(%s, advisor_screening_round),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND is_deleted = FALSE
+                    """,
+                    (
+                        application_payload.get("first_choice"),
+                        application_payload.get("second_choice"),
+                        application_payload.get("first_choice_id"),
+                        application_payload.get("second_choice_id"),
+                        application_payload.get("intended_advisor_name"),
+                        application_payload.get("intended_advisor_user_id"),
+                        application_payload.get("advisor_screening_status"),
+                        application_payload.get("advisor_screening_round"),
+                        int(application_id),
+                    ),
+                )
+                if workflow_task_payload is not None:
+                    self._sync_workflow_task_in_tx(cur, workflow_task_payload)
+                self._sync_operation_log_in_tx(cur, operation_log)
+            conn.commit()
+
     def sync_advisor_screening_batch(
         self,
         batch_payload: dict[str, Any],
@@ -1106,7 +1158,8 @@ class PostgresStateStoreSyncMixin:
                         batch_payload.get("submitted_at"),
                     ),
                 )
-                batch_id = int(cur.fetchone()[0])
+                batch_row = cur.fetchone()
+                batch_id = int(batch_row[0]) if batch_row else 0
 
                 for application_payload, workflow_task_payload, operation_log in zip(application_payloads, workflow_task_payloads, operation_logs):
                     screening_round = str(application_payload.get("screening_round") or batch_payload.get("screening_round") or "first_choice")
@@ -1762,10 +1815,10 @@ class PostgresStateStoreSyncMixin:
                     "intended_field_id",
                     "application_status",
                     "review_round",
-                    "first_choice_team_id",
                     "first_choice",
-                    "second_choice_team_id",
                     "second_choice",
+                    "first_choice_id",
+                    "second_choice_id",
                     "political_status",
                     "marital_status",
                     "religious_belief",
@@ -1824,10 +1877,10 @@ class PostgresStateStoreSyncMixin:
                     intended_field_id,
                     self._map_application_status(str(application_payload.get("application_status") or "报名已提交")),
                     application_payload.get("review_round"),
-                    application_payload.get("first_choice_team_id"),
                     application_payload.get("first_choice"),
-                    application_payload.get("second_choice_team_id"),
                     application_payload.get("second_choice"),
+                    application_payload.get("first_choice_id"),
+                    application_payload.get("second_choice_id"),
                     application_payload.get("political_status"),
                     application_payload.get("marital_status"),
                     application_payload.get("religious_belief"),
@@ -1923,19 +1976,15 @@ class PostgresStateStoreSyncMixin:
                     )
 
                 for preference in draft.get("preferences", []):
-                    # Compatibility fallback: some environments may still keep research_center_name as NOT NULL.
-                    research_center_name = str(preference.get("research_center_name") or "").strip()
                     cur.execute(
                         """
                         INSERT INTO dtlms_portal_application_preferences (
-                            application_id, preference_order, team_id, research_center_name, advisor_user_id, advisor_name, is_optional
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            application_id, preference_order, advisor_user_id, advisor_name, is_optional
+                        ) VALUES (%s, %s, %s, %s, %s)
                         """,
                         (
                             application_id,
                             int(preference.get("preference_order") or 1),
-                            int(preference.get("team_id") or 0) or None,
-                            research_center_name,
                             int(preference.get("advisor_user_id") or 0) or None,
                             preference.get("advisor_name"),
                             bool(preference.get("is_optional")),
@@ -2238,6 +2287,22 @@ class PostgresStateStoreSyncMixin:
                 self._sync_runtime_counters_in_tx(cur, counters)
                 self._sync_operation_log_in_tx(cur, operation_log)
 
+                application_draft = portal_student_payload.get("application_draft")
+                if application_draft is None:
+                    cur.execute(
+                        """
+                        SELECT COALESCE(application_draft, '{}'::jsonb) AS application_draft
+                        FROM dtlms_portal_students
+                        WHERE id = %s
+                        """,
+                        (int(portal_student_payload["id"]),),
+                    )
+                    existing_row = cur.fetchone()
+                    if existing_row is not None:
+                        application_draft = existing_row[0]
+                    else:
+                        application_draft = {}
+
                 cur.execute(
                     """
                     INSERT INTO dtlms_portal_students (
@@ -2318,7 +2383,7 @@ class PostgresStateStoreSyncMixin:
                         portal_student_payload.get("selected_team_name"),
                         portal_student_payload.get("selected_advisor_user_id"),
                         portal_student_payload.get("selected_advisor_name"),
-                        self._json_payload(portal_student_payload.get("application_draft")) if portal_student_payload.get("application_draft") is not None else None,
+                        self._json_payload(application_draft),
                         portal_student_payload.get("self_evaluation"),
                         portal_student_payload.get("submitted_at"),
                         self._normalize_portal_account_status(portal_student_payload.get("account_status")),

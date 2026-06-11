@@ -26,8 +26,6 @@ export type PortalApplicantProfileData = {
 
 export type PortalApplicationPreferenceItem = {
   preference_order: number
-  team_id?: number | null
-  research_center_name?: string | null
   advisor_user_id?: number | null
   advisor_name?: string | null
   is_optional: boolean
@@ -125,8 +123,6 @@ export type PortalApplicationDeclarationData = {
 
 export type PortalApplicationDraftRecord = {
   selected_plan_id?: number | null
-  selected_team_id?: number | null
-  selected_advisor_user_id?: number | null
   source_channel?: string | null
   source_channel_other?: string | null
   preferences: PortalApplicationPreferenceItem[]
@@ -189,10 +185,6 @@ export type PortalStudentRecord = {
   material_list_attachment_name?: string | null
   signed_agreement?: boolean
   selected_plan_id?: number | null
-  selected_team_id?: number | null
-  selected_team_name?: string | null
-  selected_advisor_user_id?: number | null
-  selected_advisor_name?: string | null
   self_evaluation?: string | null
   submitted_at?: string | null
   application_form_status?: string | null
@@ -347,10 +339,6 @@ export type PortalApplicationUpsert = {
   recommendation_notes?: string | null
   personal_statement_text?: string | null
   signed_agreement?: boolean
-  selected_team_id?: number | null
-  selected_team_name?: string | null
-  selected_advisor_user_id?: number | null
-  selected_advisor_name?: string | null
   self_evaluation?: string | null
 }
 
@@ -491,6 +479,13 @@ export function submitPortalApplication(payload: PortalApplicationUpsert) {
 
 export function savePortalApplicationDraft(payload: PortalApplicationUpsert) {
   return portalHttp.post<PortalApplicationDraftSaveResponse>('/portal/applications/draft', payload, {
+    timeout: PORTAL_LONG_RUNNING_TIMEOUT,
+  })
+}
+
+
+export function updatePortalStudentApplication(studentId: number, payload: PortalApplicationUpsert) {
+  return portalHttp.put<PortalStudentRecord>(`/portal/students/${studentId}/application`, payload, {
     timeout: PORTAL_LONG_RUNNING_TIMEOUT,
   })
 }

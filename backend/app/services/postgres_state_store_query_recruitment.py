@@ -22,6 +22,22 @@ logger = logging.getLogger(__name__)
 class PostgresStateStoreQueryRecruitmentMixin:
     """Query mixin extracted by functional module."""
 
+    def _advisor_user_id_by_username(self, username: str | None) -> int | None:
+        normalized_username = str(username or "").strip()
+        if not normalized_username:
+            return None
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM dtlms_users WHERE username = %s AND is_deleted = FALSE LIMIT 1",
+                    (normalized_username,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return int(row["id"] or 0) or None
+
     def get_recruitment_application_detail(self, application_id: int) -> dict[str, Any] | None:
         """Execute query logic for `get_recruitment_application_detail`."""
         self.ensure_schema()
@@ -96,7 +112,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
 
                 cur.execute(
                     """
-                    SELECT preference_order, research_center_name, advisor_name, is_optional
+                    SELECT preference_order, advisor_name, is_optional
                     FROM dtlms_portal_application_preferences
                     WHERE application_id = %s
                     ORDER BY preference_order ASC, id ASC
@@ -485,89 +501,68 @@ class PostgresStateStoreQueryRecruitmentMixin:
         portal_student_only: bool = False,
         advisor_name: str | None = None,
         advisor_names: list[str] | None = None,
+        advisor_user_id: int | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict[str, Any]], int]:
         """Execute query logic for `list_recruitment_applications_page`."""
         self.ensure_schema()
         offset = max(page - 1, 0) * page_size
-        where_clauses = ["ra.is_deleted = FALSE"]
+        where_clauses = ["app.is_deleted = FALSE"]
         params: list[Any] = []
 
         if plan_id is not None:
-            where_clauses.append("ra.plan_id = %s")
+            where_clauses.append("app.plan_id = %s")
             params.append(int(plan_id))
-        if portal_student_only:
-            where_clauses.append("ra.portal_student_id IS NOT NULL")
-        if status:
-            status_filters = [
-                self._map_application_status(item)
-                for item in (segment.strip() for segment in str(status).split(","))
-                if item
-            ]
-            if len(status_filters) == 1:
-                where_clauses.append("ra.application_status = %s")
-                params.append(status_filters[0])
-            elif status_filters:
-                where_clauses.append("ra.application_status = ANY(%s)")
-                params.append(status_filters)
-        if advisor_name and str(advisor_name).strip():
-            normalized_advisor_name = str(advisor_name).strip()
-            where_clauses.append(
-                """
-                (
-                    (
-                        COALESCE(ra.advisor_screening_round, '') = 'second_choice'
-                        AND COALESCE(ra.second_choice, '') = %s
-                    )
-                    OR
-                    (
-                        COALESCE(ra.advisor_screening_round, '') <> 'second_choice'
-                        AND COALESCE(NULLIF(ra.first_choice, ''), ra.intended_advisor_name, '') = %s
-                    )
-                )
-                """
-            )
-            params.extend([normalized_advisor_name, normalized_advisor_name])
-        normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
-        if normalized_advisor_names:
-            where_clauses.append(
-                """
-                (
-                    (
-                        COALESCE(ra.advisor_screening_round, '') = 'second_choice'
-                        AND COALESCE(ra.second_choice, '') = ANY(%s)
-                    )
-                    OR
-                    (
-                        COALESCE(ra.advisor_screening_round, '') <> 'second_choice'
-                        AND COALESCE(NULLIF(ra.first_choice, ''), ra.intended_advisor_name, '') = ANY(%s)
-                    )
-                )
-                """
-            )
-            params.extend([normalized_advisor_names, normalized_advisor_names])
         if keyword and str(keyword).strip():
             keyword_like = f"%{str(keyword).strip()}%"
             where_clauses.append(
-                """
-                (
-                    COALESCE(ra.business_key, '') ILIKE %s
-                    OR COALESCE(ra.candidate_no, '') ILIKE %s
-                    OR COALESCE(ra.student_name, '') ILIKE %s
-                    OR COALESCE(ra.graduation_school, '') ILIKE %s
-                    OR COALESCE(ra.graduate_school, '') ILIKE %s
-                    OR COALESCE(rf.field_name, '') ILIKE %s
-                    OR COALESCE(ra.first_choice, '') ILIKE %s
-                    OR COALESCE(ra.second_choice, '') ILIKE %s
-                    OR COALESCE(ra.intended_advisor_name, '') ILIKE %s
-                    OR COALESCE(ra.phone_number, '') ILIKE %s
-                    OR COALESCE(ra.email, '') ILIKE %s
-                )
-                """
+                "(stu.full_name ILIKE %s OR app.candidate_no ILIKE %s OR app.business_key ILIKE %s)"
             )
-            params.extend([keyword_like] * 11)
+            params.extend([keyword_like, keyword_like, keyword_like])
+        normalized_status = str(status or "").strip()
+        if normalized_status:
+            if normalized_status == "advisor_screening_pending":
+                where_clauses.append("app.application_status LIKE %s")
+                params.append("initial_screening_%")
+                where_clauses.append("app.advisor_screening_status = 'pending'")
+            elif normalized_status == "initial_screening_confirmation":
+                where_clauses.append("app.application_status = 'initial_screening_confirmation'")
+                where_clauses.append("(app.first_choice_screening_score >= 80 OR app.second_choice_screening_score >= 80)")
+                where_clauses.append(
+                    "(app.first_choice_screening_submitted_at IS NOT NULL OR app.second_choice_screening_submitted_at IS NOT NULL)"
+                )
+            else:
+                status_values = [item.strip() for item in normalized_status.split(",") if item.strip()]
+                if len(status_values) > 1:
+                    where_clauses.append("app.application_status = ANY(%s)")
+                    params.append(status_values)
+                else:
+                    where_clauses.append("app.application_status = %s")
+                    params.append(status_values[0] if status_values else normalized_status)
 
+        effective_advisor_user_id = advisor_user_id
+        if effective_advisor_user_id is None:
+            effective_advisor_user_id = self._advisor_user_id_by_username(advisor_name)
+        if effective_advisor_user_id is not None:
+            normalized_advisor_name = str(advisor_name or "").strip()
+            if normalized_advisor_name:
+                where_clauses.append(
+                    "(app.intended_advisor_name = %s OR app.intended_advisor_user_id = %s)"
+                )
+                params.extend([normalized_advisor_name, int(effective_advisor_user_id)])
+            else:
+                where_clauses.append("app.intended_advisor_user_id = %s")
+                params.append(int(effective_advisor_user_id))
+        elif advisor_name and str(advisor_name).strip():
+            normalized_advisor_name = str(advisor_name).strip()
+            where_clauses.append("app.intended_advisor_name = %s")
+            params.append(normalized_advisor_name)
+
+        normalized_advisor_names = [str(item).strip() for item in (advisor_names or []) if str(item).strip()]
+        if normalized_advisor_names:
+            where_clauses.append("app.intended_advisor_name = ANY(%s)")
+            params.append(normalized_advisor_names)
         where_sql = " AND ".join(where_clauses)
 
         with self._connect(settings.postgres_db) as conn:
@@ -575,8 +570,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
             with conn.cursor() as cur:
                 count_sql = f"""
                     SELECT COUNT(*) AS total
-                    FROM dtlms_recruitment_applications ra
-                    LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
+                    FROM dtlms_recruitment_applications app
+                    LEFT JOIN dtlms_portal_students stu ON stu.id = app.portal_student_id
                     WHERE {where_sql}
                 """
                 self._execute_dynamic(cur, count_sql, params)
@@ -585,41 +580,11 @@ class PostgresStateStoreQueryRecruitmentMixin:
 
                 page_sql = f"""
                     SELECT
-                        ra.*,
-                        CASE WHEN COALESCE(ps.account_status, 'active') = 'inactive' THEN '停用' ELSE '启用' END AS account_status,
-                        rp.plan_name AS selected_plan_name,
-                        ps.created_at AS registered_at,
-                        rf.field_name AS intended_field,
-                        am.material_status,
-                        qr.reviewer_username AS reviewer_name,
-                        ad.final_score
-                    FROM dtlms_recruitment_applications ra
-                    LEFT JOIN dtlms_portal_students ps ON ps.id = ra.portal_student_id
-                    LEFT JOIN dtlms_recruitment_plans rp ON rp.id = ra.plan_id
-                    LEFT JOIN dtlms_research_fields rf ON rf.id = ra.intended_field_id AND rf.is_deleted = FALSE
-                    LEFT JOIN LATERAL (
-                        SELECT material_status
-                        FROM dtlms_application_materials
-                        WHERE application_id = ra.id AND is_deleted = FALSE
-                        ORDER BY updated_at DESC, id DESC
-                        LIMIT 1
-                    ) am ON TRUE
-                    LEFT JOIN LATERAL (
-                        SELECT reviewer_username
-                        FROM dtlms_qualification_reviews
-                        WHERE application_id = ra.id
-                        ORDER BY updated_at DESC, id DESC
-                        LIMIT 1
-                    ) qr ON TRUE
-                    LEFT JOIN LATERAL (
-                        SELECT final_score
-                        FROM dtlms_admission_decisions
-                        WHERE application_id = ra.id
-                        ORDER BY updated_at DESC, id DESC
-                        LIMIT 1
-                    ) ad ON TRUE
+                        app.*
+                    FROM dtlms_recruitment_applications app
+                    LEFT JOIN dtlms_portal_students stu ON stu.id = app.portal_student_id
                     WHERE {where_sql}
-                    ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC, ra.id DESC
+                    ORDER BY app.id DESC
                     LIMIT %s OFFSET %s
                 """
                 self._execute_dynamic(cur, page_sql, [*params, page_size, offset])

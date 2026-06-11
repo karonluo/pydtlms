@@ -615,9 +615,6 @@ class RuntimeManagementStoreWorkflowMixin:
                 "待导师初筛-第二志愿": ("advisor_screening", "处理中"),
                 "待初筛确认": ("initial_screening_confirmation", "处理中"),
                 "入营面试": ("camp_interview", "处理中"),
-                "待中心考核": ("advisor_screening", "处理中"),
-                "待中心考核-第一志愿": ("advisor_screening", "处理中"),
-                "待中心考核-第二志愿": ("advisor_screening", "处理中"),
                 "结果公布": ("result_publish", "处理中"),
                 "预录取": ("pre_admission", "处理中"),
                 "预录取": (None, "已通过"),
@@ -994,7 +991,7 @@ class RuntimeManagementStoreWorkflowMixin:
                     principal_permissions=principal_summary["permissions"],
                     principal_username=principal_summary["username"],
                 )
-                if notification_payload is not None and self._email_service.enabled():
+                if notification_payload is not None and self._email_service.workflow_notifications_enabled():
                     self._email_service.send_recruitment_status_update(**notification_payload)
                 return result
             updated_entity = {**entity, **action_definition.get("field_updates", {})}
@@ -1080,8 +1077,11 @@ class RuntimeManagementStoreWorkflowMixin:
             if sync_student_master:
                 self._sync_student_master_from_recruitment_application(updated_entity)
 
-        if notification_payload is not None and self._email_service.enabled():
-            self._email_service.send_recruitment_status_update(**notification_payload)
+        if notification_payload is not None:
+            if flow_code == "recruitment_application" and node_key == "qualification_review" and action == "reject":
+                self._email_service.send_recruitment_material_review_rejection(**notification_payload)
+            elif self._email_service.workflow_notifications_enabled():
+                self._email_service.send_recruitment_status_update(**notification_payload)
         return result
 
     def _reset_portal_student_submission_for_resubmission(self, application: dict[str, Any]) -> dict[str, Any] | None:
@@ -1108,10 +1108,10 @@ class RuntimeManagementStoreWorkflowMixin:
             "资格审核通过",
             "预录取",
             "同意录取",
-            "不录取",
-            "报名终止",
-            "待中心考核",
         }:
+            return None
+
+        if status in {"不录取", "报名终止"}:
             return None
 
         email = str(application.get("email") or "").strip()

@@ -59,9 +59,9 @@ class RuntimeManagementStorePortalMixin:
             return "驳回重填"
         if normalized_status == "未提交":
             return "未提交报名"
-        if normalized_status in {"待导师初筛-第一志愿", "待中心考核-第一志愿"}:
+        if normalized_status == "待导师初筛-第一志愿":
             return "第一志愿初筛"
-        if normalized_status in {"待导师初筛-第二志愿", "待中心考核-第二志愿"}:
+        if normalized_status == "待导师初筛-第二志愿":
             return "第二志愿初筛"
         if normalized_status == "待初筛确认":
             return "初筛确认中"
@@ -142,9 +142,6 @@ class RuntimeManagementStorePortalMixin:
             "待导师初筛-第一志愿",
             "待导师初筛-第二志愿",
             "待初筛确认",
-            "待中心考核",
-            "待中心考核-第一志愿",
-            "待中心考核-第二志愿",
         }:
             stages[0].status = "completed"
             stages[1].status = "completed"
@@ -152,10 +149,10 @@ class RuntimeManagementStorePortalMixin:
             stages[3].status = "current"
             current_stage_key = "initial_screening"
             current_stage_label = "初筛"
-            if normalized_status in {"待导师初筛-第二志愿", "待中心考核-第二志愿"}:
-                stages[3].description = "当前进入第二志愿初筛阶段，完成评分后系统将自动判定结果"
+            if normalized_status == "待导师初筛-第二志愿":
+                stages[3].description = "" # "当前进入第二志愿初筛阶段" #，完成评分后系统将自动判定结果"
             elif normalized_status == "待初筛确认":
-                stages[3].description = "初筛已完成，等待书院管理员完成初筛确认"
+                stages[3].description = "" #"初筛已完成，等待书院管理员完成初筛确认"
             else:
                 stages[3].description = "等待初筛完成"
                 normalized_status = "待导师初筛"
@@ -198,21 +195,15 @@ class RuntimeManagementStorePortalMixin:
                 initial_screening_result=initial_screening_result,
                 background_assessments=background_assessments,
             )
-            terminated_stage_started = False
             stages[0].status = "completed"
             stages[1].status = "completed"
             for stage in stages[2:]:
                 if stage.key == terminated_stage_start_key:
-                    terminated_stage_started = True
-                if terminated_stage_started:
-                    stage.status = "terminated"
-                    stage.description = PORTAL_TERMINATED_STAGE_DESCRIPTION
-                else:
-                    stage.status = "completed"
-            current_stage_key = "result_publish"
-            current_stage_label = "结果公布"
-            normalized_status = "报名终止"
-            result_label = "终止"
+                    stage.status = "current"
+                    current_stage_key = stage.key
+                    current_stage_label = stage.label
+                    break
+                stage.status = "completed"
         else:
             stages[0].status = "completed"
             stages[1].status = "current"
@@ -224,7 +215,7 @@ class RuntimeManagementStorePortalMixin:
             application_form_status=application_form_status,
             recruitment_application_status=normalized_status or None,
             result_label=result_label,
-            review_comment=review_comment if result_label == "终止" or normalized_status in {"驳回重填", "不录取", "报名终止"} else None,
+            review_comment=review_comment if normalized_status == "驳回重填" else None,
             stages=stages,
         )
 
@@ -282,6 +273,13 @@ class RuntimeManagementStorePortalMixin:
         if application_status is None:
             application_status = self._get_latest_portal_application_status(normalized)
         normalized["recruitment_application_status"] = application_status
+        if latest_application is not None:
+            normalized["first_choice"] = latest_application.get("first_choice")
+            normalized["second_choice"] = latest_application.get("second_choice")
+            normalized["first_choice_id"] = latest_application.get("first_choice_id")
+            normalized["second_choice_id"] = latest_application.get("second_choice_id")
+            normalized["intended_advisor_user_id"] = latest_application.get("intended_advisor_user_id")
+            normalized["intended_advisor_name"] = latest_application.get("intended_advisor_name")
         if not str(normalized.get("advisor_screening_status") or "").strip() and latest_application is not None:
             normalized["advisor_screening_status"] = latest_application.get("advisor_screening_status")
         if not str(normalized.get("initial_screening_result") or "").strip() and latest_application is not None:
@@ -444,8 +442,6 @@ class RuntimeManagementStorePortalMixin:
     def _build_portal_application_draft_payload(
         self,
         payload: Any,
-        selected_team_id: int | None,
-        selected_team_name: str | None,
         selected_advisor_user_id: int | None,
         advisor_name: str | None,
         submitted_at: str | None,
@@ -462,8 +458,6 @@ class RuntimeManagementStorePortalMixin:
             preferences.append(
                 {
                     "preference_order": item.preference_order,
-                    "team_id": item.team_id,
-                    "research_center_name": str(item.research_center_name or "").strip() or None,
                     "advisor_user_id": resolved_advisor["advisor_user_id"],
                     "advisor_name": resolved_advisor["advisor_name"],
                     "is_optional": item.is_optional,
@@ -473,8 +467,6 @@ class RuntimeManagementStorePortalMixin:
             preferences = [
                 {
                     "preference_order": 1,
-                    "team_id": selected_team_id,
-                    "research_center_name": selected_team_name,
                     "advisor_user_id": selected_advisor_user_id,
                     "advisor_name": advisor_name,
                     "is_optional": False,
@@ -487,7 +479,6 @@ class RuntimeManagementStorePortalMixin:
         declaration.setdefault("has_read_declaration", bool(payload.signed_agreement))
         return {
             "selected_plan_id": payload.plan_id,
-            "selected_team_id": selected_team_id,
             "selected_advisor_user_id": selected_advisor_user_id,
             "source_channel": payload.source_channel,
             "source_channel_other": payload.source_channel_other,
@@ -501,6 +492,12 @@ class RuntimeManagementStorePortalMixin:
             "declaration": declaration,
             "submitted_at": submitted_at,
         }
+
+    @staticmethod
+    def _resolve_choice_id_from_preferences(preferences: list[dict[str, Any]], index: int) -> int | None:
+        if index < 0 or index >= len(preferences):
+            return None
+        return int(preferences[index].get("advisor_user_id") or 0) or None
 
     def _build_portal_plan_record(self, item: dict[str, Any]) -> PortalPlanRecord:
         plan = self._build_recruit_plan_record(item)
@@ -820,7 +817,6 @@ class RuntimeManagementStorePortalMixin:
                     "personal_statement_text": None,
                     "signed_agreement": False,
                     "selected_plan_id": latest_plan_id,
-                    "selected_team_name": None,
                     "selected_advisor_name": None,
                     "self_evaluation": None,
                     "submitted_at": None,
@@ -989,13 +985,13 @@ class RuntimeManagementStorePortalMixin:
             if student.get("submitted_at"):
                 raise ValueError("报名申请已提交，当前仅支持只读浏览，不能再修改信息")
 
-            selected_team_id = payload.selected_team_id
-            selected_team_name = payload.selected_team_name
-            selected_advisor_user_id = payload.selected_advisor_user_id
-            advisor_name = payload.selected_advisor_name
+            ordered_preferences = sorted(payload.preferences or [], key=lambda item: item.preference_order)
+            primary_preference = ordered_preferences[0] if ordered_preferences else None
+            tempSelectedAdvisorUserId = primary_preference.advisor_user_id if primary_preference is not None else payload.selected_advisor_user_id
+            tempSelectedAdvisorName = primary_preference.advisor_name if primary_preference is not None else payload.selected_advisor_name
             resolved_selection = self._resolve_portal_advisor_selection(
-                selected_advisor_user_id,
-                advisor_name,
+                tempSelectedAdvisorUserId,
+                tempSelectedAdvisorName,
                 require_advisor=False,
             )
             selected_advisor_user_id = resolved_selection["advisor_user_id"]
@@ -1005,8 +1001,6 @@ class RuntimeManagementStorePortalMixin:
             profile_payload = self._build_portal_profile_payload(payload)
             application_draft = self._build_portal_application_draft_payload(
                 payload,
-                selected_team_id,
-                selected_team_name,
                 selected_advisor_user_id,
                 advisor_name,
                 student.get("submitted_at"),
@@ -1035,8 +1029,6 @@ class RuntimeManagementStorePortalMixin:
                     "personal_statement_text": payload.personal_statement_text,
                     "signed_agreement": payload.signed_agreement,
                     "selected_plan_id": payload.plan_id or student.get("selected_plan_id"),
-                    "selected_team_id": selected_team_id,
-                    "selected_team_name": selected_team_name,
                     "selected_advisor_user_id": selected_advisor_user_id,
                     "selected_advisor_name": advisor_name,
                     "self_evaluation": payload.self_evaluation,
@@ -1066,17 +1058,19 @@ class RuntimeManagementStorePortalMixin:
             if resubmittable_latest_application and student.get("submitted_at"):
                 student["submitted_at"] = None
             _, plan = self._find_required("recruitment_plans", payload.plan_id)
-            selected_team_id = payload.selected_team_id
-            selected_team_name = payload.selected_team_name
             graduation_school = payload.graduation_school
             if not graduation_school:
                 raise ValueError("缺少毕业院校/就读学校信息")
             highest_degree = payload.highest_degree
             if not highest_degree:
                 raise ValueError("缺少最高学历/教育阶段信息")
+            ordered_preferences = sorted(payload.preferences or [], key=lambda item: item.preference_order)
+            primary_preference = ordered_preferences[0] if ordered_preferences else None
+            tempSelectedAdvisorUserId = primary_preference.advisor_user_id if primary_preference is not None else payload.selected_advisor_user_id
+            tempSelectedAdvisorName = primary_preference.advisor_name if primary_preference is not None else payload.selected_advisor_name
             resolved_selection = self._resolve_portal_advisor_selection(
-                payload.selected_advisor_user_id,
-                payload.selected_advisor_name,
+                tempSelectedAdvisorUserId,
+                tempSelectedAdvisorName,
             )
             selected_advisor_user_id = resolved_selection["advisor_user_id"]
             advisor_name = resolved_selection["advisor_name"]
@@ -1085,15 +1079,15 @@ class RuntimeManagementStorePortalMixin:
             profile_payload = self._build_portal_profile_payload(payload)
             application_draft = self._build_portal_application_draft_payload(
                 payload,
-                selected_team_id,
-                selected_team_name,
                 selected_advisor_user_id,
                 advisor_name,
                 submitted_at,
             )
-            preference_advisors = [item.get("advisor_name") for item in application_draft.get("preferences", []) if item.get("advisor_name")]
+            preference_items = application_draft.get("preferences", []) if isinstance(application_draft.get("preferences"), list) else []
+            preference_advisors = [item.get("advisor_name") for item in preference_items if item.get("advisor_name")]
             second_choice = preference_advisors[1] if len(preference_advisors) > 1 else None
-            second_choice_team_id = None
+            first_choice_id = self._resolve_choice_id_from_preferences(preference_items, 0) or selected_advisor_user_id
+            second_choice_id = self._resolve_choice_id_from_preferences(preference_items, 1)
 
             student.update(
                 {
@@ -1118,8 +1112,6 @@ class RuntimeManagementStorePortalMixin:
                     "personal_statement_text": payload.personal_statement_text,
                     "signed_agreement": payload.signed_agreement,
                     "selected_plan_id": payload.plan_id,
-                    "selected_team_id": selected_team_id,
-                    "selected_team_name": selected_team_name,
                     "selected_advisor_user_id": selected_advisor_user_id,
                     "selected_advisor_name": advisor_name,
                     "self_evaluation": payload.self_evaluation,
@@ -1143,10 +1135,10 @@ class RuntimeManagementStorePortalMixin:
                         "graduation_school": graduation_school,
                         "highest_degree": highest_degree,
                         "intended_field": intended_field,
-                        "first_choice_team_id": selected_team_id,
                         "first_choice": advisor_name,
-                        "second_choice_team_id": second_choice_team_id,
                         "second_choice": second_choice,
+                        "first_choice_id": first_choice_id,
+                        "second_choice_id": second_choice_id,
                         "political_status": payload.political_status,
                         "marital_status": payload.marital_status,
                         "religious_belief": payload.religious_belief,
@@ -1211,10 +1203,10 @@ class RuntimeManagementStorePortalMixin:
                         graduation_school=graduation_school,
                         highest_degree=highest_degree,
                         intended_field=intended_field,
-                        first_choice_team_id=selected_team_id,
                         first_choice=advisor_name,
-                        second_choice_team_id=second_choice_team_id,
                         second_choice=second_choice,
+                        first_choice_id=first_choice_id,
+                        second_choice_id=second_choice_id,
                         political_status=payload.political_status,
                         marital_status=payload.marital_status,
                         religious_belief=payload.religious_belief,

@@ -72,6 +72,19 @@ export type RegisteredPortalStudentActionResponse = {
 }
 
 
+export type RegisteredPortalStudentEditableApplication = {
+  student_id: number
+  student_name: string
+  phone_number?: string | null
+  email?: string | null
+  id_number?: string | null
+  profile?: import('./portal').PortalApplicantProfileData | null
+  application_draft?: import('./portal').PortalApplicationDraftRecord | null
+  selected_plan_id?: number | null
+  recruitment_application_id?: number | null
+}
+
+
 export type RegisteredPortalStudentImpersonationLaunchResponse = {
   message: string
   launch_url: string

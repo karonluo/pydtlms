@@ -167,10 +167,12 @@ def build_runtime_seed_state() -> dict[str, Any]:
     ]
     political_values = ["中共党员", "共青团员", "群众", "中共预备党员"]
     for index, item in enumerate(recruitment_applications, start=1):
+        intended_advisor_name = ["刘亚", "袁野", "徐素天"][index % 3]
         item.update(
             {
                 "review_round": "2026 秋季第一轮" if item["plan_id"] in {1, 2} else "2026 秋季第二轮",
-                "first_choice": item["intended_field"],
+                "intended_advisor_name": intended_advisor_name,
+                "first_choice": intended_advisor_name,
                 "second_choice": second_choice_values[(index - 1) % len(second_choice_values)],
                 "gender": "男" if index % 2 else "女",
                 "political_status": political_values[(index - 1) % len(political_values)],
@@ -192,7 +194,6 @@ def build_runtime_seed_state() -> dict[str, Any]:
                 "graduate_gpa": f"{3.3 + (index % 4) * 0.1:.1f}",
                 "graduate_rank": f"{index}/{24 + index}",
                 "graduate_major": item["intended_field"],
-                "intended_advisor_name": ["刘亚", "袁野", "徐素天"][index % 3],
                 "discovery_channel": "实验室官网 / 学术宣讲会",
                 "graduate_school": ["上海交通大学", "同济大学", "浙江大学", "南京大学"][index % 4],
                 "overseas_university_name": None,
