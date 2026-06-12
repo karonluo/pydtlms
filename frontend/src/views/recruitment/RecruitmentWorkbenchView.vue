@@ -11,11 +11,8 @@ import { getEmailValidationMessage, getPhoneValidationMessage, normalizeEmail, n
 import { getChinaResidentIdValidationMessage, normalizeChinaResidentIdNumber } from '../../utils/chinaResidentId'
 import { useServerPagination } from '../../composables/useServerPagination'
 import { useAuthStore } from '../../stores/auth'
-import { useExportJobStore } from '../../stores/exportJobs'
-
 import {
   confirmInitialScreening,
-  createAdvisorScreeningExportJob,
   createRecruitmentApplication,
   createRecruitmentPlan,
   deleteRecruitmentPlan,
@@ -57,7 +54,6 @@ const educationStageOptions = ['硕士', '硕士在读', '本科', '本科在读
 const familyRelationOptions = ['父亲', '母亲', '兄', '弟', '姐', '妹', '其他']
 const route = useRoute()
 const authStore = useAuthStore()
-const exportJobStore = useExportJobStore()
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 
 const updateViewportWidth = () => {
@@ -328,7 +324,6 @@ const applicationSubmitting = ref(false)
 const deleteApplicationSubmitting = ref(false)
 const importSubmitting = ref(false)
 const exportSubmitting = ref(false)
-const advisorScreeningExportSubmitting = ref(false)
 const templateSubmitting = ref(false)
 const brochureUploading = ref(false)
 const selectedPlanId = ref<number | undefined>()
@@ -1675,28 +1670,6 @@ async function handleTemplateExport() {
     exportSubmitting.value = false
   }
 }
-
-async function handleAdvisorScreeningExport() {
-  if (!canAccessAdvisorScreeningSection.value) {
-    ElMessage.warning('当前账号无权导出导师初筛清单')
-    return
-  }
-  advisorScreeningExportSubmitting.value = true
-  try {
-    await createAdvisorScreeningExportJob({
-      keyword: applicationFilters.keyword || undefined,
-      plan_id: selectedPlanId.value,
-    })
-    await exportJobStore.fetchJobs({ silent: true })
-    ElMessage.success('导师初筛导出任务已创建，完成后请在右上角导出图标中下载')
-  } catch (error) {
-    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '创建导出任务失败'
-    ElMessage.error(message)
-  } finally {
-    advisorScreeningExportSubmitting.value = false
-  }
-}
-
 async function handleTemplateDownload() {
   templateSubmitting.value = true
   try {
@@ -1943,7 +1916,7 @@ onMounted(() => {
             <el-button :loading="exportSubmitting" @click="handleTemplateExport">导出名单</el-button>
             <el-button type="primary" round @click="openCreateApplicationDialog">新增报名申请</el-button>
           </template>
-          <el-button v-if="isAdvisorScreeningSection && canAccessCurrentSection" :loading="advisorScreeningExportSubmitting" @click="handleAdvisorScreeningExport">
+          <el-button v-if="false">
             导出当前清单
           </el-button>
         </div>
@@ -1981,7 +1954,7 @@ onMounted(() => {
         <div v-if="isAdvisorScreeningPendingTab" class="advisor-screening-pending-panel">
           <el-form inline :model="applicationFilters" class="advisor-screening-pending-panel__filter">
             <el-form-item label="关键字">
-              <el-input v-model="applicationFilters.keyword" placeholder="业务编号 / 姓名 / 学校 / 方向" clearable />
+              <el-input v-model="applicationFilters.keyword" placeholder="请输入报名号或学生姓名" clearable />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="handleFilterSearch">查询</el-button>
