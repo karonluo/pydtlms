@@ -110,11 +110,11 @@ const showBackgroundAssessmentTools = computed(() => {
 const taskDefinitionKey = computed(() => String(props.workflowTask?.task_definition_key || '').trim())
 
 const showAdvisorScreeningTools = computed(() => {
-  return props.enableScreeningTools && (taskDefinitionKey.value === 'advisor_screening' || String(props.workflowTask?.current_node || '').includes('导师初筛'))
+  return props.enableScreeningTools && taskDefinitionKey.value === 'advisor_screening'
 })
 
 const showInitialScreeningConfirmationTools = computed(() => {
-  return props.enableScreeningTools && (taskDefinitionKey.value === 'initial_screening_confirmation' || String(props.workflowTask?.current_node || '').includes('初筛确认'))
+  return props.enableScreeningTools && taskDefinitionKey.value === 'initial_screening_confirmation'
 })
 
 const hasCustomWorkflowTools = computed(() => showAdvisorScreeningTools.value || showInitialScreeningConfirmationTools.value)
@@ -298,7 +298,7 @@ function submitAdvisorScreening() {
     ElMessage.warning('签名画板尚未准备完成，请重试')
     return
   }
-  emit('submitAdvisorScreening', {
+  const payload = {
     signature_base64: canvas.toDataURL('image/png'),
     items: [
       {
@@ -306,7 +306,15 @@ function submitAdvisorScreening() {
         advisor_score: Number(advisorScreeningForm.advisor_score),
       },
     ],
+  }
+  console.error('导师初筛提交 payload', {
+    application_id: props.detail.application_id,
+    application_status: props.detail.application_status,
+    current_node: props.workflowTask?.current_node,
+    task_definition_key: props.workflowTask?.task_definition_key,
+    payload,
   })
+  emit('submitAdvisorScreening', payload)
 }
 
 function submitInitialScreeningConfirmation() {

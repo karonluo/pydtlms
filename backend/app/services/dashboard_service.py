@@ -384,6 +384,10 @@ def confirm_initial_screening(application_id: int, payload, principal: Principal
     return store.confirm_initial_screening(application_id, payload, principal=principal)
 
 
+def rescore_advisor_screening_submitted_application(application_id: int, principal: Principal):
+    return store.rescore_advisor_screening_submitted_application(application_id, principal=principal)
+
+
 def delete_recruitment_application(application_id: int) -> None:
     store.delete_recruitment_application(application_id)
 

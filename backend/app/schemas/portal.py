@@ -397,6 +397,53 @@ def _populate_personal_statement_attachment_fallbacks(
     return personal_statement
 
 
+def _populate_application_draft_fallbacks(
+    draft: "PortalApplicationDraftRecord",
+    raw_data: dict[str, Any],
+) -> "PortalApplicationDraftRecord":
+    draft.selected_plan_id = draft.selected_plan_id or raw_data.get("selected_plan_id")
+
+    if not draft.preferences and raw_data.get("first_choice"):
+        draft.preferences = [
+            {
+                "preference_order": 1,
+                "advisor_name": raw_data.get("first_choice"),
+                "advisor_user_id": raw_data.get("intended_advisor_user_id"),
+                "is_optional": False,
+            }
+        ]
+
+    if not draft.education_experiences:
+        draft.education_experiences = _parse_model_list(raw_data.get("education_experience"), PortalEducationExperienceItem)
+    if not draft.practice_experiences:
+        draft.practice_experiences = _parse_model_list(raw_data.get("practice_experience"), PortalPracticeExperienceItem)
+    if not draft.family_members:
+        draft.family_members = _parse_model_list(raw_data.get("family_info"), PortalFamilyMemberItem)
+    if not draft.english_proficiencies:
+        draft.english_proficiencies = _parse_model_list(raw_data.get("english_level"), PortalEnglishProficiencyItem)
+    if not draft.achievement_records:
+        draft.achievement_records = _parse_model_list(raw_data.get("recommendation_notes"), PortalAchievementRecordItem)
+
+    draft.personal_statement = _populate_personal_statement_attachment_fallbacks(draft.personal_statement, raw_data)
+    draft.personal_statement = _populate_personal_statement_legacy_fields(draft.personal_statement)
+    draft.declaration.has_read_declaration = draft.declaration.has_read_declaration or bool(raw_data.get("signed_agreement"))
+
+    if not draft.personal_statement.personal_statement_text:
+        draft.personal_statement.personal_statement_text = raw_data.get("personal_statement_text")
+    if not draft.personal_statement.ai_problem_statement:
+        draft.personal_statement.ai_problem_statement = raw_data.get("ai_problem_statement")
+    if not draft.personal_statement.ai_industry_opinion:
+        draft.personal_statement.ai_industry_opinion = raw_data.get("ai_industry_opinion")
+    if not draft.personal_statement.growth_experience_text:
+        draft.personal_statement.growth_experience_text = raw_data.get("growth_experience_text")
+    if not draft.personal_statement.program_application_reason_text:
+        draft.personal_statement.program_application_reason_text = raw_data.get("program_application_reason_text")
+    if not draft.personal_statement.career_plan_text:
+        draft.personal_statement.career_plan_text = raw_data.get("career_plan_text")
+
+    return draft
+
+
 def _validate_portal_personal_statement_rules(
     personal_statement: "PortalPersonalStatementData | None",
     require_complete: bool,
@@ -924,13 +971,8 @@ class PortalStudentRecord(BaseModel):
                     "submitted_at": data.get("submitted_at"),
                 }
         elif isinstance(data.get("application_draft"), dict):
-            draft_payload = dict(data.get("application_draft") or {})
-            draft_personal_statement = _populate_personal_statement_attachment_fallbacks(
-                PortalPersonalStatementData.model_validate(draft_payload.get("personal_statement") or {}),
-                data,
-            )
-            draft_payload["personal_statement"] = draft_personal_statement.model_dump(mode="python", exclude_none=False)
-            data["application_draft"] = draft_payload
+            draft_payload = PortalApplicationDraftRecord.model_validate(data.get("application_draft") or {})
+            data["application_draft"] = _populate_application_draft_fallbacks(draft_payload, data).model_dump(mode="python", exclude_none=False)
         return data
 
 

@@ -2287,6 +2287,33 @@ class PostgresStateStoreSyncMixin:
                 self._sync_runtime_counters_in_tx(cur, counters)
                 self._sync_operation_log_in_tx(cur, operation_log)
 
+                existing_portal_student: dict[str, Any] | None = None
+                if portal_student_payload.get("id") is not None:
+                    cur.execute(
+                        """
+                        SELECT
+                            gender, birth_date, ethnic_group, native_place, marital_status, religious_belief,
+                            id_type, mailing_address, graduation_school, highest_degree, intended_field,
+                            political_status, english_level, family_info, education_experience,
+                            practice_experience, personal_profile, recommendation_notes,
+                            personal_statement_text, signed_agreement, selected_plan_id,
+                            selected_team_id, selected_team_name, selected_advisor_user_id,
+                            selected_advisor_name, self_evaluation, submitted_at, account_status,
+                            created_at, updated_at
+                        FROM dtlms_portal_students
+                        WHERE id = %s
+                        """,
+                        (int(portal_student_payload["id"]),),
+                    )
+                    existing_portal_student = cur.fetchone()
+
+                def keep_existing_official_value(column_name: str) -> Any:
+                    value = portal_student_payload.get(column_name)
+                    if value in (None, "", [], {}):
+                        if isinstance(existing_portal_student, dict):
+                            return existing_portal_student.get(column_name)
+                    return value
+
                 application_draft = portal_student_payload.get("application_draft")
                 if application_draft is None:
                     cur.execute(
@@ -2358,34 +2385,34 @@ class PostgresStateStoreSyncMixin:
                         portal_student_payload.get("email"),
                         portal_student_payload.get("id_number"),
                         portal_student_payload.get("password_hash"),
-                        portal_student_payload.get("gender"),
-                        portal_student_payload.get("birth_date"),
-                        portal_student_payload.get("ethnic_group"),
-                        portal_student_payload.get("native_place"),
-                        portal_student_payload.get("marital_status"),
-                        portal_student_payload.get("religious_belief"),
-                        portal_student_payload.get("id_type"),
-                        portal_student_payload.get("mailing_address"),
-                        portal_student_payload.get("graduation_school"),
-                        portal_student_payload.get("highest_degree"),
-                        portal_student_payload.get("intended_field"),
-                        portal_student_payload.get("political_status"),
-                        portal_student_payload.get("english_level"),
-                        portal_student_payload.get("family_info"),
-                        portal_student_payload.get("education_experience"),
-                        portal_student_payload.get("practice_experience"),
-                        portal_student_payload.get("personal_profile"),
-                        portal_student_payload.get("recommendation_notes"),
-                        portal_student_payload.get("personal_statement_text"),
+                        keep_existing_official_value("gender"),
+                        keep_existing_official_value("birth_date"),
+                        keep_existing_official_value("ethnic_group"),
+                        keep_existing_official_value("native_place"),
+                        keep_existing_official_value("marital_status"),
+                        keep_existing_official_value("religious_belief"),
+                        keep_existing_official_value("id_type"),
+                        keep_existing_official_value("mailing_address"),
+                        keep_existing_official_value("graduation_school"),
+                        keep_existing_official_value("highest_degree"),
+                        keep_existing_official_value("intended_field"),
+                        keep_existing_official_value("political_status"),
+                        keep_existing_official_value("english_level"),
+                        keep_existing_official_value("family_info"),
+                        keep_existing_official_value("education_experience"),
+                        keep_existing_official_value("practice_experience"),
+                        keep_existing_official_value("personal_profile"),
+                        keep_existing_official_value("recommendation_notes"),
+                        keep_existing_official_value("personal_statement_text"),
                         bool(portal_student_payload.get("signed_agreement")),
-                        portal_student_payload.get("selected_plan_id"),
-                        portal_student_payload.get("selected_team_id"),
-                        portal_student_payload.get("selected_team_name"),
-                        portal_student_payload.get("selected_advisor_user_id"),
-                        portal_student_payload.get("selected_advisor_name"),
+                        keep_existing_official_value("selected_plan_id"),
+                        keep_existing_official_value("selected_team_id"),
+                        keep_existing_official_value("selected_team_name"),
+                        keep_existing_official_value("selected_advisor_user_id"),
+                        keep_existing_official_value("selected_advisor_name"),
                         self._json_payload(application_draft),
-                        portal_student_payload.get("self_evaluation"),
-                        portal_student_payload.get("submitted_at"),
+                        keep_existing_official_value("self_evaluation"),
+                        keep_existing_official_value("submitted_at"),
                         self._normalize_portal_account_status(portal_student_payload.get("account_status")),
                         portal_student_payload.get("created_at"),
                         portal_student_payload.get("updated_at"),

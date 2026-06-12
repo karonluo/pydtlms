@@ -227,6 +227,29 @@ export type AdvisorScreeningBatchSubmitResponse = {
   applications: RecruitApplicationRecord[]
 }
 
+
+export type AdvisorScreeningSubmittedApplicationRecord = {
+  student_id: number
+  plan_id: number
+  candidate_no: string
+  business_key?: string | null
+  full_name: string
+  application_id: number
+  first_choice_screening_submitted_at?: string | null
+  second_choice_screening_submitted_at?: string | null
+  first_choice?: string | null
+  first_choice_id?: number | null
+  second_choice?: string | null
+  second_choice_id?: number | null
+  choice_score?: number | null
+  choice_name?: string | null
+  application_status?: string | null
+  intended_advisor_name?: string | null
+}
+
+
+export type AdvisorScreeningSubmittedApplicationListResponse = PagedResponse<AdvisorScreeningSubmittedApplicationRecord>
+
 export type RecruitmentAttachmentUploadResponse = {
   category: string
   file_name: string
@@ -329,6 +352,11 @@ export function listRecruitmentApplications(params?: PaginationParams & { keywor
 }
 
 
+export function listInitialScreeningConfirmationApplications(params?: PaginationParams & { keyword?: string; plan_id: number; advisor_names?: string }) {
+  return http.get<RecruitApplicationListResponse>('/recruitment/applications/initial-screening-confirmation', { params })
+}
+
+
 export function createRecruitmentApplication(payload: RecruitApplicationUpsert) {
   return http.post<RecruitApplicationRecord>('/recruitment/applications', payload)
 }
@@ -366,6 +394,16 @@ export function deleteRecruitmentApplication(id: number) {
 
 export function submitAdvisorScreeningBatch(payload: AdvisorScreeningBatchSubmitRequest) {
   return http.post<AdvisorScreeningBatchSubmitResponse>('/recruitment/applications/advisor-screening:submit', payload)
+}
+
+
+export function listAdvisorScreeningSubmittedApplications(params?: PaginationParams & { keyword?: string }) {
+  return http.get<AdvisorScreeningSubmittedApplicationListResponse>('/recruitment/applications/advisor-screening-submitted', { params })
+}
+
+
+export function rescoreAdvisorScreeningSubmittedApplication(applicationId: number) {
+  return http.post<RecruitApplicationRecord>(`/recruitment/applications/advisor-screening-submitted/${applicationId}/rescore`)
 }
 
 

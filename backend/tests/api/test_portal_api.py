@@ -454,7 +454,6 @@ def test_portal_application_submission_returns_business_key(monkeypatch) -> None
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -647,7 +646,6 @@ def test_portal_application_submission_accepts_structured_attachment_fields(monk
                     'preferences': [
                         {
                             'preference_order': 1,
-                            'research_center_name': '智能制造联合团队',
                             'advisor_name': '刘亚',
                             'is_optional': False,
                         }
@@ -753,7 +751,6 @@ def test_portal_application_submission_rejects_short_personal_statement(monkeypa
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -806,7 +803,6 @@ def test_portal_application_submission_rejects_missing_resume_attachment(monkeyp
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -855,7 +851,6 @@ def test_portal_application_submission_rejects_bachelor_graduate_without_master_
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -975,7 +970,6 @@ def test_portal_application_submission_rejects_non_bachelor_second_education_exp
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1112,7 +1106,6 @@ def test_portal_application_submission_rejects_more_than_two_practice_experience
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1162,7 +1155,6 @@ def test_portal_application_submission_rejects_blank_practice_placeholder(monkey
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1239,7 +1231,6 @@ def test_portal_application_submission_rejects_missing_english_proficiency(monke
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1275,7 +1266,6 @@ def test_portal_application_submission_rejects_english_proficiency_without_attac
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1317,7 +1307,6 @@ def test_portal_application_submission_rejects_missing_parent_family_member(monk
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1375,7 +1364,6 @@ def test_portal_application_submission_accepts_single_parent_family_member(monke
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1423,7 +1411,6 @@ def test_portal_application_submission_rejects_more_than_four_achievement_record
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1476,7 +1463,6 @@ def test_portal_application_submission_rejects_incomplete_paper_achievement(monk
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1530,7 +1516,6 @@ def test_portal_application_submission_rejects_award_achievement_without_certifi
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1597,7 +1582,6 @@ def test_portal_application_submission_accepts_structured_achievement_records(mo
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }
@@ -1809,7 +1793,6 @@ def test_portal_application_submission_creates_new_record_without_deadlock(monke
                 'preferences': [
                     {
                         'preference_order': 1,
-                        'research_center_name': '智能制造联合团队',
                         'advisor_name': '刘亚',
                         'is_optional': False,
                     }

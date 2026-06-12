@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Sequence, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -518,17 +519,27 @@ class RecruitApplicationUpsert(BaseModel):
             raise ValueError("缺少最高学历/教育阶段信息")
         return self
 
-    @model_validator(mode="after")
-    def validate_resident_id_number(self) -> "RecruitApplicationUpsert":
-        id_number = _first_non_empty(self.id_number)
-        if not id_number:
-            return self
-        id_type = _first_non_empty(self.id_type, self.profile.id_type if self.profile else None)
-        if id_type and "身份证" not in id_type:
-            return self
-        self.id_number = validate_china_resident_id_number(id_number, "居民身份证号码")
-        return self
 
+class InitialScreeningConfirmationApplicationRecord(BaseModel):
+    application_id: int
+    student_id: int
+    plan_id: int
+    candidate_no: str
+    business_key: str | None = None
+    full_name: str
+    first_choice: str | None = None
+    first_choice_screening_score: float | None = None
+    second_choice: str | None = None
+    second_choice_screening_score: float | None = None
+    first_choice_screening_submitted_at: datetime | None = None
+    second_choice_screening_submitted_at: datetime | None = None
+    choice_score: float | None = None
+    choice_name: str | None = None
+    application_status: str
+    intended_advisor_name: str | None = None
+
+class InitialScreeningConfirmationApplicationListResponse(PaginationResponseBase):
+    items: list[InitialScreeningConfirmationApplicationRecord]
 
 class RecruitApplicationListResponse(PaginationResponseBase):
     items: list[RecruitApplicationRecord]

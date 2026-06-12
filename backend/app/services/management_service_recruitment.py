@@ -67,6 +67,52 @@ class RuntimeManagementStoreRecruitmentMixin:
         advisor_candidates = {item for item in advisor_candidates if item}
         return bool(advisor_candidates.intersection(expected_values))
 
+    def _resolve_rescore_screening_round(self, application: dict[str, Any], principal_summary: dict[str, Any]) -> str:
+        username, full_name = self._normalize_screening_actor_values(principal_summary)
+        expected_values = {item for item in (username, full_name) if item}
+        if not expected_values:
+            raise PermissionError("当前账号不是该申请当前轮次的责任导师")
+
+        first_choice_candidates = {
+            str(application.get("first_choice") or "").strip(),
+            str(application.get("intended_advisor_name") or "").strip(),
+        }
+        second_choice_candidates = {
+            str(application.get("second_choice") or "").strip(),
+        }
+
+        first_choice_matched = bool({item for item in first_choice_candidates if item}.intersection(expected_values))
+        second_choice_matched = bool({item for item in second_choice_candidates if item}.intersection(expected_values))
+
+        if first_choice_matched and not second_choice_matched:
+            return "first_choice"
+        if second_choice_matched and not first_choice_matched:
+            return "second_choice"
+        if first_choice_matched and second_choice_matched:
+            return "first_choice"
+        raise PermissionError("当前账号不是该申请当前轮次的责任导师")
+
+    @staticmethod
+    def _build_rescore_block_message(screening_round: str, application: dict[str, Any]) -> str:
+        first_choice_submitted = bool(application.get("first_choice_screening_submitted_at") or application.get("first_choice_screening_batch_id"))
+        has_second_choice = bool(str(application.get("second_choice") or "").strip())
+        second_choice_submitted = bool(application.get("second_choice_screening_submitted_at") or application.get("second_choice_screening_batch_id"))
+        current_status = str(application.get("application_status") or "").strip()
+        if screening_round == "first_choice":
+            if not first_choice_submitted:
+                return "第一志愿导师需要已提交后才能重新评分"
+            if has_second_choice and second_choice_submitted:
+                return "第二志愿导师已经提交，第一志愿导师不能重新评分"
+            if current_status not in {"initial_screening_confirmation", "待初筛确认", "报名终止", "initial_screening_second", "待导师初筛-第二志愿"}:
+                return "当前申请不在初筛确认或报名终止环节，无法重新评分"
+            return ""
+        second_choice_submitted = bool(application.get("second_choice_screening_submitted_at") or application.get("second_choice_screening_batch_id"))
+        if not second_choice_submitted:
+            return "第二志愿导师需要已提交后才能重新评分"
+        if current_status not in {"initial_screening_confirmation", "待初筛确认", "报名终止"}:
+            return "当前申请不在初筛确认或报名终止环节，无法重新评分"
+        return ""
+
     @staticmethod
     def _advisor_screening_submission_locked(application: dict[str, Any], screening_round: str) -> bool:
         if screening_round == "second_choice":
@@ -930,6 +976,109 @@ class RuntimeManagementStoreRecruitmentMixin:
                 recruitment_notification = self._build_recruitment_email_notification(updated_entity, review_comment=payload.comment)
                 if recruitment_notification is not None:
                     self._email_service.send_recruitment_status_update(**recruitment_notification)
+
+            return RecruitApplicationRecord(**updated_entity)
+
+    def rescore_advisor_screening_submitted_application(self, application_id: int, *, principal: Any | None = None) -> RecruitApplicationRecord:
+        principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": []})
+
+        with self._lock:
+            entity_index, entity = self._find_required("recruitment_applications", int(application_id))
+            workflow_located = self._workflow_task_index_by_business_key(str(entity.get("business_key") or ""))
+            if workflow_located is None:
+                raise ValueError("未找到对应的流程任务")
+            task_index, task = workflow_located
+            current_stage = self._infer_registered_portal_current_stage(entity, task)
+            current_node_key = str(task.get("node_key") or "").strip()
+            application_status = str(entity.get("application_status") or "").strip()
+
+            if current_stage == "camp_interview" or current_node_key == "camp_interview" or application_status == "入营面试":
+                raise ValueError("因为该学生已经到了面试阶段所以无法重新评分")
+            is_confirmation_stage = current_stage == "initial_screening_confirmation" or current_node_key == "initial_screening_confirmation" or application_status == "待初筛确认"
+            is_terminated_stage = current_stage == "terminated" or application_status == "报名终止"
+            is_second_screening_stage = current_stage == "initial_screening_second" or current_node_key == "initial_screening_second" or application_status == "待导师初筛-第二志愿"
+            if not is_confirmation_stage and not is_terminated_stage and not is_second_screening_stage:
+                raise ValueError("当前申请不在初筛确认或报名终止环节，无法重新评分")
+
+            screening_round = self._resolve_rescore_screening_round(entity, principal_summary)
+            block_message = self._build_rescore_block_message(screening_round, entity)
+            if block_message:
+                raise ValueError(block_message)
+
+            if screening_round not in {"first_choice", "second_choice"}:
+                screening_round = "second_choice" if entity.get("second_choice_screening_submitted_at") else "first_choice"
+
+            updated_entity = dict(entity)
+            if screening_round == "second_choice":
+                updated_entity["application_status"] = "待导师初筛-第二志愿"
+                updated_entity["advisor_screening_round"] = "second_choice"
+                updated_entity["second_choice_screening_submitted_at"] = None
+                updated_entity["second_choice_screening_score"] = None
+                updated_entity["second_choice_screening_batch_id"] = None
+            else:
+                updated_entity["application_status"] = "待导师初筛-第一志愿"
+                updated_entity["advisor_screening_round"] = "first_choice"
+                updated_entity["first_choice_screening_submitted_at"] = None
+                updated_entity["first_choice_screening_score"] = None
+                updated_entity["first_choice_screening_batch_id"] = None
+
+            updated_entity["advisor_screening_status"] = "pending"
+            updated_entity["advisor_screening_submitted_at"] = None
+            updated_entity["initial_screening_status"] = None
+            updated_entity["initial_screening_result"] = None
+            updated_entity["initial_screening_confirmed_at"] = None
+            updated_entity["initial_screening_confirmer_username"] = None
+            updated_entity["initial_screening_confirmer_name"] = None
+            updated_entity["initial_screening_notification_status"] = None
+            updated_entity["initial_screening_notification_sent_at"] = None
+            updated_entity["next_stage_name"] = None
+            updated_entity["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            updated_task = dict(task)
+            updated_task["node_key"] = "advisor_screening"
+            updated_task["current_node"] = "导师初筛"
+            updated_task["current_handler"] = str(updated_entity.get("first_choice") or updated_entity.get("second_choice") or updated_entity.get("intended_advisor_name") or "导师")
+            updated_task["status"] = "处理中"
+            updated_task["latest_comment"] = "重新评分回退至导师初筛环节"
+            updated_task.setdefault("history", []).append(
+                {
+                    "operated_at": updated_entity["updated_at"],
+                    "operator_username": principal_summary["username"],
+                    "operator_full_name": principal_summary["full_name"],
+                    "action": "rescore_advisor_screening_submitted",
+                    "action_label": "重新评分",
+                    "from_node": str(task.get("current_node") or "初筛确认"),
+                    "to_node": "导师初筛",
+                    "result_status": "处理中",
+                    "comment": "重新评分回退至导师初筛环节",
+                }
+            )
+            self._ensure_workflow_engine_metadata(updated_task)
+
+            operation_log = self._record_operation(
+                "招生管理",
+                "报名申请",
+                str(application_id),
+                "重新评分",
+                f'将 {updated_entity.get("student_name") or ""} 的已提交记录回退至导师初筛环节',
+                operator_username=principal_summary["username"],
+            )
+
+            try:
+                self._postgres_store.rollback_recruitment_application_stage(
+                    updated_entity,
+                    updated_task,
+                    clear_background_assessments=False,
+                    clear_initial_screening_confirmation=True,
+                    operation_log=operation_log,
+                    counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+                )
+            except Exception as exc:
+                logger.exception("Rescore submitted advisor-screening application persistence failed")
+                raise RuntimeError("重新评分回退持久化失败，请稍后重试或联系管理员") from exc
+
+            self._list("recruitment_applications")[entity_index] = updated_entity
+            self._list("workflow_tasks")[task_index] = updated_task
 
             return RecruitApplicationRecord(**updated_entity)
 

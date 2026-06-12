@@ -525,6 +525,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
             if normalized_status == "advisor_screening_pending":
                 where_clauses.append("app.application_status LIKE %s")
                 params.append("initial_screening_%")
+                where_clauses.append("app.application_status <> 'initial_screening_confirmation'")
                 where_clauses.append("app.advisor_screening_status = 'pending'")
             elif normalized_status == "initial_screening_confirmation":
                 where_clauses.append("app.application_status = 'initial_screening_confirmation'")

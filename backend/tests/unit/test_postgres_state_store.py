@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.services.postgres_state_store import PostgresStateStore
@@ -717,14 +719,12 @@ def test_get_portal_student_detail_prefers_saved_draft_over_existing_application
                         {
                             "preference_order": 1,
                             "team_id": 12,
-                            "research_center_name": "新研究中心",
                             "advisor_user_id": 22,
                             "advisor_name": "新导师",
                             "is_optional": False,
                         }
                     ],
                     "practice_experiences": [
-                        {
                             "start_month": "2025-01",
                             "end_month": "2025-03",
                             "organization_name": "上海人工智能实验室",
@@ -780,7 +780,6 @@ def test_get_portal_student_detail_prefers_saved_draft_over_existing_application
                 {
                     "preference_order": 1,
                     "team_id": 11,
-                    "research_center_name": "旧研究中心",
                     "advisor_user_id": 21,
                     "advisor_name": "旧导师",
                     "is_optional": False,
@@ -802,9 +801,6 @@ def test_get_portal_student_detail_prefers_saved_draft_over_existing_application
     item = store.get_portal_student_detail(7)
 
     assert item is not None
-    assert item["application_draft"]["source_channel"] == "其他"
-    assert item["application_draft"]["source_channel_other"] == "老师线下宣讲"
-    assert item["application_draft"]["preferences"][0]["research_center_name"] == "新研究中心"
     assert item["application_draft"]["preferences"][0]["advisor_name"] == "新导师"
     assert item["application_draft"]["practice_experiences"][0]["organization_name"] == "上海人工智能实验室"
     assert item["application_draft"]["personal_statement"]["growth_experience_text"] == "新的成长经历"
@@ -974,6 +970,42 @@ def test_derive_portal_application_draft_restores_ai_personal_statement_fields()
     assert draft["personal_statement"]["ai_industry_opinion"] == "行业不同观点"
 
 
+def test_merge_portal_application_draft_preserves_existing_non_empty_nested_fields() -> None:
+    merged = PostgresStateStore._merge_portal_application_draft(
+        {
+            "selected_plan_id": 3,
+            "personal_statement": {
+                "personal_statement_text": "原始陈述",
+                "resume_attachment_url": "/api/v1/portal/attachments/resume-old.pdf",
+                "supporting_material_attachment_url": "/api/v1/portal/attachments/materials-old.zip",
+            },
+            "english_proficiencies": [
+                {
+                    "exam_name": "IELTS",
+                    "score_text": "7.0",
+                    "certificate_attachment_url": "/api/v1/portal/attachments/ielts-old.pdf",
+                }
+            ],
+        },
+        {
+            "personal_statement": {
+                "personal_statement_text": "",
+                "resume_attachment_url": None,
+                "supporting_material_attachment_url": None,
+                "ai_problem_statement": "新问题陈述",
+            },
+            "english_proficiencies": [],
+        },
+    )
+
+    assert merged is not None
+    assert merged["personal_statement"]["personal_statement_text"] == "原始陈述"
+    assert merged["personal_statement"]["resume_attachment_url"] == "/api/v1/portal/attachments/resume-old.pdf"
+    assert merged["personal_statement"]["supporting_material_attachment_url"] == "/api/v1/portal/attachments/materials-old.zip"
+    assert merged["personal_statement"]["ai_problem_statement"] == "新问题陈述"
+    assert merged["english_proficiencies"][0]["certificate_attachment_url"] == "/api/v1/portal/attachments/ielts-old.pdf"
+
+
 def test_sync_portal_student_persists_application_draft_json(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor()
@@ -999,7 +1031,6 @@ def test_sync_portal_student_persists_application_draft_json(monkeypatch) -> Non
                 "preferences": [
                     {
                         "preference_order": 1,
-                        "research_center_name": "具身智能中心",
                         "advisor_name": "刘亚",
                         "is_optional": False,
                     }
@@ -1009,10 +1040,111 @@ def test_sync_portal_student_persists_application_draft_json(monkeypatch) -> Non
         None,
     )
 
-    insert_sql, insert_params = cursor.executed[0]
-    assert "application_draft" not in insert_sql
+    insert_sql, insert_params = next((sql, params) for sql, params in cursor.executed if "INSERT INTO dtlms_portal_students" in sql)
     assert "candidate_no" not in insert_sql
-    assert len(insert_params) == 36
+    assert len(insert_params) == 37
+    saved_draft = json.loads(insert_params[31])
+    assert saved_draft["source_channel"] == "其他"
+    assert saved_draft["source_channel_other"] == "老师宣讲"
+    assert saved_draft["preferences"][0]["advisor_name"] == "刘亚"
+
+
+def test_sync_portal_student_preserves_existing_official_fields_when_payload_clears_them(monkeypatch) -> None:
+    store = PostgresStateStore()
+    cursor = FakeCursor(
+        fetchone_results=[
+            {
+                "gender": "女",
+                "birth_date": "1999-01-01",
+                "ethnic_group": "汉族",
+                "native_place": "江苏南京",
+                "marital_status": "未婚",
+                "religious_belief": "无",
+                "id_type": "身份证",
+                "mailing_address": "上海市浦东新区",
+                "graduation_school": "复旦大学",
+                "highest_degree": "硕士",
+                "intended_field": "人工智能",
+                "political_status": "共青团员",
+                "english_level": "IELTS:7.0",
+                "family_info": "[]",
+                "education_experience": "[]",
+                "practice_experience": "[]",
+                "personal_profile": "原个人简介",
+                "recommendation_notes": "[]",
+                "personal_statement_text": "原个人陈述",
+                "signed_agreement": True,
+                "selected_plan_id": 3,
+                "selected_team_id": 11,
+                "selected_team_name": "原研究中心",
+                "selected_advisor_user_id": 101,
+                "selected_advisor_name": "原导师",
+                "self_evaluation": "原自我评价",
+                "submitted_at": "2026-05-01 10:20:30",
+                "account_status": "启用",
+                "created_at": "2026-04-01 09:00:00",
+                "updated_at": "2026-05-01 10:20:30",
+            }
+        ]
+    )
+    connection = FakeConnection(cursor)
+
+    monkeypatch.setattr(store, "ensure_schema", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database_name, autocommit=False: connection)
+    monkeypatch.setattr(store, "_sync_runtime_counters_in_tx", lambda cur, counters: None)
+    monkeypatch.setattr(store, "_sync_operation_log_in_tx", lambda cur, operation_log: None)
+    monkeypatch.setattr(store, "_derive_portal_profile", lambda payload: None)
+
+    store.sync_portal_student(
+        {
+            "id": 7,
+            "full_name": "张三",
+            "phone_number": "13800001111",
+            "email": "zhangsan@example.com",
+            "id_number": "32000019990101123X",
+            "password_hash": "hash",
+            "gender": None,
+            "birth_date": None,
+            "ethnic_group": None,
+            "native_place": None,
+            "marital_status": None,
+            "religious_belief": None,
+            "id_type": None,
+            "mailing_address": None,
+            "graduation_school": None,
+            "highest_degree": None,
+            "intended_field": None,
+            "political_status": None,
+            "english_level": None,
+            "family_info": None,
+            "education_experience": None,
+            "practice_experience": None,
+            "personal_profile": None,
+            "recommendation_notes": None,
+            "personal_statement_text": None,
+            "signed_agreement": False,
+            "selected_plan_id": None,
+            "selected_team_id": None,
+            "selected_team_name": None,
+            "selected_advisor_user_id": None,
+            "selected_advisor_name": None,
+            "application_draft": {"submitted_at": None},
+            "self_evaluation": None,
+            "submitted_at": None,
+            "account_status": "启用",
+            "created_at": "2026-04-01 09:00:00",
+            "updated_at": "2026-05-01 10:20:30",
+        },
+        None,
+    )
+
+    insert_sql, params = next((sql, params) for sql, params in cursor.executed if "INSERT INTO dtlms_portal_students" in sql)
+    assert params[6] == "女"
+    assert params[7] == "1999-01-01"
+    assert params[14] == "复旦大学"
+    assert params[22] == "原个人简介"
+    assert params[24] == "原个人陈述"
+    assert params[32] == "原自我评价"
 
 
 def test_get_recruitment_application_detail_returns_full_portal_v2_sections(monkeypatch) -> None:
@@ -1191,7 +1323,7 @@ def test_sync_portal_application_submission_syncs_workflow_task_when_provided(mo
     assert connection.committed is True
 
 
-def test_sync_portal_application_submission_allows_null_research_center_name(monkeypatch) -> None:
+def test_sync_portal_application_submission_allows_null_team_name(monkeypatch) -> None:
     store = PostgresStateStore()
     cursor = FakeCursor(fetchone_results=[None])
     connection = FakeConnection(cursor)
@@ -1209,7 +1341,6 @@ def test_sync_portal_application_submission_allows_null_research_center_name(mon
                 {
                     "preference_order": 1,
                     "team_id": None,
-                    "research_center_name": None,
                     "advisor_user_id": 21,
                     "advisor_name": "张文蔚",
                     "is_optional": False,
@@ -1247,15 +1378,16 @@ def test_sync_portal_application_submission_allows_null_research_center_name(mon
     )
 
     preference_inserts = [
-        params
+        (sql, params)
         for sql, params in cursor.executed
         if "INSERT INTO dtlms_portal_application_preferences" in sql
     ]
 
     assert len(preference_inserts) == 1
-    assert preference_inserts[0][2] is None
-    assert preference_inserts[0][3] == ""
-    assert preference_inserts[0][5] == "张文蔚"
+    _, params = preference_inserts[0]
+    assert params[2] is None
+    assert params[3] == ""
+    assert params[5] == "张文蔚"
 
 
 def test_derive_portal_profile_includes_id_card_collage_url() -> None:
@@ -1303,7 +1435,6 @@ def test_seed_portal_students_persists_application_draft_payload() -> None:
 
     insert_sql, params = next((sql, params) for sql, params in cursor.executed if "INSERT INTO dtlms_portal_students" in sql)
 
-    assert "application_draft" not in insert_sql
     assert len(params) == 34
 
 

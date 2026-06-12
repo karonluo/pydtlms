@@ -96,6 +96,89 @@ def test_download_recruitment_application_template_returns_blank_excel(monkeypat
     assert "attachment; filename*=UTF-8''" in response.headers["content-disposition"]
 
 
+def test_initial_screening_confirmation_applications_endpoint_uses_dedicated_query(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "recruiter", ["recruitment:read"])
+
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_list_initial_screening_confirmation_applications(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "items": [],
+            "total": 0,
+            "page": kwargs["page"],
+            "page_size": kwargs["page_size"],
+        }
+
+    monkeypatch.setattr("app.api.v1.recruitment.list_initial_screening_confirmation_applications", fake_list_initial_screening_confirmation_applications)
+
+    response = client.get(
+        "/api/v1/recruitment/applications/initial-screening-confirmation",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"keyword": "SH2026", "plan_id": 5, "advisor_names": "刘亚,王强", "page": 2, "page_size": 20},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+    assert captured_kwargs == {
+        "keyword": "SH2026",
+        "plan_id": 5,
+        "advisor_names": ["刘亚", "王强"],
+        "page": 2,
+        "page_size": 20,
+    }
+
+
+def test_rescore_advisor_screening_submitted_endpoint_delegates_to_service(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "advisor.liu", ["recruitment_advisor_screening:write"])
+
+    captured: dict[str, object] = {}
+
+    def fake_rescore_advisor_screening_submitted_application(application_id: int, principal):
+        captured["application_id"] = application_id
+        captured["principal_username"] = principal.username
+        return {
+            "id": application_id,
+            "plan_id": 5,
+            "business_key": "SH202605010001",
+            "student_name": "测试学生",
+            "material_status": "材料齐全",
+            "application_status": "待导师初筛-第一志愿",
+            "graduation_school": "东南大学",
+            "highest_degree": "硕士",
+            "intended_field": "人工智能",
+        }
+
+    monkeypatch.setattr("app.api.v1.recruitment.rescore_advisor_screening_submitted_application", fake_rescore_advisor_screening_submitted_application)
+
+    response = client.post(
+        "/api/v1/recruitment/applications/advisor-screening-submitted/123/rescore",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["application_status"] == "待导师初筛-第一志愿"
+    assert captured == {"application_id": 123, "principal_username": "advisor.liu"}
+
+
+def test_rescore_advisor_screening_submitted_endpoint_returns_bad_request_for_interview_stage(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "advisor.liu", ["recruitment_advisor_screening:write"])
+
+    def fake_rescore_advisor_screening_submitted_application(application_id: int, principal):
+        del application_id, principal
+        raise ValueError("因为该学生已经到了面试阶段所以无法重新评分")
+
+    monkeypatch.setattr("app.api.v1.recruitment.rescore_advisor_screening_submitted_application", fake_rescore_advisor_screening_submitted_application)
+
+    response = client.post(
+        "/api/v1/recruitment/applications/advisor-screening-submitted/123/rescore",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "因为该学生已经到了面试阶段所以无法重新评分"
+
+
 def test_delete_recruitment_plan_endpoint_returns_no_content(monkeypatch, client: TestClient) -> None:
     access_token = _install_principal_resolution(monkeypatch, "recruiter", ["recruitment:write"])
     deleted_plan_ids: list[int] = []

@@ -944,10 +944,22 @@ class PostgresStateStoreCoreMixin:
 
     @classmethod
     def _merge_portal_application_draft(cls, base_draft: dict[str, Any] | None, overlay_draft: dict[str, Any] | None) -> dict[str, Any] | None:
+        def merge_value(existing_value: Any, new_value: Any) -> Any:
+            if isinstance(existing_value, dict) and isinstance(new_value, dict):
+                merged_dict = dict(existing_value)
+                for key, value in new_value.items():
+                    merged_dict[key] = merge_value(merged_dict.get(key), value)
+                return merged_dict
+            if isinstance(existing_value, list) and isinstance(new_value, list):
+                return new_value if new_value else existing_value
+            if new_value in (None, "", [], {}):
+                return existing_value
+            return new_value
+
         merged: dict[str, Any] = dict(base_draft or {})
         if isinstance(overlay_draft, dict):
             for key, value in overlay_draft.items():
-                merged[key] = value
+                merged[key] = merge_value(merged.get(key), value)
 
         has_content = any(value not in (None, "", [], {}) for key, value in merged.items() if key != "selected_plan_id") or merged.get("selected_plan_id") is not None
         return merged if has_content else None

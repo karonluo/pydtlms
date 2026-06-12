@@ -811,7 +811,6 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
         preferences=[
             {
                 "preference_order": 1,
-                "research_center_name": team_name,
                 "team_id": 1,
                 "advisor_name": advisor_name,
                 "advisor_user_id": 11,
@@ -1123,7 +1122,7 @@ def test_get_recruitment_portal_application_detail_maps_only_student_filled_sect
         },
         "source_channel": "其他",
         "source_channel_other": "老师宣讲",
-        "preferences": [{"preference_order": 1, "research_center_name": "具身智能", "advisor_name": "刘亚", "is_optional": False}],
+        "preferences": [{"preference_order": 1, "advisor_name": "刘亚", "is_optional": False}],
         "education_experiences": [{"sort_order": 1, "education_stage": "本科毕业", "school_name": "江南大学"}],
         "practice_experiences": [{"organization_name": "某研究院"}],
         "english_proficiencies": [{"exam_name": "IELTS", "score_text": "7.0"}],
@@ -2644,6 +2643,455 @@ def test_rollback_registered_portal_student_stage_moves_confirmation_back_to_adv
     assert fake_mailer.recruitment_stage_rollback_calls[-1]["target_stage_label"] == "导师初筛-第一志愿"
 
 
+def test_rescore_advisor_screening_submitted_application_rolls_task_back_to_advisor_screening(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 91,
+            "full_name": "重新评分学生",
+            "email": "rescore-stage@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009991",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-stage@example.com",
+                "portal_student_id": 91,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 93}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="passed", comment="进入面试前重新评分"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    result = store.rescore_advisor_screening_submitted_application(
+        application.id,
+        principal={"username": "advisor.liu", "full_name": "刘亚", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert result.application_status == "待导师初筛-第一志愿"
+    assert current_task["node_key"] == "advisor_screening"
+    assert current_task["current_node"] == "导师初筛"
+    assert current_application["application_status"] == "待导师初筛-第一志愿"
+    assert current_application["advisor_screening_status"] == "pending"
+    assert current_application["initial_screening_status"] is None
+    assert fake_postgres.rollback_recruitment_applications[-1]["clear_initial_screening_confirmation"] is True
+
+
+def test_rescore_advisor_screening_submitted_application_rejects_interview_stage(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 92,
+            "full_name": "面试阶段学生",
+            "email": "rescore-interview@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009992",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-interview@example.com",
+                "portal_student_id": 92,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 93}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="passed", comment="进入面试阶段"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="因为该学生已经到了面试阶段所以无法重新评分"):
+        store.rescore_advisor_screening_submitted_application(
+            application.id,
+            principal={"username": "advisor.liu", "full_name": "刘亚", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+        )
+
+
+def test_rescore_advisor_screening_submitted_application_rejects_first_choice_after_second_choice_submitted(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 93,
+            "full_name": "第一志愿学生",
+            "email": "rescore-first-choice@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009993",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-first-choice@example.com",
+                "portal_student_id": 93,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 93}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 91}],
+        ),
+        principal={
+            "username": "advisor.wang",
+            "full_name": "王青",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="第二志愿导师已经提交，第一志愿导师不能重新评分"):
+        store.rescore_advisor_screening_submitted_application(
+            application.id,
+            principal={"username": "advisor.liu", "full_name": "刘亚", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+        )
+
+
+def test_rescore_advisor_screening_submitted_application_allows_first_choice_without_second_choice_at_confirmation(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 94,
+            "full_name": "无第二志愿学生",
+            "email": "rescore-first-choice-allowed@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009994",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-first-choice-allowed@example.com",
+                "portal_student_id": 94,
+                "second_choice": "",
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 93}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="passed", comment="允许第一志愿导师重新评分"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    result = store.rescore_advisor_screening_submitted_application(
+        application.id,
+        principal={"username": "advisor.liu", "full_name": "刘亚", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+    )
+
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert result.application_status == "待导师初筛-第一志愿"
+    assert current_application["application_status"] == "待导师初筛-第一志愿"
+    assert current_application["advisor_screening_status"] == "pending"
+
+
+def test_rescore_advisor_screening_submitted_application_allows_second_choice_only_at_confirmation(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 95,
+            "full_name": "第二志愿学生",
+            "email": "rescore-second-choice@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009995",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-second-choice@example.com",
+                "portal_student_id": 95,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 93}],
+        ),
+        principal={
+            "username": "advisor.wang",
+            "full_name": "王青",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="第二志愿导师只有在初筛确认环节才能重新评分"):
+        store.rescore_advisor_screening_submitted_application(
+            application.id,
+            principal={"username": "advisor.wang", "full_name": "王青", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+        )
+
+    store.confirm_initial_screening(
+        application.id,
+        InitialScreeningConfirmationRequest(result="passed", comment="允许第二志愿导师重新评分"),
+        principal={
+            "username": "academy.confirm",
+            "full_name": "初筛确认人",
+            "roles": ["academy_admin"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    result = store.rescore_advisor_screening_submitted_application(
+        application.id,
+        principal={"username": "advisor.wang", "full_name": "王青", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+    )
+
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert result.application_status == "待导师初筛-第二志愿"
+    assert current_application["application_status"] == "待导师初筛-第二志愿"
+    assert current_application["advisor_screening_round"] == "second_choice"
+
+
+def test_rescore_advisor_screening_submitted_application_allows_first_choice_at_termination(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 96,
+            "full_name": "第一志愿终止学生",
+            "email": "rescore-first-choice-terminated@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009996",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-first-choice-terminated@example.com",
+                "portal_student_id": 96,
+                "second_choice": "",
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 72}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert current_application["application_status"] == "报名终止"
+    assert current_application["first_choice_screening_submitted_at"] is not None
+
+    result = store.rescore_advisor_screening_submitted_application(
+        application.id,
+        principal={"username": "advisor.liu", "full_name": "刘亚", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+    )
+
+    refreshed_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert result.application_status == "待导师初筛-第一志愿"
+    assert refreshed_application["application_status"] == "待导师初筛-第一志愿"
+    assert refreshed_application["advisor_screening_round"] == "first_choice"
+    assert refreshed_application["first_choice_screening_submitted_at"] is None
+
+
+def test_rescore_advisor_screening_submitted_application_allows_second_choice_at_termination(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    store = RuntimeManagementStore()
+    store.state.setdefault("portal_students", []).insert(
+        0,
+        {
+            "id": 97,
+            "full_name": "第二志愿终止学生",
+            "email": "rescore-second-choice-terminated@example.com",
+            "account_status": "启用",
+            "phone_number": "13800009997",
+        },
+    )
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "rescore-second-choice-terminated@example.com",
+                "portal_student_id": 97,
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 91}],
+        ),
+        principal={
+            "username": "advisor.liu",
+            "full_name": "刘亚",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+    store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[{"application_id": application.id, "advisor_score": 75}],
+        ),
+        principal={
+            "username": "advisor.wang",
+            "full_name": "王青",
+            "roles": ["advisor"],
+            "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"],
+        },
+    )
+
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert current_application["application_status"] == "报名终止"
+    assert current_application["second_choice_screening_submitted_at"] is not None
+
+    result = store.rescore_advisor_screening_submitted_application(
+        application.id,
+        principal={"username": "advisor.wang", "full_name": "王青", "roles": ["advisor"], "permissions": ["recruitment:read", "recruitment:write", "workflow:read", "workflow:write"]},
+    )
+
+    refreshed_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert result.application_status == "待导师初筛-第二志愿"
+    assert refreshed_application["application_status"] == "待导师初筛-第二志愿"
+    assert refreshed_application["second_choice_screening_submitted_at"] is None
+
+
 def test_rollback_registered_portal_student_stage_moves_camp_interview_back_to_qualification_review(monkeypatch) -> None:
     fake_postgres = FakePostgresStateStore()
     fake_mailer = FakeNotificationEmailService()
@@ -3947,7 +4395,6 @@ def test_export_registered_portal_students_includes_undergraduate_fields(monkeyp
             "preferences": [
                 {
                     "preference_order": 1,
-                    "research_center_name": available_team.team_name,
                     "team_id": None,
                     "advisor_name": available_team.lead_advisor_name,
                     "advisor_user_id": None,
@@ -4050,7 +4497,6 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
             "preferences": [
                 {
                     "preference_order": 1,
-                    "research_center_name": available_team.team_name,
                     "team_id": None,
                     "advisor_name": available_team.lead_advisor_name,
                     "advisor_user_id": None,
@@ -4186,13 +4632,11 @@ def test_build_registered_portal_student_export_row_does_not_truncate_repeated_g
                 "preferences": [
                     {
                         "preference_order": 1,
-                        "research_center_name": "方向一",
                         "advisor_name": "导师甲",
                         "is_optional": False,
                     },
                     {
                         "preference_order": 2,
-                        "research_center_name": "方向二",
                         "advisor_name": "导师乙",
                         "is_optional": True,
                     },
@@ -4217,7 +4661,6 @@ def test_build_registered_portal_student_export_row_does_not_truncate_repeated_g
                 "preferences": [
                     {
                         "preference_order": 1,
-                        "research_center_name": "唯一方向",
                         "advisor_name": "导师丙",
                         "is_optional": False,
                     }
@@ -4456,7 +4899,6 @@ def test_submit_portal_application_allows_advisor_only_preference_without_team(m
     student_id = next(item["id"] for item in store.state["portal_students"] if item["email"] == "advisor-only-submit@example.com")
     payload_data = _build_portal_application_payload(available_plan.id, "智能制造联合团队", "刘亚").model_dump(mode="python")
     payload_data["preferences"][0]["team_id"] = None
-    payload_data["preferences"][0]["research_center_name"] = None
     payload_data["selected_team_id"] = None
     payload_data["selected_team_name"] = None
 
@@ -5981,7 +6423,6 @@ def test_portal_application_upsert_requires_primary_preference_advisor() -> None
     payload["preferences"] = [
         {
             "preference_order": 1,
-            "research_center_name": "智能制造联合团队",
             "team_id": 1,
             "advisor_name": "",
             "advisor_user_id": None,
@@ -6065,7 +6506,6 @@ def test_portal_application_draft_upsert_treats_blank_preference_ids_as_unselect
     payload["preferences"] = [
         {
             "preference_order": 1,
-            "research_center_name": "智能制造联合团队",
             "team_id": "",
             "advisor_name": "刘亚",
             "advisor_user_id": "",
@@ -6104,7 +6544,6 @@ def test_portal_application_draft_upsert_allows_blank_second_preference_without_
     payload["preferences"] = [
         {
             "preference_order": 1,
-            "research_center_name": "智能制造联合团队",
             "team_id": 1,
             "advisor_name": "刘亚",
             "advisor_user_id": 11,

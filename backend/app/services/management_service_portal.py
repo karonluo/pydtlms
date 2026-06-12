@@ -445,7 +445,20 @@ class RuntimeManagementStorePortalMixin:
         selected_advisor_user_id: int | None,
         advisor_name: str | None,
         submitted_at: str | None,
+        existing_draft: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        def merge_value(existing_value: Any, new_value: Any) -> Any:
+            if isinstance(existing_value, dict) and isinstance(new_value, dict):
+                merged_dict = dict(existing_value)
+                for key, value in new_value.items():
+                    merged_dict[key] = merge_value(merged_dict.get(key), value)
+                return merged_dict
+            if isinstance(existing_value, list) and isinstance(new_value, list):
+                return new_value if new_value else existing_value
+            if new_value in (None, "", [], {}):
+                return existing_value
+            return new_value
+
         preferences: list[dict[str, Any]] = []
         for item in sorted(payload.preferences, key=lambda preference: preference.preference_order):
             resolved_advisor = self._resolve_portal_advisor_selection(
@@ -477,7 +490,7 @@ class RuntimeManagementStorePortalMixin:
             personal_statement["personal_statement_text"] = payload.personal_statement_text
         declaration = payload.declaration.model_dump(mode="python") if payload.declaration is not None else {}
         declaration.setdefault("has_read_declaration", bool(payload.signed_agreement))
-        return {
+        draft = {
             "selected_plan_id": payload.plan_id,
             "selected_advisor_user_id": selected_advisor_user_id,
             "source_channel": payload.source_channel,
@@ -492,6 +505,12 @@ class RuntimeManagementStorePortalMixin:
             "declaration": declaration,
             "submitted_at": submitted_at,
         }
+        if isinstance(existing_draft, dict):
+            merged_draft = dict(existing_draft)
+            for key, value in draft.items():
+                merged_draft[key] = merge_value(merged_draft.get(key), value)
+            return merged_draft
+        return draft
 
     @staticmethod
     def _resolve_choice_id_from_preferences(preferences: list[dict[str, Any]], index: int) -> int | None:
@@ -1004,6 +1023,7 @@ class RuntimeManagementStorePortalMixin:
                 selected_advisor_user_id,
                 advisor_name,
                 student.get("submitted_at"),
+                student.get("application_draft") if isinstance(student.get("application_draft"), dict) else None,
             )
 
             student.update(
@@ -1082,6 +1102,7 @@ class RuntimeManagementStorePortalMixin:
                 selected_advisor_user_id,
                 advisor_name,
                 submitted_at,
+                student.get("application_draft") if isinstance(student.get("application_draft"), dict) else None,
             )
             preference_items = application_draft.get("preferences", []) if isinstance(application_draft.get("preferences"), list) else []
             preference_advisors = [item.get("advisor_name") for item in preference_items if item.get("advisor_name")]
