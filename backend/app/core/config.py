@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     postgres_user: str = "postgres"
     postgres_password: str = "Pass@@word123!"
     postgres_db: str = "db_dtlms"
+    postgres_backup_db: str = "db_dtlms_backup"
     postgres_schema: str = "public"
     sqlalchemy_echo: bool = False
 
