@@ -1,9 +1,7 @@
--- 获取已提交清单
--- 导师属于第一志愿的已提交
+-- 获取待提交清单
 SELECT
   stu.ID AS student_id,
-  ra.application_status,
-  ra.candidate_no, -- 学生报名号
+  ra.candidate_no, -- 报名号
   ra.business_key,
   stu.full_name, -- 学生姓名
   ra.ID AS application_id,
@@ -15,22 +13,20 @@ SELECT
   ra.second_choice,
   ra.second_choice_id,
   ra.second_choice_screening_score,
-  CASE WHEN ra.first_choice_screening_score < 80 THEN '未通过' ELSE '通过' END AS is_passed,
-  '第一志愿' AS choice_name -- 初筛轮次
+  
+  '第一志愿' AS choice_name -- 待提交属于哪一个志愿（初筛轮次）
 FROM
   dtlms_portal_students AS stu
   LEFT JOIN dtlms_recruitment_applications AS ra ON stu.ID = ra.portal_student_id 
 WHERE
   ( first_choice = {传入当前登录导师姓名} OR first_choice_id = {传入当前登录导师ID} ) 
-  AND ( first_choice_screening_submitted_at IS NOT NULL ) 
-  AND ra.application_status != 'initial_screening_first' 
-UNION ALL
--- 导师属于第二志愿的已提交
+  AND ( first_choice_screening_submitted_at IS NULL ) 
+  AND ra.application_status = 'initial_screening_first'
+  UNION ALL
 SELECT
   stu.ID AS student_id,
-  ra.application_status,
-  ra.candidate_no, -- 学生报名号
-  ra.business_key, 
+  ra.candidate_no,
+  ra.business_key,
   stu.full_name, -- 学生姓名
   ra.ID AS application_id,
   ra.first_choice_screening_submitted_at,
@@ -41,14 +37,12 @@ SELECT
   ra.second_choice,
   ra.second_choice_id,
   ra.second_choice_screening_score,
-  CASE WHEN ra.second_choice_screening_score < 80 THEN '未通过' ELSE '通过' END AS is_passed,
-  '第二志愿' AS choice_name -- 初筛轮次
+  
+  '第二志愿' AS choice_name -- 待提交属于哪一个志愿（初筛轮次）
 FROM
   dtlms_portal_students AS stu
   LEFT JOIN dtlms_recruitment_applications AS ra ON stu.ID = ra.portal_student_id 
 WHERE
   ( second_choice = {传入当前登录导师姓名} OR second_choice_id = {传入当前登录导师ID} ) 
-  AND ( second_choice_screening_submitted_at IS NOT NULL ) 
-  AND ra.application_status != 'initial_screening_first'
-  AND ra.application_status != 'initial_screening_second' 
-  
+  AND ( second_choice_screening_submitted_at IS NULL AND first_choice_screening_submitted_at IS NOT NULL)
+  AND ra.application_status = 'initial_screening_second'

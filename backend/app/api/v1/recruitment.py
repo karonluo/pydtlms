@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -49,7 +50,11 @@ from app.services.dashboard_service import (
     update_recruitment_application,
     update_recruitment_plan,
 )
-from app.services.advisor_screening_submitted_service import list_advisor_screening_submitted_applications
+from app.services.advisor_screening_pending_service import list_advisor_screening_pending_applications
+from app.services.advisor_screening_submitted_sql_service import (
+    list_advisor_screening_submitted_applications,
+    query_store as advisor_screening_submitted_query_store,
+)
 from app.services.initial_screening_confirmation_service import list_initial_screening_confirmation_applications
 from app.services.recruitment_excel_service import parse_recruitment_template
 
@@ -179,13 +184,28 @@ def recruitment_advisor_screening_submitted_applications(
     principal: Principal = Depends(require_permissions("recruitment_advisor_screening:read")),
 ) -> InitialScreeningConfirmationApplicationListResponse:
     advisor_name = principal.full_name.strip() or None
-    advisor_user_id = None
+    advisor_user_id = advisor_screening_submitted_query_store._advisor_user_id_by_username(principal.username)
     return list_advisor_screening_submitted_applications(
         keyword=keyword,
         advisor_name=advisor_name,
         advisor_user_id=advisor_user_id,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/applications/advisor-screening-pending")
+def recruitment_advisor_screening_pending_applications(
+    keyword: str | None = Query(default=None),
+    principal: Principal = Depends(require_permissions("recruitment_advisor_screening:read")),
+) -> list[dict[str, Any]]:
+    advisor_name = principal.full_name.strip() or None
+    advisor_user_id = None
+    return list_advisor_screening_pending_applications(
+        keyword=keyword,
+        advisor_username=principal.username,
+        advisor_name=advisor_name,
+        advisor_user_id=advisor_user_id,
     )
 
 

@@ -239,9 +239,12 @@ export type AdvisorScreeningSubmittedApplicationRecord = {
   second_choice_screening_submitted_at?: string | null
   first_choice?: string | null
   first_choice_id?: number | null
+  first_choice_screening_score?: number | null
   second_choice?: string | null
   second_choice_id?: number | null
+  second_choice_screening_score?: number | null
   choice_score?: number | null
+  is_passed?: string | null
   choice_name?: string | null
   application_status?: string | null
   intended_advisor_name?: string | null
@@ -249,6 +252,24 @@ export type AdvisorScreeningSubmittedApplicationRecord = {
 
 
 export type AdvisorScreeningSubmittedApplicationListResponse = PagedResponse<AdvisorScreeningSubmittedApplicationRecord>
+
+
+export type AdvisorScreeningPendingApplicationRecord = {
+  student_id: number
+  candidate_no: string
+  business_key?: string | null
+  full_name: string
+  application_id: number
+  first_choice_screening_submitted_at?: string | null
+  second_choice_screening_submitted_at?: string | null
+  first_choice?: string | null
+  first_choice_id?: number | null
+  first_choice_screening_score?: number | null
+  second_choice?: string | null
+  second_choice_id?: number | null
+  second_choice_screening_score?: number | null
+  choice_name?: string | null
+}
 
 export type RecruitmentAttachmentUploadResponse = {
   category: string
@@ -399,6 +420,11 @@ export function submitAdvisorScreeningBatch(payload: AdvisorScreeningBatchSubmit
 
 export function listAdvisorScreeningSubmittedApplications(params?: PaginationParams & { keyword?: string }) {
   return http.get<AdvisorScreeningSubmittedApplicationListResponse>('/recruitment/applications/advisor-screening-submitted', { params })
+}
+
+
+export function listAdvisorScreeningPendingApplications(params?: { keyword?: string }) {
+  return http.get<AdvisorScreeningPendingApplicationRecord[]>('/recruitment/applications/advisor-screening-pending', { params })
 }
 
 

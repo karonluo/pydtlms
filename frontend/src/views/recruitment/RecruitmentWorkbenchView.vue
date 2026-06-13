@@ -45,7 +45,11 @@ import {
   type RecruitWorkbench,
 } from '../../api/recruitment'
 import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
-import { listAdvisorScreeningSubmittedApplications, type AdvisorScreeningSubmittedApplicationRecord } from '../../api/recruitment'
+import {
+  listAdvisorScreeningPendingApplications,
+  listAdvisorScreeningSubmittedApplications,
+  type AdvisorScreeningSubmittedApplicationRecord,
+} from '../../api/recruitment'
 
 const sourceChannelOptions = ['导师推荐', '实验室官网', '高校宣讲', '朋友同学推荐', '其他']
 const genderOptions = ['男', '女']
@@ -412,11 +416,11 @@ const showApplicationStatusColumn = computed(() => !isScreeningSection.value)
 const showPhoneColumn = computed(() => !isScreeningSection.value && !isCompactApplicationTable.value)
 const showReviewerColumn = computed(() => !isScreeningSection.value && !isCompactApplicationTable.value)
 const showApplicationPagination = computed(() => !isAdvisorScreeningSection.value)
-const advisorScreeningTablePageSize = 1000
 const advisorScreeningTab = ref<'pending' | 'submitted'>('pending')
 const advisorScreeningSubmittedLoading = ref(false)
 const advisorScreeningSubmittedRows = ref<AdvisorScreeningSubmittedApplicationRecord[]>([])
 const advisorScreeningSubmittedPagination = useServerPagination()
+const advisorScreeningPendingRows = ref<RecruitApplicationRecord[]>([])
 const advisorScreeningSubmittedFilters = reactive({
   keyword: '',
 })
@@ -701,33 +705,12 @@ async function loadApplications() {
   applicationsLoading.value = true
   try {
     if (isAdvisorScreeningSection.value) {
-      const pageSize = advisorScreeningTablePageSize
-      const mergedItems: RecruitApplicationRecord[] = []
-      let page = 1
-      let total = 0
-
-      while (true) {
-        const response = await listRecruitmentApplications({
-          keyword: applicationFilters.keyword || undefined,
-          status: effectiveApplicationStatusFilter.value,
-          portal_student_only: isPlanSection.value || undefined,
-          advisor_names: applicationFilters.advisor_names.length ? applicationFilters.advisor_names.join(',') : undefined,
-          plan_id: selectedPlanId.value,
-          page,
-          page_size: pageSize,
-        })
-        mergedItems.push(...response.data.items)
-        total = response.data.total
-        if (mergedItems.length >= total || response.data.items.length < pageSize) {
-          break
-        }
-        page += 1
+      applications.value = []
+      applicationPager.sync(0)
+      selectedAdvisorScreeningIds.value = []
+      if (advisorScreeningTab.value === 'pending') {
+        await loadAdvisorScreeningPendingRows()
       }
-
-      applications.value = mergedItems
-      applicationPager.sync(mergedItems.length)
-      syncAdvisorScreeningDrafts(mergedItems)
-      selectedAdvisorScreeningIds.value = selectedAdvisorScreeningIds.value.filter((id) => mergedItems.some((item) => item.id === id))
     } else if (isInitialScreeningSection.value) {
       if (selectedPlanId.value === undefined) {
         applications.value = []
@@ -775,15 +758,67 @@ const advisorScreeningVisibleRows = computed(() => {
   if (!isAdvisorScreeningSection.value) {
     return applications.value
   }
-  return advisorScreeningTab.value === 'submitted' ? applications.value : advisorScreeningTableRows.value
+  return advisorScreeningTab.value === 'submitted' ? applications.value : advisorScreeningPendingRows.value
 })
 
 function handleAdvisorScreeningTabChange(tab: 'pending' | 'submitted') {
   advisorScreeningTab.value = tab
+  if (tab === 'pending') {
+    selectedAdvisorScreeningIds.value = []
+    void loadAdvisorScreeningPendingRows()
+    return
+  }
   if (tab === 'submitted') {
     selectedAdvisorScreeningIds.value = []
     void loadAdvisorScreeningSubmittedRows()
   }
+}
+
+async function loadAdvisorScreeningPendingRows() {
+  if (!isAdvisorScreeningSection.value || advisorScreeningTab.value !== 'pending') {
+    advisorScreeningPendingRows.value = []
+    applications.value = []
+    return
+  }
+  applicationsLoading.value = true
+  try {
+    const response = await listAdvisorScreeningPendingApplications({
+      keyword: applicationFilters.keyword || undefined,
+    })
+    advisorScreeningPendingRows.value = response.data.map((item) => ({
+      id: item.application_id,
+      student_name: item.full_name,
+      business_key: item.business_key || '',
+      candidate_no: item.candidate_no,
+      first_choice: item.first_choice || '',
+      first_choice_id: item.first_choice_id ?? null,
+      first_choice_screening_submitted_at: item.first_choice_screening_submitted_at || null,
+      first_choice_screening_score: item.first_choice_screening_score ?? null,
+      second_choice: item.second_choice || '',
+      second_choice_id: item.second_choice_id ?? null,
+      second_choice_screening_submitted_at: item.second_choice_screening_submitted_at || null,
+      second_choice_screening_score: item.second_choice_screening_score ?? null,
+      advisor_screening_round: item.choice_name === '第二志愿' ? 'second_choice' : 'first_choice',
+      application_status: item.choice_name === '第二志愿' ? 'initial_screening_second' : 'initial_screening_first',
+      advisor_screening_status: 'pending',
+      intended_advisor_name: item.first_choice || '',
+    } as RecruitApplicationRecord))
+    applications.value = advisorScreeningPendingRows.value
+    syncAdvisorScreeningDrafts(applications.value)
+  } finally {
+    applicationsLoading.value = false
+  }
+}
+
+async function handleAdvisorScreeningPendingSearch() {
+  selectedAdvisorScreeningIds.value = []
+  await loadAdvisorScreeningPendingRows()
+}
+
+async function handleAdvisorScreeningPendingReset() {
+  applicationFilters.keyword = ''
+  selectedAdvisorScreeningIds.value = []
+  await loadAdvisorScreeningPendingRows()
 }
 
 async function loadAdvisorScreeningSubmittedRows() {
@@ -947,13 +982,10 @@ function isAdvisorScreeningLocked(row: RecruitApplicationRecord) {
   if (row.advisor_screening_status === 'submitted') {
     return true
   }
-  if (row.first_choice_screening_batch_id || row.first_choice_screening_submitted_at) {
-    return true
-  }
-  if (row.advisor_screening_round === 'second_choice') {
+  if (String(row.advisor_screening_round || '').trim() === 'second_choice') {
     return Boolean(row.second_choice_screening_batch_id || row.second_choice_screening_submitted_at)
   }
-  return Boolean(row.second_choice_screening_batch_id || row.second_choice_screening_submitted_at)
+  return Boolean(row.first_choice_screening_batch_id || row.first_choice_screening_submitted_at)
 }
 
 function isInitialScreeningLocked(row: RecruitApplicationRecord) {
@@ -1735,6 +1767,11 @@ watch(
     if (!isAdvisorScreeningSection.value) {
       return
     }
+    if (advisorScreeningTab.value === 'pending') {
+      selectedAdvisorScreeningIds.value = []
+      void loadAdvisorScreeningPendingRows()
+      return
+    }
     if (isAdvisorScreeningSubmittedTab.value) {
       selectedAdvisorScreeningIds.value = []
       void loadAdvisorScreeningSubmittedRows()
@@ -1954,11 +1991,11 @@ onMounted(() => {
         <div v-if="isAdvisorScreeningPendingTab" class="advisor-screening-pending-panel">
           <el-form inline :model="applicationFilters" class="advisor-screening-pending-panel__filter">
             <el-form-item label="关键字">
-              <el-input v-model="applicationFilters.keyword" placeholder="请输入报名号或学生姓名" clearable />
+              <el-input v-model="applicationFilters.keyword" placeholder="请输入报名号或学生姓名" clearable @keyup.enter="handleAdvisorScreeningPendingSearch" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleFilterSearch">查询</el-button>
-              <el-button @click="handleFilterReset">重置</el-button>
+              <el-button type="primary" @click="handleAdvisorScreeningPendingSearch">查询</el-button>
+              <el-button @click="handleAdvisorScreeningPendingReset">重置</el-button>
             </el-form-item>
           </el-form>
         </div>
@@ -2007,7 +2044,6 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column v-if="isPlanSection" prop="registered_at" label="注册时间" width="160" show-overflow-tooltip />
-          <el-table-column v-if="isAdvisorScreeningPendingTab" prop="choice_name" label="志愿" width="92" show-overflow-tooltip />
           <el-table-column v-if="isInitialScreeningSection" prop="second_choice" label="第二志愿" min-width="92" show-overflow-tooltip />
           <el-table-column v-if="showIntendedAdvisorColumn && !isPlanSection" prop="intended_advisor_name" label="意向导师" width="88" show-overflow-tooltip />
           <el-table-column v-if="showPhoneColumn && !isPlanSection" prop="phone_number" label="电话" width="112" show-overflow-tooltip />
@@ -2097,11 +2133,15 @@ onMounted(() => {
           <el-table-column prop="candidate_no" label="报名号" min-width="132" show-overflow-tooltip />
           <el-table-column prop="choice_name" label="志愿" width="92" show-overflow-tooltip />
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
-          <el-table-column prop="choice_score" label="分数" width="80" align="center" />
+          <el-table-column label="分数" width="80" align="center">
+            <template #default="scope">
+              {{ scope.row.choice_name === '第二志愿' ? (scope.row.second_choice_screening_score ?? '-') : (scope.row.first_choice_screening_score ?? '-') }}
+            </template>
+          </el-table-column>
           <el-table-column label="结论" width="96" align="center">
             <template #default="scope">
-              <el-tag :type="Number(scope.row.choice_score) >= 80 ? 'success' : 'danger'">
-                {{ Number(scope.row.choice_score) >= 80 ? '通过' : '未通过' }}
+              <el-tag :type="scope.row.is_passed === '通过' ? 'success' : 'danger'">
+                {{ scope.row.is_passed || '-' }}
               </el-tag>
             </template>
           </el-table-column>
@@ -2166,7 +2206,11 @@ onMounted(() => {
             </div>
             <div>
               <span class="management-confirm-dialog__label">当前分数</span>
-              <strong>{{ advisorScreeningRescoreTarget.choice_score ?? '-' }}</strong>
+              <strong>
+                {{ advisorScreeningRescoreTarget.choice_name === '第二志愿'
+                  ? (advisorScreeningRescoreTarget.second_choice_screening_score ?? '-')
+                  : (advisorScreeningRescoreTarget.first_choice_screening_score ?? '-') }}
+              </strong>
             </div>
             <div style="grid-column: span 2;">
               <span class="management-confirm-dialog__label">提醒</span>

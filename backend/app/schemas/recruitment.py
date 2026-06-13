@@ -534,6 +534,7 @@ class InitialScreeningConfirmationApplicationRecord(BaseModel):
     first_choice_screening_submitted_at: datetime | None = None
     second_choice_screening_submitted_at: datetime | None = None
     choice_score: float | None = None
+    is_passed: str | None = None
     choice_name: str | None = None
     application_status: str
     intended_advisor_name: str | None = None

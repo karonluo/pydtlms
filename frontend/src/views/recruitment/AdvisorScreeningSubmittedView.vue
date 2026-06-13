@@ -28,7 +28,17 @@ function resolveSubmittedChoiceLabel(row: AdvisorScreeningSubmittedApplicationRe
 }
 
 function resolveSubmittedScoreLabel(row: AdvisorScreeningSubmittedApplicationRecord) {
-  return row.choice_score === null || row.choice_score === undefined ? '-' : String(row.choice_score)
+  if (row.choice_name === '第一志愿') {
+    return row.first_choice_screening_score === null || row.first_choice_screening_score === undefined ? '-' : String(row.first_choice_screening_score)
+  }
+  if (row.choice_name === '第二志愿') {
+    return row.second_choice_screening_score === null || row.second_choice_screening_score === undefined ? '-' : String(row.second_choice_screening_score)
+  }
+  return '-'
+}
+
+function resolveSubmittedPassLabel(row: AdvisorScreeningSubmittedApplicationRecord) {
+  return row.is_passed || '-'
 }
 
 async function loadRows() {
@@ -123,6 +133,11 @@ onMounted(() => {
         <el-table-column label="提交时间" min-width="180">
           <template #default="{ row }">
             {{ formatSubmittedTime(row.first_choice_screening_submitted_at || row.second_choice_screening_submitted_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="结论" width="96" align="center">
+          <template #default="{ row }">
+            {{ resolveSubmittedPassLabel(row) }}
           </template>
         </el-table-column>
         <el-table-column prop="choice_name" label="志愿名称" min-width="120" />
