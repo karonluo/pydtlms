@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.worksheet.worksheet import Worksheet
 
 
 RECRUITMENT_TEMPLATE_COLUMNS: list[tuple[str, str]] = [
@@ -67,7 +68,11 @@ REGISTERED_PORTAL_STUDENT_EXPORT_BASE_COLUMNS: list[tuple[str, str]] = [
     ("selected_plan_id", "招生计划ID"),
     ("selected_plan_name", "招生计划"),
     ("first_choice_advisor_name", "第一志愿导师"),
+    ("first_choice_screening_score", "第一志愿导师评分"),
+    ("first_choice_center_name", "第一志愿导师所属研究中心"),
     ("second_choice_advisor_name", "第二志愿导师"),
+    ("second_choice_screening_score", "第二志愿导师评分"),
+    ("second_choice_center_name", "第二志愿导师所属研究中心"),
     ("recruitment_application_business_key", "报名业务编号"),
     ("recruitment_application_id", "报名记录ID"),
     ("recruitment_application_status", "申请流转状态"),
@@ -101,17 +106,6 @@ REGISTERED_PORTAL_STUDENT_EXPORT_BASE_COLUMNS: list[tuple[str, str]] = [
     ("personal_statement_text", "个人陈述摘要"),
     ("self_evaluation", "自我评价"),
     ("signed_agreement", "已阅读声明"),
-    ("application_profile_json", "报名基础信息JSON"),
-    ("application_draft_json", "报名草稿JSON"),
-    ("preferences_json", "志愿信息JSON"),
-    ("education_experiences_json", "教育经历JSON"),
-    ("practice_experiences_json", "实践经历JSON"),
-    ("english_proficiencies_json", "英语成绩JSON"),
-    ("family_members_json", "家庭成员JSON"),
-    ("achievement_records_json", "科研成果JSON"),
-    ("personal_statement_json", "个人陈述JSON"),
-    ("declaration_json", "声明JSON"),
-    ("declaration_progress_snapshot_json", "声明进度快照JSON"),
 ]
 
 REGISTERED_PORTAL_STUDENT_EXPORT_DYNAMIC_COLUMN_DEFINITIONS: list[tuple[str, str, list[tuple[str, str]]]] = [
@@ -219,6 +213,33 @@ REGISTERED_PORTAL_STUDENT_EXPORT_TAIL_COLUMNS: list[tuple[str, str]] = [
     ("undergraduate_graduation_certificate_attachment", "本科毕业证附件"),
 ]
 
+ADVISOR_SCREENING_EXPORT_COLUMNS: list[tuple[str, str]] = [
+    ("row_no", "序号"),
+    ("candidate_no", "报名号"),
+    ("business_key", "业务编号"),
+    ("student_name", "姓名"),
+    ("choice_name", "志愿"),
+    ("advisor_screening_round", "初筛轮次"),
+    ("first_choice", "第一志愿"),
+    ("second_choice", "第二志愿"),
+    ("first_choice_screening_score", "第一志愿分数"),
+    ("second_choice_screening_score", "第二志愿分数"),
+    ("application_status", "申请状态"),
+    ("advisor_screening_status", "提交状态"),
+    ("applied_at", "申请时间"),
+    ("first_choice_screening_submitted_at", "第一志愿提交时间"),
+    ("second_choice_screening_submitted_at", "第二志愿提交时间"),
+]
+
+CAMP_OFFER_TEMPLATE_COLUMNS: list[tuple[str, str]] = [
+    ("candidate_no", "candidate_no"),
+    ("plan_id", "plan_id"),
+    ("is_agree", "is_agree"),
+    ("reason", "reason"),
+    ("is_sent_mail", "is_sent_mail"),
+    ("student_offer_submitted_at", "student_offer_submitted_at"),
+]
+
 
 def _normalize_header(value: Any) -> str:
     return str(value or "").replace(" ", "").replace("\n", "").strip()
@@ -278,7 +299,7 @@ def _build_excel_row(record: dict[str, Any], columns: list[tuple[str, str]]) -> 
 
 def parse_recruitment_template(file_bytes: bytes) -> list[dict[str, Any]]:
     workbook = load_workbook(BytesIO(file_bytes), data_only=True)
-    worksheet = workbook.active
+    worksheet = cast(Worksheet, workbook.active)
     rows = list(worksheet.iter_rows(values_only=True))
     if not rows:
         return []
@@ -304,9 +325,62 @@ def parse_recruitment_template(file_bytes: bytes) -> list[dict[str, Any]]:
     return result
 
 
+def parse_camp_offer_template(file_bytes: bytes) -> list[dict[str, Any]]:
+    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
+    worksheet = cast(Worksheet, workbook.active)
+    rows = list(worksheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+
+    header_row = rows[0]
+    normalized_headers = [_normalize_header(item).lower() for item in header_row]
+    if not normalized_headers:
+        raise ValueError("导入文件缺少表头")
+
+    header_index: dict[str, int] = {}
+    for idx, header in enumerate(normalized_headers):
+        if not header:
+            continue
+        if header in {"报名号", "candidate_no"}:
+            header_index["candidate_no"] = idx
+        elif header in {"plan_id", "planid", "计划id"}:
+            header_index["plan_id"] = idx
+        elif header in {"is_agree", "isagree", "是否同意"}:
+            header_index["is_agree"] = idx
+        elif header in {"reason", "原因", "reson"}:
+            header_index["reason"] = idx
+        elif header in {"is_sent_mail", "issentmail", "是否已发邮件"}:
+            header_index["is_sent_mail"] = idx
+        elif header in {"student_offer_submitted_at", "studentsubmittedat", "学生提交日期", "submited"}:
+            header_index["student_offer_submitted_at"] = idx
+
+    if "candidate_no" not in header_index:
+        raise ValueError("导入文件必须包含 candidate_no 列")
+
+    result: list[dict[str, Any]] = []
+    for row in rows[1:]:
+        if not any(value not in (None, "") for value in row):
+            continue
+        item: dict[str, Any] = {}
+        for field in [
+            "candidate_no",
+            "plan_id",
+            "is_agree",
+            "reason",
+            "is_sent_mail",
+            "student_offer_submitted_at",
+        ]:
+            index = header_index.get(field)
+            if index is None or index >= len(row):
+                continue
+            item[field] = _normalize_cell(row[index])
+        result.append(item)
+    return result
+
+
 def build_recruitment_template(records: list[dict[str, Any]]) -> bytes:
     workbook = Workbook()
-    worksheet = workbook.active
+    worksheet = cast(Worksheet, workbook.active)
     worksheet.title = "Worksheet"
     worksheet.append([label for _, label in RECRUITMENT_TEMPLATE_COLUMNS])
     for record in records:
@@ -319,11 +393,25 @@ def build_recruitment_template(records: list[dict[str, Any]]) -> bytes:
 def build_registered_portal_students_template(records: list[dict[str, Any]]) -> bytes:
     columns = _resolve_registered_portal_student_export_columns(records)
     workbook = Workbook()
-    worksheet = workbook.active
+    worksheet = cast(Worksheet, workbook.active)
     worksheet.title = "注册学生"
     worksheet.append([label for _, label in columns])
     for record in records:
         worksheet.append(_build_excel_row(record, columns))
+    stream = BytesIO()
+    workbook.save(stream)
+    return stream.getvalue()
+
+
+def build_advisor_screening_template(records: list[dict[str, Any]]) -> bytes:
+    workbook = Workbook()
+    worksheet = cast(Worksheet, workbook.active)
+    worksheet.title = "导师初筛"
+    worksheet.append([label for _, label in ADVISOR_SCREENING_EXPORT_COLUMNS])
+    for index, record in enumerate(records, start=1):
+        row_record = dict(record)
+        row_record["row_no"] = index
+        worksheet.append(_build_excel_row(row_record, ADVISOR_SCREENING_EXPORT_COLUMNS))
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()

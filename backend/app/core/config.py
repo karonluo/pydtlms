@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = False
     smtp_use_ssl: bool = True
     smtp_timeout_seconds: int = 300
+    initial_screening_confirmation_email_list: str = ""
+    initial_screening_confirmation_timeout_second: int = 30
+    initial_screening_confirmation_smtp_enabled: bool = False
+    recruitment_judgment_source: str = "state"
 
     postgres_host: str = "47.117.107.23"
     postgres_port: int = 15431
@@ -124,6 +128,17 @@ class Settings(BaseSettings):
         if not self.redis_uses_sentinel:
             return {}
         return {"master_name": self.redis_sentinel_name}
+
+    @property
+    def recruitment_judgment_source_value(self) -> str:
+        value = self.recruitment_judgment_source.strip().lower()
+        if value not in {"state", "db"}:
+            raise ValueError("RECRUITMENT_JUDGMENT_SOURCE 仅支持 state 或 db")
+        return value
+
+    @property
+    def recruitment_uses_db_judgment(self) -> bool:
+        return self.recruitment_judgment_source_value == "db"
 
     @property
     def normalized_site_root_url(self) -> str:

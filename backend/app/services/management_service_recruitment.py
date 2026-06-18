@@ -1,14 +1,27 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
+from app.core.config import settings
 from app.schemas.portal import PortalApplicationDeclarationData, PortalPersonalStatementData
 from app.schemas.dashboard import (
+    DashboardRecruitmentAdvisorChoiceDistribution,
     DashboardRecruitmentAdvisorChoiceDistributionResponse,
+    DashboardRecruitmentAdvisorChoiceItem,
     DashboardUndergraduateSchoolStudentItem,
     DashboardUndergraduateSchoolStudentListResponse,
 )
-from app.schemas.recruitment import RecruitApplicationRecord, RecruitPortalApplicationDetail
+from app.schemas.recruitment import (
+    CampOfferImportIssue,
+    CampOfferImportResult,
+    CampOfferListResponse,
+    CampOfferRecord,
+    CampOfferUpsert,
+    RecruitApplicationRecord,
+    RecruitPortalApplicationDetail,
+)
+
+from app.services.recruitment_excel_service import build_advisor_screening_template
 
 from .management_service_shared import *
 
@@ -48,6 +61,10 @@ class RuntimeManagementStoreRecruitmentMixin:
         return "first_choice"
 
     def _principal_matches_screening_advisor(self, application: dict[str, Any], screening_round: str, principal_summary: dict[str, Any]) -> bool:
+        role_codes = {str(item).strip() for item in principal_summary.get("roles", []) if str(item).strip()}
+        if "platform_admin" in role_codes:
+            return True
+
         username, full_name = self._normalize_screening_actor_values(principal_summary)
         expected_values = {username, full_name}
         expected_values = {item for item in expected_values if item}
@@ -378,6 +395,262 @@ class RuntimeManagementStoreRecruitmentMixin:
         except Exception as exc:
             logger.warning("Query recruitment application detail from PostgreSQL failed in database-only mode: %s", exc)
             raise DatabaseUnavailableError("招生报名详情当前仅允许从数据库读取，PostgreSQL 查询失败") from exc
+        raise DatabaseUnavailableError("招生报名详情当前仅允许从数据库读取，未找到对应记录")
+
+    def _resolve_camp_offer_plan_id(self, explicit_plan_id: int | None = None) -> int:
+        if explicit_plan_id is not None:
+            return int(explicit_plan_id)
+        latest_plan_id = self._postgres_store.get_latest_recruitment_plan_id()
+        if latest_plan_id is None:
+            raise ValueError("当前没有可用招生计划，无法确定 plan_id")
+        return int(latest_plan_id)
+
+    def _validate_camp_offer_candidate_no_exists(self, candidate_no: str) -> None:
+        normalized_candidate_no = str(candidate_no or "").strip()
+        if not normalized_candidate_no:
+            raise ValueError("candidate_no 不能为空")
+        items, total = self._postgres_store.list_recruitment_applications_page(keyword=normalized_candidate_no, page=1, page_size=5)
+        matched = any(str(item.get("candidate_no") or "").strip() == normalized_candidate_no for item in items)
+        if total <= 0 or not matched:
+            raise ValueError(f"报名号不存在：{normalized_candidate_no}")
+
+    def get_camp_offers(
+        self,
+        *,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        is_sent_mail: bool | None = None,
+        is_agree: bool | None = None,
+        first_choice_advisor: str | None = None,
+        first_choice_team: str | None = None,
+        first_choice_score_op: str | None = None,
+        first_choice_score: float | None = None,
+        second_choice_advisor: str | None = None,
+        second_choice_team: str | None = None,
+        second_choice_score_op: str | None = None,
+        second_choice_score: float | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> CampOfferListResponse:
+        items, total = self._postgres_store.list_camp_offers_page(
+            keyword=keyword,
+            plan_id=plan_id,
+            is_sent_mail=is_sent_mail,
+            is_agree=is_agree,
+            first_choice_advisor=first_choice_advisor,
+            first_choice_team=first_choice_team,
+            first_choice_score_op=first_choice_score_op,
+            first_choice_score=first_choice_score,
+            second_choice_advisor=second_choice_advisor,
+            second_choice_team=second_choice_team,
+            second_choice_score_op=second_choice_score_op,
+            second_choice_score=second_choice_score,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+        )
+        records = [CampOfferRecord(**item) for item in items]
+        return CampOfferListResponse(items=records, total=total, page=page, page_size=page_size)
+
+    def get_camp_offer_detail(self, offer_id: int) -> CampOfferRecord:
+        item = self._postgres_store.get_camp_offer_detail(int(offer_id))
+        if item is None:
+            raise KeyError("Camp offer not found")
+        return CampOfferRecord(**item)
+
+    def export_camp_offers(
+        self,
+        *,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        is_sent_mail: bool | None = None,
+        is_agree: bool | None = None,
+        first_choice_advisor: str | None = None,
+        first_choice_team: str | None = None,
+        first_choice_score_op: str | None = None,
+        first_choice_score: float | None = None,
+        second_choice_advisor: str | None = None,
+        second_choice_team: str | None = None,
+        second_choice_score_op: str | None = None,
+        second_choice_score: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return all camp-offer rows matching the supplied filters (ignoring
+        pagination). Used by the /camp-offers/export endpoint to build an
+        Excel workbook for the operator."""
+
+        items, _ = self._postgres_store.list_camp_offers_page(
+            keyword=keyword,
+            plan_id=plan_id,
+            is_sent_mail=is_sent_mail,
+            is_agree=is_agree,
+            first_choice_advisor=first_choice_advisor,
+            first_choice_team=first_choice_team,
+            first_choice_score_op=first_choice_score_op,
+            first_choice_score=first_choice_score,
+            second_choice_advisor=second_choice_advisor,
+            second_choice_team=second_choice_team,
+            second_choice_score_op=second_choice_score_op,
+            second_choice_score=second_choice_score,
+            sort_by=None,
+            sort_order=None,
+            page=1,
+            page_size=50000,
+        )
+        return [dict(item) for item in items]
+
+    def create_camp_offer(self, payload: CampOfferUpsert, principal: Any | None = None) -> CampOfferRecord:
+        with self._lock:
+            plan_id = self._resolve_camp_offer_plan_id(payload.plan_id)
+            candidate_no = str(payload.candidate_no or "").strip()
+            self._validate_camp_offer_candidate_no_exists(candidate_no)
+            duplicated = self._postgres_store.find_camp_offer_by_candidate_plan(candidate_no=candidate_no, plan_id=plan_id)
+            if duplicated is not None:
+                raise ValueError("该报名号在当前招生计划下已存在入营名单记录")
+
+            operation_log = self._record_operation(
+                "招生管理",
+                "入营名单",
+                candidate_no,
+                "新增",
+                f"新增入营名单 {candidate_no}",
+                operator_username=self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})["username"],
+            )
+            inserted = self._postgres_store.create_camp_offer(
+                {
+                    "candidate_no": candidate_no,
+                    "plan_id": plan_id,
+                    "is_sent_mail": payload.is_sent_mail,
+                    "is_agree": payload.is_agree,
+                    "reason": payload.reason,
+                    "student_offer_submitted_at": payload.student_offer_submitted_at,
+                },
+                operation_log,
+            )
+            return self.get_camp_offer_detail(int(inserted.get("id") or 0))
+
+    def update_camp_offer(self, offer_id: int, payload: CampOfferUpsert, principal: Any | None = None) -> CampOfferRecord:
+        with self._lock:
+            existing = self._postgres_store.get_camp_offer_detail(int(offer_id))
+            if existing is None:
+                raise KeyError("Camp offer not found")
+
+            plan_id = self._resolve_camp_offer_plan_id(payload.plan_id)
+            candidate_no = str(payload.candidate_no or "").strip()
+            self._validate_camp_offer_candidate_no_exists(candidate_no)
+            duplicated = self._postgres_store.find_camp_offer_by_candidate_plan(candidate_no=candidate_no, plan_id=plan_id)
+            if duplicated is not None and int(duplicated.get("id") or 0) != int(offer_id):
+                raise ValueError("该报名号在当前招生计划下已存在入营名单记录")
+
+            operation_log = self._record_operation(
+                "招生管理",
+                "入营名单",
+                str(offer_id),
+                "编辑",
+                f"更新入营名单 {candidate_no}",
+                operator_username=self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})["username"],
+            )
+            updated = self._postgres_store.update_camp_offer(
+                int(offer_id),
+                {
+                    "candidate_no": candidate_no,
+                    "plan_id": plan_id,
+                    "is_sent_mail": payload.is_sent_mail,
+                    "is_agree": payload.is_agree,
+                    "reason": payload.reason,
+                    "student_offer_submitted_at": payload.student_offer_submitted_at,
+                },
+                operation_log,
+            )
+            if not updated:
+                raise KeyError("Camp offer not found")
+            return self.get_camp_offer_detail(int(offer_id))
+
+    def delete_camp_offer(self, offer_id: int, principal: Any | None = None) -> None:
+        with self._lock:
+            existing = self._postgres_store.get_camp_offer_detail(int(offer_id))
+            if existing is None:
+                raise KeyError("Camp offer not found")
+            candidate_no = str(existing.get("candidate_no") or "").strip()
+            operation_log = self._record_operation(
+                "招生管理",
+                "入营名单",
+                str(offer_id),
+                "删除",
+                f"删除入营名单 {candidate_no}",
+                operator_username=self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})["username"],
+            )
+            deleted = self._postgres_store.delete_camp_offer(int(offer_id), operation_log)
+            if not deleted:
+                raise KeyError("Camp offer not found")
+
+    def import_camp_offers(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        plan_id: int | None = None,
+        principal: Any | None = None,
+    ) -> CampOfferImportResult:
+        with self._lock:
+            default_plan_id = self._resolve_camp_offer_plan_id(plan_id)
+            imported_ids: list[int] = []
+            issues: list[CampOfferImportIssue] = []
+            operator = self._principal_summary(principal or {"username": "admin", "full_name": "admin", "roles": []})
+            for row_number, row in enumerate(rows, start=2):
+                candidate_no = str(row.get("candidate_no") or "").strip()
+                if not candidate_no:
+                    issues.append(CampOfferImportIssue(row_number=row_number, candidate_no=None, reason="candidate_no 为空，已跳过"))
+                    continue
+                try:
+                    row_plan_id = row.get("plan_id")
+                    resolved_plan_id = int(str(row_plan_id).strip()) if row_plan_id not in (None, "") else default_plan_id
+                except Exception:
+                    issues.append(CampOfferImportIssue(row_number=row_number, candidate_no=candidate_no, reason="plan_id 非法，已跳过"))
+                    continue
+                try:
+                    self._validate_camp_offer_candidate_no_exists(candidate_no)
+                except ValueError as exc:
+                    issues.append(CampOfferImportIssue(row_number=row_number, candidate_no=candidate_no, reason=str(exc)))
+                    continue
+                duplicated = self._postgres_store.find_camp_offer_by_candidate_plan(candidate_no=candidate_no, plan_id=resolved_plan_id)
+                if duplicated is not None:
+                    issues.append(CampOfferImportIssue(row_number=row_number, candidate_no=candidate_no, reason="该报名号在当前计划下已存在，已跳过"))
+                    continue
+
+                is_sent_mail_raw = str(row.get("is_sent_mail") or "").strip().lower()
+                is_agree_raw = str(row.get("is_agree") or "").strip().lower()
+                operation_log = self._record_operation(
+                    "招生管理",
+                    "入营名单",
+                    candidate_no,
+                    "导入",
+                    f"导入入营名单 {candidate_no}",
+                    operator_username=operator["username"],
+                )
+                inserted = self._postgres_store.create_camp_offer(
+                    {
+                        "candidate_no": candidate_no,
+                        "plan_id": resolved_plan_id,
+                        "is_sent_mail": is_sent_mail_raw in {"1", "true", "yes", "y", "是", "已发送"},
+                        "is_agree": None if is_agree_raw == "" else is_agree_raw in {"1", "true", "yes", "y", "是", "同意"},
+                        "reason": str(row.get("reason") or "").strip() or None,
+                        "student_offer_submitted_at": str(row.get("student_offer_submitted_at") or "").strip() or None,
+                    },
+                    operation_log,
+                )
+                inserted_id = int(inserted.get("id") or 0)
+                if inserted_id:
+                    imported_ids.append(inserted_id)
+
+            return CampOfferImportResult(
+                imported_count=len(imported_ids),
+                skipped_count=len(issues),
+                plan_id=default_plan_id,
+                imported_ids=imported_ids,
+                issues=issues,
+            )
 
     def get_recruitment_portal_application_detail(self, application_id: int) -> RecruitPortalApplicationDetail:
         application = self.get_recruitment_application_detail(application_id)
@@ -453,19 +726,19 @@ class RuntimeManagementStoreRecruitmentMixin:
             payload = self._postgres_store.list_dashboard_recruitment_advisor_choice_distribution()
             return DashboardRecruitmentAdvisorChoiceDistributionResponse(
                 choices=[
-                    {
-                        "choice_round": str(choice.get("choice_round") or ""),
-                        "choice_name": str(choice.get("choice_name") or ""),
-                        "total": int(choice.get("total") or 0),
-                        "items": [
-                            {
-                                "advisor_name": str(item.get("advisor_name") or ""),
-                                "student_count": int(item.get("student_count") or 0),
-                                "percentage": float(item.get("percentage") or 0),
-                            }
+                    DashboardRecruitmentAdvisorChoiceDistribution(
+                        choice_round=str(choice.get("choice_round") or ""),
+                        choice_name=str(choice.get("choice_name") or ""),
+                        total=int(choice.get("total") or 0),
+                        items=[
+                            DashboardRecruitmentAdvisorChoiceItem(
+                                advisor_name=str(item.get("advisor_name") or ""),
+                                student_count=int(item.get("student_count") or 0),
+                                percentage=float(item.get("percentage") or 0),
+                            )
                             for item in choice.get("items", [])
                         ],
-                    }
+                    )
                     for choice in payload.get("choices", [])
                 ],
             )
@@ -630,6 +903,49 @@ class RuntimeManagementStoreRecruitmentMixin:
         )
         return build_recruitment_template(items)
 
+    def export_advisor_screening_applications(
+        self,
+        *,
+        keyword: str | None = None,
+        advisor_name: str | None = None,
+        advisor_user_id: int | None = None,
+        screening_round: str | None = None,
+        status: str | None = None,
+    ) -> bytes:
+        rows, _ = self._postgres_store.list_recruitment_applications_page(
+            keyword=keyword,
+            status=status,
+            advisor_name=advisor_name,
+            advisor_user_id=advisor_user_id,
+            page=1,
+            page_size=10000,
+        )
+        normalized_round = str(screening_round or "").strip()
+        export_rows: list[dict[str, Any]] = []
+        for row in rows:
+            row_round = str(row.get("advisor_screening_round") or "").strip()
+            if normalized_round and row_round != normalized_round:
+                continue
+            export_rows.append(
+                {
+                    "candidate_no": row.get("candidate_no"),
+                    "business_key": row.get("business_key"),
+                    "student_name": row.get("student_name"),
+                    "choice_name": "第二志愿" if row_round == "second_choice" else "第一志愿",
+                    "advisor_screening_round": row_round,
+                    "first_choice": row.get("first_choice"),
+                    "second_choice": row.get("second_choice"),
+                    "first_choice_screening_score": row.get("first_choice_screening_score"),
+                    "second_choice_screening_score": row.get("second_choice_screening_score"),
+                    "application_status": row.get("application_status"),
+                    "advisor_screening_status": row.get("advisor_screening_status"),
+                    "applied_at": row.get("applied_at"),
+                    "first_choice_screening_submitted_at": row.get("first_choice_screening_submitted_at"),
+                    "second_choice_screening_submitted_at": row.get("second_choice_screening_submitted_at"),
+                }
+            )
+        return build_advisor_screening_template(export_rows)
+
     def export_recruitment_application_blank_template(self) -> bytes:
         return build_recruitment_template([])
 
@@ -717,11 +1033,22 @@ class RuntimeManagementStoreRecruitmentMixin:
         with self._lock:
             for item in payload.items:
                 entity_index, entity = self._find_required("recruitment_applications", int(item.application_id))
-                workflow_located = self._workflow_task_index_by_business_key(str(entity.get("business_key") or ""))
-                if workflow_located is None:
+                business_key = str(entity.get("business_key") or "").strip()
+                workflow_task: dict[str, Any] | None
+                if settings.recruitment_uses_db_judgment:
+                    workflow_snapshot = getattr(self._postgres_store, "get_workflow_task_snapshot_by_business_key", None)
+                    workflow_task = cast(dict[str, Any] | None, workflow_snapshot(business_key)) if callable(workflow_snapshot) else None
+                else:
+                    workflow_task = None
+
+                workflow_located = self._workflow_task_index_by_business_key(business_key)
+                if workflow_task is None:
+                    workflow_task = workflow_located[1] if workflow_located is not None else None
+
+                if workflow_task is None or workflow_located is None:
                     raise ValueError("未找到对应的流程任务")
                 task_index, task = workflow_located
-                if str(task.get("node_key") or "") != "advisor_screening":
+                if str(workflow_task.get("node_key") or "") != "advisor_screening":
                     raise ValueError("当前申请不在导师初筛环节")
 
                 screening_round = self._resolve_advisor_screening_round(entity)
@@ -817,12 +1144,16 @@ class RuntimeManagementStoreRecruitmentMixin:
 
             screening_round = next(iter(screening_rounds))
             signature_base64 = str(payload.signature_base64 or "").strip()
+            advisor_username = str(principal_summary["username"])
+            advisor_name = str(principal_summary["full_name"])
             batch_id = int(
-                sync_advisor_screening(
+                cast(
+                    int,
+                    sync_advisor_screening(
                     {
                         "advisor_user_id": None,
-                        "advisor_username": principal_summary["username"],
-                        "advisor_name": principal_summary["full_name"],
+                        "advisor_username": advisor_username,
+                        "advisor_name": advisor_name,
                         "advisor_role_code": "advisor",
                         "screening_round": screening_round,
                         "signature_base64": signature_base64,
@@ -832,6 +1163,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                     updated_tasks,
                     operation_logs,
                     counters={"operation_logs": int(self._counters.get("operation_logs", 0))},
+                ),
                 )
             )
 

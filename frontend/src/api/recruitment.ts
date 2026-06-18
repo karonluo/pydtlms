@@ -207,9 +207,105 @@ export type RecruitApplicationImportResult = {
   issues: RecruitApplicationImportIssue[]
 }
 
+export type CampOfferRecord = {
+  id: number
+  candidate_no: string
+  plan_id: number
+  plan_name?: string | null
+  is_sent_mail: boolean
+  is_agree?: boolean | null
+  reason?: string | null
+  student_name?: string | null
+  student_email?: string | null
+  student_phone?: string | null
+  first_choice_advisor_name?: string | null
+  first_choice_advisor_team_name?: string | null
+  first_choice_screening_score?: number | null
+  second_choice_advisor_name?: string | null
+  second_choice_advisor_team_name?: string | null
+  second_choice_screening_score?: number | null
+  created_at?: string | null
+  student_offer_submitted_at?: string | null
+}
+
+export type CampOfferListResponse = PagedResponse<CampOfferRecord>
+
+export type CampOfferUpsert = {
+  candidate_no: string
+  plan_id?: number | null
+  is_sent_mail?: boolean
+  is_agree?: boolean | null
+  reason?: string | null
+  student_offer_submitted_at?: string | null
+}
+
+export type CampOfferImportIssue = {
+  row_number: number
+  candidate_no?: string | null
+  reason: string
+}
+
+export type CampOfferImportResult = {
+  imported_count: number
+  skipped_count: number
+  plan_id: number
+  imported_ids: number[]
+  issues: CampOfferImportIssue[]
+}
+
+export type OfferTemplateRecord = {
+  id: string | number
+  filename: string
+  display_name: string
+  size_bytes?: number
+  uploaded_at?: string | null
+  uploaded_by?: string | null
+  is_builtin?: boolean
+  source: 'builtin' | 'uploaded'
+  builtin_key?: 'first' | 'second' | null
+}
+
+export type OfferTemplateListResponse = {
+  items: OfferTemplateRecord[]
+}
+
+export type CampOfferNotificationSendRequest = {
+  candidate_nos: string[]
+  choice: 'first' | 'second'
+  template_id?: string | number | null
+  simulate: boolean
+  simulate_recipient?: string | null
+}
+
+export type CampOfferNotificationSendResultItem = {
+  candidate_no: string
+  email: string
+  status: string
+  error: string
+}
+
+export type CampOfferNotificationSendResponse = {
+  message: string
+  choice: string
+  simulate: boolean
+  simulate_recipient?: string | null
+  template_path?: string | null
+  success_count: number
+  failure_count: number
+  results: CampOfferNotificationSendResultItem[]
+}
+
 
 export type AdvisorScreeningSubmitItem = {
   application_id: number
+  advisor_score: number
+}
+
+
+export type AdvisorScreeningScoreUpdateRequest = {
+  application_id: number
+  candidate_no: string
+  choice_name: '第一志愿' | '第二志愿'
   advisor_score: number
 }
 
@@ -418,13 +514,28 @@ export function submitAdvisorScreeningBatch(payload: AdvisorScreeningBatchSubmit
 }
 
 
+export function updateAdvisorScreeningScore(payload: AdvisorScreeningScoreUpdateRequest) {
+  return http.post<RecruitApplicationRecord>('/recruitment/applications/advisor-screening-score', payload)
+}
+
+
 export function listAdvisorScreeningSubmittedApplications(params?: PaginationParams & { keyword?: string }) {
   return http.get<AdvisorScreeningSubmittedApplicationListResponse>('/recruitment/applications/advisor-screening-submitted', { params })
 }
 
 
+export function getAdvisorScreeningSubmittedApplicationsCount(params?: { keyword?: string }) {
+  return http.get<{ total: number }>('/recruitment/applications/advisor-screening-submitted/count', { params })
+}
+
+
 export function listAdvisorScreeningPendingApplications(params?: { keyword?: string }) {
   return http.get<AdvisorScreeningPendingApplicationRecord[]>('/recruitment/applications/advisor-screening-pending', { params })
+}
+
+
+export function getAdvisorScreeningPendingApplicationsCount(params?: { keyword?: string }) {
+  return http.get<{ total: number }>('/recruitment/applications/advisor-screening-pending/count', { params })
 }
 
 
@@ -491,5 +602,110 @@ export function uploadRecruitmentAttachment(studentId: number, file: File, categ
       'Content-Type': 'multipart/form-data',
     },
     timeout: 300000,
+  })
+}
+
+export function listCampOffers(params: {
+  keyword?: string
+  plan_id?: number
+  is_sent_mail?: boolean
+  is_agree?: boolean
+  first_choice_advisor?: string
+  first_choice_team?: string
+  first_choice_score_op?: "eq" | "ne" | "gt" | "ge" | "lt" | "le"
+  first_choice_score?: number
+  second_choice_advisor?: string
+  second_choice_team?: string
+  second_choice_score_op?: "eq" | "ne" | "gt" | "ge" | "lt" | "le"
+  second_choice_score?: number
+  sort_by?: string
+  sort_order?: string
+  page?: number
+  page_size?: number
+}) {
+  return http.get<CampOfferListResponse>('/recruitment/camp-offers', { params })
+}
+
+export function getCampOfferDetail(offerId: number) {
+  return http.get<CampOfferRecord>(`/recruitment/camp-offers/${offerId}`)
+}
+
+export function createCampOffer(payload: CampOfferUpsert) {
+  return http.post<CampOfferRecord>('/recruitment/camp-offers', payload)
+}
+
+export function updateCampOffer(offerId: number, payload: CampOfferUpsert) {
+  return http.put<CampOfferRecord>(`/recruitment/camp-offers/${offerId}`, payload)
+}
+
+export function deleteCampOffer(offerId: number) {
+  return http.delete<void>(`/recruitment/camp-offers/${offerId}`)
+}
+
+export function importCampOffers(file: File, planId?: number) {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (typeof planId === 'number' && Number.isFinite(planId)) {
+    formData.append('plan_id', String(planId))
+  }
+  return http.post<CampOfferImportResult>('/recruitment/camp-offers/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+}
+
+export function sendCampOfferNotification(payload: CampOfferNotificationSendRequest) {
+  return http.post<CampOfferNotificationSendResponse>('/recruitment/camp-offers/notify', payload)
+}
+
+export function listOfferTemplates() {
+  return http.get<OfferTemplateListResponse>(`/recruitment/camp-offers/templates`)
+}
+
+export function uploadOfferTemplate(file: File) {
+  const formData = new FormData()
+  formData.append("file", file)
+  return http.post<OfferTemplateRecord>("/recruitment/camp-offers/templates", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  })
+}
+
+export function fetchOfferTemplateContent(id: string | number) {
+  return http.get<string>(
+    `/recruitment/camp-offers/templates/${encodeURIComponent(String(id))}/content`,
+    { responseType: "blob", transformResponse: [(data: unknown) => data] as any },
+  )
+}
+
+export function fetchOfferTemplatePreview(id: string | number) {
+  return http.get<string>(
+    `/recruitment/camp-offers/templates/${encodeURIComponent(String(id))}/preview`,
+    { responseType: "text" as any, transformResponse: [(data: unknown) => data] as any },
+  )
+}
+
+export function deleteOfferTemplate(id: string | number) {
+  return http.delete<void>(`/recruitment/camp-offers/templates/${encodeURIComponent(String(id))}`)
+}
+
+export function exportCampOffers(params: {
+  keyword?: string
+  plan_id?: number
+  is_sent_mail?: boolean
+  is_agree?: boolean
+  first_choice_advisor?: string
+  first_choice_team?: string
+  first_choice_score_op?: "eq" | "ne" | "gt" | "ge" | "lt" | "le"
+  first_choice_score?: number
+  second_choice_advisor?: string
+  second_choice_team?: string
+  second_choice_score_op?: "eq" | "ne" | "gt" | "ge" | "lt" | "le"
+  second_choice_score?: number
+} = {}) {
+  return http.get<Blob>(`/recruitment/camp-offers/export`, {
+    params,
+    responseType: "blob",
+    transformResponse: [(data: unknown) => data as Blob] as any,
   })
 }

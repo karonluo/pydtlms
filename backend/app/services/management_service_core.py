@@ -655,6 +655,23 @@ class RuntimeManagementStoreCoreMixin:
             options.append(SelectOption(label=self._build_advisor_option_label(item), value=str(advisor_id) if advisor_id is not None else full_name))
         return options
 
+    def _center_advisor_select_options(self) -> list[SelectOption]:
+        try:
+            advisor_rows, _ = self._postgres_store.list_system_users_page(role_code="advisor", page=1, page_size=1000)
+        except Exception as exc:
+            logger.exception("Load center advisor options from PostgreSQL failed")
+            raise DatabaseUnavailableError("数据库暂不可用，请稍后重试") from exc
+
+        options: list[SelectOption] = []
+        for item in advisor_rows:
+            full_name = str(item.get("full_name") or "").strip()
+            if not full_name:
+                continue
+            username = str(item.get("username") or "").strip()
+            label = f"{full_name}（{username}）" if username else full_name
+            options.append(SelectOption(label=label, value=str(item.get("id") or full_name)))
+        return options
+
     def _registered_portal_advisor_filter_options(self) -> list[SelectOption]:
         try:
             advisor_rows, _ = self._postgres_store.list_system_users_page(role_code="advisor", page=1, page_size=1000)
@@ -1259,6 +1276,7 @@ class RuntimeManagementStoreCoreMixin:
 
     def get_student_options(self, *, principal: Principal | dict[str, Any] | None = None) -> StudentOptionsResponse:
         advisor_options = self._advisor_select_options()
+        center_advisor_options = self._center_advisor_select_options()
         registered_portal_advisor_filter_options = self._registered_portal_advisor_filter_options()
         registered_portal_first_choice_advisor_filter_options = self._registered_portal_first_choice_advisor_filter_options()
         registered_portal_second_choice_advisor_filter_options = self._registered_portal_second_choice_advisor_filter_options()
@@ -1277,6 +1295,7 @@ class RuntimeManagementStoreCoreMixin:
             status_options=self._dict_options("student_status"),
             degree_options=self._dict_options("student_degree_type"),
             advisor_options=advisor_options,
+            center_advisor_options=center_advisor_options,
             registered_portal_advisor_filter_options=registered_portal_advisor_filter_options,
             registered_portal_first_choice_advisor_filter_options=registered_portal_first_choice_advisor_filter_options,
             registered_portal_second_choice_advisor_filter_options=registered_portal_second_choice_advisor_filter_options,

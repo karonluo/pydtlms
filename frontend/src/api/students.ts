@@ -52,6 +52,10 @@ export type RegisteredPortalStudentRecord = {
   selected_plan_name?: string | null
   selected_center_name?: string | null
   selected_advisor_name?: string | null
+  first_choice_center_name?: string | null
+  second_choice_center_name?: string | null
+  first_choice_screening_score?: number | null
+  second_choice_screening_score?: number | null
   recruitment_application_id?: number | null
   recruitment_application_candidate_no?: string | null
   recruitment_application_business_key?: string | null
@@ -114,6 +118,8 @@ export type RegisteredPortalStudentExportRequest = {
   advisor_names?: string[]
   first_choice_advisor_names?: string[]
   second_choice_advisor_names?: string[]
+  first_choice_center_names?: string[]
+  second_choice_center_names?: string[]
   export_scope?: string
 }
 
@@ -182,6 +188,7 @@ export type StudentOptions = {
   status_options: SelectOption[]
   degree_options: SelectOption[]
   advisor_options: SelectOption[]
+  center_advisor_options: SelectOption[]
   registered_portal_advisor_filter_options: SelectOption[]
   registered_portal_first_choice_advisor_filter_options: SelectOption[]
   registered_portal_second_choice_advisor_filter_options: SelectOption[]
@@ -216,7 +223,19 @@ export function getStudentOptions() {
 }
 
 
-export function listRegisteredPortalStudents(params?: PaginationParams & { keyword?: string; application_form_status?: string; recruitment_application_status?: string; show_all_background_assessed?: boolean; advisor_names?: string; first_choice_advisor_names?: string; second_choice_advisor_names?: string }) {
+export function listRegisteredPortalStudents(params?: PaginationParams & {
+  keyword?: string
+  application_form_status?: string
+  recruitment_application_status?: string
+  show_all_background_assessed?: boolean
+  advisor_names?: string
+  first_choice_advisor_names?: string
+  second_choice_advisor_names?: string
+  first_choice_center_names?: string
+  second_choice_center_names?: string
+  sort_by?: string
+  sort_order?: string
+}) {
   return http.get<RegisteredPortalStudentListResponse>('/students/portal-registrations', { params })
 }
 

@@ -25,6 +25,65 @@ class DashboardOverview(BaseModel):
     workflow_metrics: list[MetricCard]
 
 
+class DashboardRecruitmentApplicationStatusItem(BaseModel):
+    application_status_state: str
+    count: int
+
+
+class DashboardRecruitmentApplicationStatusResponse(BaseModel):
+    items: list[DashboardRecruitmentApplicationStatusItem]
+
+
+class DashboardRecruitmentFirstChoicePendingGradingItem(BaseModel):
+    advisor_name: str
+    student_count: int
+
+
+class DashboardRecruitmentFirstChoicePendingGradingResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[DashboardRecruitmentFirstChoicePendingGradingItem]
+
+
+class DashboardRecruitmentSecondChoicePendingGradingItem(BaseModel):
+    advisor_name: str
+    student_count: int
+
+
+class DashboardRecruitmentSecondChoicePendingGradingResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[DashboardRecruitmentSecondChoicePendingGradingItem]
+
+
+class DashboardRecruitmentFirstChoicePendingStudentItem(BaseModel):
+    application_id: int
+    candidate_no: str
+    student_name: str
+
+
+class DashboardRecruitmentFirstChoicePendingStudentListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[DashboardRecruitmentFirstChoicePendingStudentItem]
+
+
+class DashboardRecruitmentSecondChoicePendingStudentItem(BaseModel):
+    application_id: int
+    candidate_no: str
+    student_name: str
+
+
+class DashboardRecruitmentSecondChoicePendingStudentListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[DashboardRecruitmentSecondChoicePendingStudentItem]
+
+
 class DashboardUndergraduateSchoolRankingItem(BaseModel):
     school_name: str
     student_count: int

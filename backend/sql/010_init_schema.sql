@@ -69,11 +69,10 @@ CREATE TABLE IF NOT EXISTS dtlms_advisors (
 
 CREATE TABLE IF NOT EXISTS dtlms_teams (
     id BIGSERIAL PRIMARY KEY,
-    team_code VARCHAR(32) NOT NULL UNIQUE,
     team_name VARCHAR(128) NOT NULL UNIQUE,
     department_name VARCHAR(128) NOT NULL,
     discipline_name VARCHAR(128),
-    lead_advisor_id BIGINT REFERENCES dtlms_advisors(id),
+    lead_user_id BIGINT REFERENCES dtlms_users(id),
     research_directions TEXT,
     team_status VARCHAR(32) NOT NULL DEFAULT 'active',
     established_on DATE,
@@ -87,16 +86,11 @@ CREATE TABLE IF NOT EXISTS dtlms_teams (
 CREATE TABLE IF NOT EXISTS dtlms_team_advisors (
     id BIGSERIAL PRIMARY KEY,
     team_id BIGINT NOT NULL REFERENCES dtlms_teams(id),
-    advisor_id BIGINT NOT NULL REFERENCES dtlms_advisors(id),
-    advisor_role VARCHAR(32) NOT NULL DEFAULT 'member',
-    joined_on DATE,
-    left_on DATE,
+    advisor_user_id BIGINT NOT NULL REFERENCES dtlms_users(id),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (team_id, advisor_id),
-    CHECK (advisor_role IN ('lead', 'member', 'co_advisor')),
-    CHECK (left_on IS NULL OR joined_on IS NULL OR left_on >= joined_on)
+    UNIQUE (team_id, advisor_user_id)
 );
 
 CREATE TABLE IF NOT EXISTS dtlms_students (

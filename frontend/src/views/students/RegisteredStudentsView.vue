@@ -1,0 +1,2528 @@
+<script setup lang="ts">
+import axios from 'axios'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
+import { useRoute } from 'vue-router'
+
+import RecruitmentPortalApplicationDrawer from '../../components/recruitment/RecruitmentPortalApplicationDrawer.vue'
+import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
+import { useServerPagination } from '../../composables/useServerPagination'
+import { buildDictColorMap, resolveDictTagType, type DictColorMap } from '../../utils/dictTag'
+import { getPhoneValidationMessage, normalizePhoneNumber } from '../../utils/contactValidation'
+import {
+  getRecruitmentPortalApplicationDetail,
+  type RecruitPortalApplicationDetail,
+} from '../../api/recruitment'
+import { hasGrantedPermission } from '../../router/menuAccess'
+import PortalApplicationV2Form from '../portal/applicationv2/PortalApplicationV2Form.vue'
+import {
+  activateRegisteredPortalStudent,
+  batchDeleteCenters,
+  createRegisteredPortalStudentExportJob,
+  createCenter,
+  createStudent,
+  deactivateRegisteredPortalStudent,
+  deleteCenter,
+  deleteStudent,
+  getStudentOptions,
+  getStudentStats,
+  impersonateRegisteredPortalStudent,
+  listCenters,
+  listRegisteredPortalStudents,
+  rollbackRegisteredPortalStudentStage,
+  listStudents,
+  resetRegisteredPortalStudentPassword,
+  updateStudent,
+  sendRegisteredPortalStudentEmail,
+  updateCenter,
+  type RegisteredPortalStudentActionResponse,
+  type CenterRecord,
+  type CenterUpsert,
+  type RegisteredPortalStudentEmailRequest,
+  type RegisteredPortalStudentRollbackStageRequest,
+  type RegisteredPortalStudentRecord,
+  type StudentOptions,
+  type StudentRecord,
+  type StudentStats,
+  type StudentUpsert,
+} from '../../api/students'
+import type { PortalStudentRecord } from '../../api/portal'
+import { executeWorkflowTaskAction, listWorkflowTasks, type WorkflowActionOption, type WorkflowTaskRecord } from '../../api/workflow'
+import { useAuthStore } from '../../stores/auth'
+import { useExportJobStore } from '../../stores/exportJobs'
+
+const route = useRoute()
+const authStore = useAuthStore()
+const exportJobStore = useExportJobStore()
+const loading = ref(false)
+const bootstrapping = ref(false)
+const submitting = ref(false)
+const dialogVisible = ref(false)
+const deleteCenterDialogVisible = ref(false)
+const portalEmailDialogVisible = ref(false)
+const portalEmailSubmitting = ref(false)
+const portalEmailResultDialogVisible = ref(false)
+const portalNoticeDialogVisible = ref(false)
+const exportJobResultDialogVisible = ref(false)
+const resetPasswordDialogVisible = ref(false)
+const rollbackDialogVisible = ref(false)
+const exportSubmitting = ref(false)
+const resetPasswordSubmitting = ref(false)
+const rollbackSubmitting = ref(false)
+const rollbackLoading = ref(false)
+const deleteCenterSubmitting = ref(false)
+const portalImpersonationSubmitting = ref(false)
+const portalStudentEditorVisible = ref(false)
+const portalStudentEditorLoading = ref(false)
+const portalStudentEditorSubmitting = ref(false)
+const portalStudentEditorRecord = ref<PortalStudentRecord | null>(null)
+const portalStudentEditorTitle = ref('编辑学生')
+const dialogMode = ref<'create' | 'edit'>('create')
+const currentId = ref<number | null>(null)
+const selectedCenterIds = ref<number[]>([])
+const selectedRegisteredPortalStudentIds = ref<number[]>([])
+const deletingCenter = ref<CenterRecord | null>(null)
+const studentStatusColors = ref<DictColorMap>({})
+const portalEmailTarget = ref<RegisteredPortalStudentRecord | null>(null)
+const portalEmailResult = ref<RegisteredPortalStudentActionResponse | null>(null)
+const portalEmailResultContext = ref<{ recipient: string; subject: string } | null>(null)
+const resetPasswordTarget = ref<RegisteredPortalStudentRecord | null>(null)
+const resetPasswordResult = ref<RegisteredPortalStudentActionResponse | null>(null)
+const rollbackTarget = ref<RegisteredPortalStudentRecord | null>(null)
+const rollbackDetail = ref<RecruitPortalApplicationDetail | null>(null)
+const portalApplicationDetailVisible = ref(false)
+const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
+const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
+const portalWorkflowTaskLoading = ref(false)
+const portalWorkflowActionSubmitting = ref(false)
+const portalWorkflowCommentDialogVisible = ref(false)
+const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
+const portalWorkflowComment = ref('')
+const exportJobResult = ref<{ message: string; scopeLabel: string; recordCount: number; filterSummary: string } | null>(null)
+const portalNotice = ref<{ title: string; message: string; type: 'success' | 'warning' | 'error' | 'info' } | null>(null)
+
+type PortalApplicationEditorExpose = {
+  submitForm: () => Promise<void>
+}
+
+const portalStudentEditorRef = ref<PortalApplicationEditorExpose | null>(null)
+
+const stats = ref<StudentStats>({
+  total_students: 0,
+  active_students: 0,
+  outbound_students: 0,
+  thesis_students: 0,
+  advisor_count: 0,
+  center_total: 0,
+  enabled_center_total: 0,
+  registered_portal_total: 0,
+  portal_submitted_total: 0,
+  portal_unsubmitted_total: 0,
+})
+const options = ref<StudentOptions>({
+  status_options: [],
+  degree_options: [],
+  advisor_options: [],
+  center_advisor_options: [],
+  registered_portal_advisor_filter_options: [],
+  registered_portal_first_choice_advisor_filter_options: [],
+  registered_portal_second_choice_advisor_filter_options: [],
+  registered_portal_application_status_options: [],
+  center_options: [],
+  political_status_options: [],
+  center_advisor_map: [],
+})
+const students = ref<StudentRecord[]>([])
+const centers = ref<CenterRecord[]>([])
+const registeredPortalStudents = ref<RegisteredPortalStudentRecord[]>([])
+
+const studentFilters = reactive({
+  keyword: '',
+  status: '',
+  advisor_name: '',
+  center_name: '',
+})
+const centerFilters = reactive({
+  keyword: '',
+  is_enabled: '',
+  director_id: '',
+})
+const registeredPortalFilters = reactive({
+  keyword: '',
+  application_form_status: '',
+  recruitment_application_status: '',
+  show_all_background_assessed: false,
+  first_choice_advisor_names: [] as string[],
+  second_choice_advisor_names: [] as string[],
+  first_choice_center_names: [] as string[],
+  second_choice_center_names: [] as string[],
+  sort_by: '',
+  sort_order: 'desc',
+})
+const portalEmailForm = reactive<RegisteredPortalStudentEmailRequest>({
+  subject: '',
+  content: '',
+})
+const rollbackForm = reactive<RegisteredPortalStudentRollbackStageRequest>({
+  target_stage: '',
+  comment: '',
+})
+
+type RegisteredPortalRollbackStageKey =
+  | 'qualification_review'
+  | 'background_assessment'
+  | 'advisor_screening_first'
+  | 'advisor_screening_second'
+  | 'initial_screening_confirmation'
+  | 'camp_interview'
+
+const registeredPortalRollbackStageCatalog: Array<{ label: string; value: RegisteredPortalRollbackStageKey; rank: number }> = [
+  { label: '资格审核', value: 'qualification_review', rank: 1 },
+  { label: '背景评估', value: 'background_assessment', rank: 2 },
+  { label: '导师初筛-第一志愿', value: 'advisor_screening_first', rank: 3 },
+  { label: '导师初筛-第二志愿', value: 'advisor_screening_second', rank: 4 },
+  { label: '初筛确认', value: 'initial_screening_confirmation', rank: 5 },
+  { label: '入营面试', value: 'camp_interview', rank: 6 },
+]
+
+const studentFormRef = ref<FormInstance>()
+const centerFormRef = ref<FormInstance>()
+const studentForm = reactive<StudentUpsert>({
+  student_no: '',
+  full_name: '',
+  status: '在校',
+  advisor_name: '',
+  advisor_id: '',
+  center_name: '',
+  degree_type: '工程博士',
+  enrollment_year: new Date().getFullYear(),
+  phone_number: '',
+  political_status: '',
+})
+const centerForm = reactive<CenterUpsert>({
+  center_name: '',
+  director_name: '',
+  director_id: '',
+  advisor_names: [],
+  advisor_ids: [],
+  is_enabled: true,
+  created_date: new Date().toISOString().slice(0, 10),
+})
+
+const centerEnabledOptions = [
+  { label: '启用', value: 'true' },
+  { label: '停用', value: 'false' },
+]
+const portalApplicationFormStatusOptions = [
+  { label: '已填写报名', value: '已填写报名' },
+  { label: '驳回重填', value: '驳回重填' },
+  { label: '未填写报名', value: '未填写报名' },
+]
+
+const studentRules: FormRules<StudentUpsert> = {
+  student_no: [{ required: true, message: '请输入学号', trigger: 'blur' }],
+  full_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+  advisor_id: [{ required: true, message: '请选择导师', trigger: 'change' }],
+  center_name: [{ required: true, message: '请选择中心', trigger: 'change' }],
+  degree_type: [{ required: true, message: '请选择学位类型', trigger: 'change' }],
+  enrollment_year: [{ required: true, message: '请输入入学年份', trigger: 'change' }],
+}
+const centerRules: FormRules<CenterUpsert> = {
+  center_name: [{ required: true, message: '请输入中心名称', trigger: 'blur' }],
+  director_id: [{ required: true, message: '请选择负责人', trigger: 'change' }],
+  advisor_ids: [{ required: true, message: '请选择导师团队', trigger: 'change', type: 'array' }],
+}
+
+const activeSection = computed(() => String(route.meta.section || 'records'))
+const isRecordSection = computed(() => activeSection.value === 'records')
+const isCenterSection = computed(() => activeSection.value === 'centers')
+const isPlatformAdmin = computed(() => authStore.roles.includes('platform_admin'))
+const isRegisteredPortalSection = computed(() => activeSection.value === 'portal-registrations')
+const isRegisteredPortalAcademyAdmin = computed(() => !isPlatformAdmin.value && authStore.roles.some((role) => role === 'AILABMGT' || role === 'academy_admin'))
+const canMaintainCenterSection = computed(() => hasGrantedPermission(authStore.permissions, 'research_center:write'))
+const canMutateSection = computed(() => {
+  if (isRegisteredPortalSection.value) {
+    return false
+  }
+  if (isCenterSection.value) {
+    return canMaintainCenterSection.value
+  }
+  return true
+})
+const sectionConfig = computed(() => {
+  if (activeSection.value === 'portal-registrations') {
+    return {
+      title: '注册学生管理',
+      tag: '门户注册学生',
+      createLabel: '',
+      total: registeredStudentPager.pagination.total,
+    }
+  }
+  if (activeSection.value === 'centers') {
+    return {
+      title: '研究中心管理',
+      tag: '研究中心主数据',
+      createLabel: '新增研究中心',
+      total: centerPager.pagination.total,
+    }
+  }
+  return {
+    title: '学生主档',
+    tag: '主数据管理',
+    createLabel: '新增学生',
+    total: studentPager.pagination.total,
+  }
+})
+const centerAdvisorOptions = computed(() => options.value.center_advisor_options)
+const centerAdvisorMap = computed(() => {
+  const mapping = new Map<string, { value: string; label: string }[]>()
+  options.value.center_advisor_map.forEach((item) => mapping.set(item.center_name, item.advisors))
+  return mapping
+})
+const allAdvisorOptions = computed(() => options.value.advisor_options)
+const advisorOptions = computed(() => {
+  if (!studentForm.center_name) {
+    return allAdvisorOptions.value
+  }
+  const mappedOptions = centerAdvisorMap.value.get(studentForm.center_name)
+  return mappedOptions?.length ? mappedOptions : allAdvisorOptions.value
+})
+const resetPasswordResultMessage = computed(() => {
+  if (!resetPasswordResult.value) {
+    return ''
+  }
+  return buildRegisteredStudentActionMessage(
+    resetPasswordResult.value,
+    '重置密码邮件已发送。',
+    '当前未配置邮件服务，本次未发送邮件。',
+  )
+})
+const portalNoticeDialogTitle = computed(() => portalNotice.value?.title || '提示')
+const studentPager = useServerPagination()
+const centerPager = useServerPagination()
+const registeredStudentPager = useServerPagination()
+
+function normalizeStudentPayload(payload: StudentUpsert): StudentUpsert {
+  return {
+    ...payload,
+    advisor_id: payload.advisor_id ? String(payload.advisor_id) : '',
+    center_name: payload.center_name.trim(),
+    phone_number: payload.phone_number?.trim() || '',
+    political_status: payload.political_status?.trim() || '',
+  }
+}
+
+function normalizeCenterPayload(payload: CenterUpsert): CenterUpsert {
+  return {
+    ...payload,
+    center_name: payload.center_name.trim(),
+    director_id: payload.director_id ? String(payload.director_id) : '',
+    advisor_ids: Array.from(new Set(payload.advisor_ids.filter(Boolean).map((item) => String(item)))),
+    created_date: payload.created_date || new Date().toISOString().slice(0, 10),
+  }
+}
+
+function showPortalNotice(message: string, type: 'success' | 'warning' | 'error' | 'info' = 'info', title?: string) {
+  portalNotice.value = {
+    title: title || (type === 'success' ? '操作成功' : type === 'error' ? '操作失败' : '提示'),
+    message,
+    type,
+  }
+  portalNoticeDialogVisible.value = true
+}
+
+async function loadStats() {
+  const response = await getStudentStats()
+  stats.value = response.data
+}
+
+async function loadOptions() {
+  const response = await getStudentOptions()
+  options.value = response.data
+  studentStatusColors.value = buildDictColorMap(response.data.status_options)
+}
+
+async function loadRecords() {
+  const response = await listStudents({
+    keyword: studentFilters.keyword || undefined,
+    status: studentFilters.status || undefined,
+    advisor_name: studentFilters.advisor_name || undefined,
+    center_name: studentFilters.center_name || undefined,
+    page: studentPager.pagination.currentPage,
+    page_size: studentPager.pagination.pageSize,
+  })
+  students.value = response.data.items
+  studentPager.sync(response.data.total)
+}
+
+async function loadCenters() {
+  const response = await listCenters({
+    keyword: centerFilters.keyword || undefined,
+    is_enabled: centerFilters.is_enabled ? centerFilters.is_enabled === 'true' : undefined,
+    director_id: centerFilters.director_id || undefined,
+    page: centerPager.pagination.currentPage,
+    page_size: centerPager.pagination.pageSize,
+  })
+  centers.value = response.data.items
+  centerPager.sync(response.data.total)
+}
+
+async function loadRegisteredPortalStudents() {
+  const response = await listRegisteredPortalStudents({
+    keyword: registeredPortalFilters.keyword || undefined,
+    application_form_status: registeredPortalFilters.application_form_status || undefined,
+    recruitment_application_status: registeredPortalFilters.recruitment_application_status || undefined,
+    show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
+    first_choice_advisor_names: registeredPortalFilters.first_choice_advisor_names.length ? registeredPortalFilters.first_choice_advisor_names.join(',') : undefined,
+    second_choice_advisor_names: registeredPortalFilters.second_choice_advisor_names.length ? registeredPortalFilters.second_choice_advisor_names.join(',') : undefined,
+    first_choice_center_names: registeredPortalFilters.first_choice_center_names.length ? registeredPortalFilters.first_choice_center_names.join(',') : undefined,
+    second_choice_center_names: registeredPortalFilters.second_choice_center_names.length ? registeredPortalFilters.second_choice_center_names.join(',') : undefined,
+    sort_by: registeredPortalFilters.sort_by || undefined,
+    sort_order: registeredPortalFilters.sort_by ? registeredPortalFilters.sort_order || 'desc' : undefined,
+    page: registeredStudentPager.pagination.currentPage,
+    page_size: registeredStudentPager.pagination.pageSize,
+  })
+  registeredPortalStudents.value = response.data.items
+  selectedRegisteredPortalStudentIds.value = []
+  registeredStudentPager.sync(response.data.total)
+}
+
+async function loadSectionData() {
+  loading.value = true
+  try {
+    if (activeSection.value === 'portal-registrations') {
+      await loadRegisteredPortalStudents()
+      return
+    }
+    if (activeSection.value === 'centers') {
+      await loadCenters()
+      return
+    }
+    await loadRecords()
+  } finally {
+    loading.value = false
+  }
+}
+
+async function bootstrap() {
+  bootstrapping.value = true
+  try {
+    await Promise.all([loadStats(), loadOptions(), loadSectionData()])
+  } finally {
+    bootstrapping.value = false
+  }
+}
+
+async function refreshAfterMutation() {
+  await Promise.all([loadStats(), loadOptions(), loadSectionData()])
+}
+
+function resetStudentForm() {
+  currentId.value = null
+  Object.assign(studentForm, {
+    student_no: '',
+    full_name: '',
+    status: '在校',
+    advisor_name: '',
+    advisor_id: '',
+    center_name: '',
+    degree_type: '工程博士',
+    enrollment_year: new Date().getFullYear(),
+    phone_number: '',
+    political_status: '',
+  })
+  studentFormRef.value?.clearValidate()
+}
+
+function resetCenterForm() {
+  currentId.value = null
+  Object.assign(centerForm, {
+    center_name: '',
+    director_name: '',
+    director_id: '',
+    advisor_names: [],
+    advisor_ids: [],
+    is_enabled: true,
+    created_date: new Date().toISOString().slice(0, 10),
+  })
+  centerFormRef.value?.clearValidate()
+}
+
+function openCreateDialog() {
+  if (!canMutateSection.value) {
+    return
+  }
+  dialogMode.value = 'create'
+  if (activeSection.value === 'centers') {
+    resetCenterForm()
+  } else {
+    resetStudentForm()
+  }
+  dialogVisible.value = true
+}
+
+function openStudentEditDialog(row: StudentRecord) {
+  dialogMode.value = 'edit'
+  currentId.value = row.id
+  Object.assign(studentForm, {
+    student_no: row.student_no,
+    full_name: row.full_name,
+    status: row.status,
+    advisor_name: row.advisor_name,
+    advisor_id: row.advisor_id ? String(row.advisor_id) : '',
+    center_name: row.center_name,
+    degree_type: row.degree_type,
+    enrollment_year: row.enrollment_year,
+    phone_number: row.phone_number || '',
+    political_status: row.political_status || '',
+  })
+  dialogVisible.value = true
+}
+
+function openCenterEditDialog(row: CenterRecord) {
+  dialogMode.value = 'edit'
+  currentId.value = row.id
+  Object.assign(centerForm, {
+    center_name: row.center_name,
+    director_name: row.director_name,
+    director_id: row.director_id ? String(row.director_id) : '',
+    advisor_names: [...row.advisor_names],
+    advisor_ids: row.advisor_ids.map((item) => String(item)),
+    is_enabled: row.is_enabled,
+    created_date: row.created_date || new Date().toISOString().slice(0, 10),
+  })
+  dialogVisible.value = true
+}
+
+async function submitStudentForm() {
+  const formInstance = studentFormRef.value
+  if (!formInstance) {
+    return
+  }
+  const isValid = await formInstance.validate().catch(() => false)
+  if (!isValid) {
+    return
+  }
+  const phoneValidationMessage = getPhoneValidationMessage(studentForm.phone_number || '')
+  if (phoneValidationMessage) {
+    ElMessage.warning(phoneValidationMessage)
+    return
+  }
+  if (studentForm.phone_number) {
+    studentForm.phone_number = normalizePhoneNumber(studentForm.phone_number)
+  }
+  submitting.value = true
+  try {
+    const payload = normalizeStudentPayload(studentForm)
+    if (dialogMode.value === 'create') {
+      await createStudent(payload)
+      ElMessage.success('学生已新增')
+    } else if (currentId.value !== null) {
+      await updateStudent(currentId.value, payload)
+      ElMessage.success('学生信息已更新')
+    }
+    dialogVisible.value = false
+    await refreshAfterMutation()
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitCenterForm() {
+  const formInstance = centerFormRef.value
+  if (!formInstance) {
+    return
+  }
+  const isValid = await formInstance.validate().catch(() => false)
+  if (!isValid) {
+    return
+  }
+  submitting.value = true
+  try {
+    const payload = normalizeCenterPayload(centerForm)
+    if (dialogMode.value === 'create') {
+      await createCenter(payload)
+      ElMessage.success('研究中心已新增')
+    } else if (currentId.value !== null) {
+      await updateCenter(currentId.value, payload)
+      ElMessage.success('研究中心信息已更新')
+    }
+    dialogVisible.value = false
+    await refreshAfterMutation()
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '研究中心保存失败') : '研究中心保存失败'
+    ElMessage.error(detail)
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitDialog() {
+  if (isCenterSection.value) {
+    await submitCenterForm()
+    return
+  }
+  await submitStudentForm()
+}
+
+async function handleDeleteStudent(row: StudentRecord) {
+  await ElMessageBox.confirm(`确定删除学生 ${row.full_name} 吗？`, '删除确认', { type: 'warning' })
+  await deleteStudent(row.id)
+  ElMessage.success('学生已删除')
+  await refreshAfterMutation()
+}
+
+async function handleDeleteCenter(row: CenterRecord) {
+  deletingCenter.value = row
+  deleteCenterDialogVisible.value = true
+}
+
+function closeDeleteCenterDialog() {
+  if (deleteCenterSubmitting.value) {
+    return
+  }
+  deleteCenterDialogVisible.value = false
+  deletingCenter.value = null
+}
+
+async function submitDeleteCenter() {
+  if (!deletingCenter.value) {
+    return
+  }
+  try {
+    deleteCenterSubmitting.value = true
+    await deleteCenter(deletingCenter.value.id)
+    ElMessage.success('研究中心已删除')
+    closeDeleteCenterDialog()
+    await refreshAfterMutation()
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '研究中心删除失败') : '研究中心删除失败'
+    ElMessage.error(detail)
+  } finally {
+    deleteCenterSubmitting.value = false
+  }
+}
+
+async function handleBatchDeleteCenters() {
+  if (!selectedCenterIds.value.length) {
+    ElMessage.warning('请先选择研究中心')
+    return
+  }
+  await ElMessageBox.confirm(`确定批量删除已选 ${selectedCenterIds.value.length} 个研究中心吗？`, '批量删除确认', { type: 'warning' })
+  const response = await batchDeleteCenters(selectedCenterIds.value)
+  ElMessage.success(`已删除 ${response.data.success_count} 个研究中心`)
+  selectedCenterIds.value = []
+  await refreshAfterMutation()
+}
+
+async function handleSearch() {
+  if (isRegisteredPortalSection.value) {
+    registeredStudentPager.reset()
+  } else if (isCenterSection.value) {
+    centerPager.reset()
+  } else {
+    studentPager.reset()
+  }
+  await loadSectionData()
+}
+
+async function handleReset() {
+  Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
+  Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
+  Object.assign(registeredPortalFilters, {
+    keyword: '',
+    application_form_status: '',
+    recruitment_application_status: '',
+    show_all_background_assessed: false,
+    first_choice_advisor_names: [],
+    second_choice_advisor_names: [],
+    first_choice_center_names: [],
+    second_choice_center_names: [],
+    sort_by: '',
+    sort_order: 'desc',
+  })
+  selectedCenterIds.value = []
+  selectedRegisteredPortalStudentIds.value = []
+  studentPager.reset()
+  centerPager.reset()
+  registeredStudentPager.reset()
+  await loadSectionData()
+}
+
+async function handleStudentPageChange(page: number) {
+  studentPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleStudentPageSizeChange(size: number) {
+  studentPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleCenterPageChange(page: number) {
+  centerPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleCenterPageSizeChange(size: number) {
+  centerPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleRegisteredStudentPageChange(page: number) {
+  registeredStudentPager.handleCurrentChange(page)
+  await loadSectionData()
+}
+
+async function handleRegisteredStudentPageSizeChange(size: number) {
+  registeredStudentPager.handleSizeChange(size)
+  await loadSectionData()
+}
+
+async function handleRegisteredPortalSortChange(payload: { prop?: string; order?: 'ascending' | 'descending' | null }) {
+  const sortableFields = new Set(['first_choice_screening_score', 'second_choice_screening_score'])
+  if (!payload.prop || !sortableFields.has(payload.prop)) {
+    registeredPortalFilters.sort_by = ''
+    registeredPortalFilters.sort_order = 'desc'
+    await loadSectionData()
+    return
+  }
+  registeredPortalFilters.sort_by = payload.prop
+  registeredPortalFilters.sort_order = payload.order === 'ascending' ? 'asc' : 'desc'
+  registeredStudentPager.reset()
+  await loadSectionData()
+}
+
+function buildRegisteredPortalExportFilters() {
+  return {
+    keyword: registeredPortalFilters.keyword || undefined,
+    application_form_status: registeredPortalFilters.application_form_status || undefined,
+    recruitment_application_status: registeredPortalFilters.recruitment_application_status || undefined,
+    show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
+    first_choice_advisor_names: registeredPortalFilters.first_choice_advisor_names.length ? [...registeredPortalFilters.first_choice_advisor_names] : undefined,
+    second_choice_advisor_names: registeredPortalFilters.second_choice_advisor_names.length ? [...registeredPortalFilters.second_choice_advisor_names] : undefined,
+    first_choice_center_names: registeredPortalFilters.first_choice_center_names.length ? [...registeredPortalFilters.first_choice_center_names] : undefined,
+    second_choice_center_names: registeredPortalFilters.second_choice_center_names.length ? [...registeredPortalFilters.second_choice_center_names] : undefined,
+  }
+}
+
+function buildRegisteredPortalExportFilterSummary() {
+  const items: string[] = []
+  if (registeredPortalFilters.keyword) {
+    items.push(`关键词：${registeredPortalFilters.keyword}`)
+  }
+  if (registeredPortalFilters.application_form_status) {
+    items.push(`报名状态：${registeredPortalFilters.application_form_status}`)
+  }
+  if (registeredPortalFilters.recruitment_application_status) {
+    items.push(`申请流转状态：${registeredPortalFilters.recruitment_application_status}`)
+  }
+  if (isRegisteredPortalAcademyAdmin.value) {
+    items.push(`背景评估视图：${registeredPortalFilters.show_all_background_assessed ? '查看全部' : '隐藏本人已完成背景评估'}`)
+  }
+  if (registeredPortalFilters.first_choice_advisor_names.length) {
+    items.push(`第一志愿导师：${registeredPortalFilters.first_choice_advisor_names.join('、')}`)
+  }
+  if (registeredPortalFilters.second_choice_advisor_names.length) {
+    items.push(`第二志愿导师：${registeredPortalFilters.second_choice_advisor_names.join('、')}`)
+  }
+  if (registeredPortalFilters.first_choice_center_names.length) {
+    items.push(`第一志愿中心：${registeredPortalFilters.first_choice_center_names.join('、')}`)
+  }
+  if (registeredPortalFilters.second_choice_center_names.length) {
+    items.push(`第二志愿中心：${registeredPortalFilters.second_choice_center_names.join('、')}`)
+  }
+  if (registeredPortalFilters.sort_by) {
+    const sortLabel = registeredPortalFilters.sort_by === 'first_choice_screening_score' ? '第一志愿导师评分' : '第二志愿导师评分'
+    items.push(`排序：${sortLabel} ${registeredPortalFilters.sort_order === 'asc' ? '升序' : '降序'}`)
+  }
+  return items.join('；') || '当前未设置筛选条件'
+}
+
+async function handleExportRegisteredPortalStudents() {
+  if (!selectedRegisteredPortalStudentIds.value.length) {
+    showPortalNotice('请先选择需要导出的注册学生', 'warning')
+    return
+  }
+  exportSubmitting.value = true
+  try {
+    const response = await createRegisteredPortalStudentExportJob({ ids: selectedRegisteredPortalStudentIds.value })
+    await exportJobStore.fetchJobs()
+    exportJobResult.value = {
+      message: response.data.message,
+      scopeLabel: '导出所选',
+      recordCount: selectedRegisteredPortalStudentIds.value.length,
+      filterSummary: '按当前勾选学生创建导出任务',
+    }
+    exportJobResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '导出失败') : '导出失败'
+    showPortalNotice(message, 'error', '导出失败')
+  } finally {
+    exportSubmitting.value = false
+  }
+}
+
+async function handleExportAllRegisteredPortalStudents() {
+  if (!registeredStudentPager.pagination.total) {
+    showPortalNotice('当前没有可导出的注册学生', 'warning')
+    return
+  }
+  exportSubmitting.value = true
+  try {
+    const response = await createRegisteredPortalStudentExportJob(buildRegisteredPortalExportFilters())
+    await exportJobStore.fetchJobs()
+    exportJobResult.value = {
+      message: response.data.message,
+      scopeLabel: '导出查询结果',
+      recordCount: registeredStudentPager.pagination.total,
+      filterSummary: buildRegisteredPortalExportFilterSummary(),
+    }
+    exportJobResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message || '导出失败') : '导出失败'
+    showPortalNotice(message, 'error', '导出失败')
+  } finally {
+    exportSubmitting.value = false
+  }
+}
+
+function handleCenterSelectionChange(selection: CenterRecord[]) {
+  selectedCenterIds.value = selection.map((item) => item.id)
+}
+
+function handleRegisteredPortalStudentSelectionChange(selection: RegisteredPortalStudentRecord[]) {
+  selectedRegisteredPortalStudentIds.value = selection.map((item) => item.id)
+}
+
+function handleStudentCenterChange(value: string) {
+  const availableAdvisors = centerAdvisorMap.value.get(value) || []
+  if (!availableAdvisors.some((item) => item.value === studentForm.advisor_id)) {
+    studentForm.advisor_id = ''
+  }
+}
+
+function handleCenterDirectorChange(value: string) {
+  if (!value) {
+    return
+  }
+  if (!centerForm.advisor_ids.includes(value)) {
+    centerForm.advisor_ids = Array.from(new Set([...centerForm.advisor_ids, value]))
+  }
+}
+
+function syncCenterDirector() {
+  const directorId = String(centerForm.director_id || '')
+  if (directorId && centerForm.advisor_ids.includes(directorId)) {
+    return
+  }
+  centerForm.director_id = centerForm.advisor_ids[0] || ''
+}
+
+function statusTagType(status: string) {
+  return resolveDictTagType(status, studentStatusColors.value)
+}
+
+function portalApplicationFormStatusTagType(status: string) {
+  if (status === '已填写报名') {
+    return 'success'
+  }
+  if (status === '驳回重填') {
+    return 'warning'
+  }
+  return 'info'
+}
+
+function portalRecruitmentStatusTagType(status: string | null | undefined) {
+  if (!status) {
+    return 'info'
+  }
+  if (status === '报名已提交' || status === '资格审核通过' || status === '材料评分中' || status === '面试完成') {
+    return 'warning'
+  }
+  if (status === '预录取' || status === '同意录取') {
+    return 'success'
+  }
+  if (status === '驳回重填') {
+    return 'danger'
+  }
+  return 'info'
+}
+
+function portalAccountStatusTagType(status: string) {
+  return status === '启用' ? 'success' : 'danger'
+}
+
+function buildRegisteredStudentActionMessage(response: RegisteredPortalStudentActionResponse, sentText: string, skippedText: string) {
+  if (response.email_sent === true) {
+    return `${response.message}\n\n${sentText}`
+  }
+  if (response.email_sent === false) {
+    return `${response.message}\n\n${skippedText}`
+  }
+  return response.message
+}
+
+const portalEmailResultMessage = computed(() => {
+  if (!portalEmailResult.value) {
+    return ''
+  }
+  return buildRegisteredStudentActionMessage(
+    portalEmailResult.value,
+    '邮件已发送。',
+    '当前未配置邮件服务，本次未发送邮件。',
+  )
+})
+
+function resetPortalEmailForm() {
+  portalEmailTarget.value = null
+  portalEmailForm.subject = ''
+  portalEmailForm.content = ''
+}
+
+function resetPortalEmailResultDialog() {
+  portalEmailResult.value = null
+  portalEmailResultContext.value = null
+}
+
+function resetResetPasswordDialog() {
+  resetPasswordTarget.value = null
+  resetPasswordResult.value = null
+}
+
+async function handleDeactivateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
+  if (row.account_status === '停用') {
+    await ElMessageBox.alert('该注册学生账号已停用。', '提示', { type: 'info' })
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定停用 ${row.full_name} 的门户账号吗？停用后将无法登录和提交报名。`, '停用确认', { type: 'warning' })
+    const response = await deactivateRegisteredPortalStudent(row.id)
+    await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
+    await refreshAfterMutation()
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      showPortalNotice(String(error.response?.data?.detail || error.message || '停用账号失败'), 'error', '停用账号失败')
+    }
+  }
+}
+
+async function handleActivateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
+  if (row.account_status === '启用') {
+    await ElMessageBox.alert('该注册学生账号已启用。', '提示', { type: 'info' })
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定重新启用 ${row.full_name} 的门户账号吗？启用后可恢复登录和报名操作。`, '启用确认', { type: 'warning' })
+    const response = await activateRegisteredPortalStudent(row.id)
+    await ElMessageBox.alert(response.data.message, '操作成功', { type: 'success' })
+    await refreshAfterMutation()
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      showPortalNotice(String(error.response?.data?.detail || error.message || '启用账号失败'), 'error', '启用账号失败')
+    }
+  }
+}
+
+async function handleResetRegisteredPortalStudentPassword(row: RegisteredPortalStudentRecord) {
+  if (row.account_status !== '启用') {
+    showPortalNotice('已停用账号不可重置密码。', 'warning')
+    return
+  }
+  resetPasswordTarget.value = row
+  resetPasswordResult.value = null
+  resetPasswordDialogVisible.value = true
+}
+
+async function submitResetPasswordDialog() {
+  if (!resetPasswordTarget.value) {
+    return
+  }
+  resetPasswordSubmitting.value = true
+  try {
+    const response = await resetRegisteredPortalStudentPassword(resetPasswordTarget.value.id)
+    resetPasswordResult.value = response.data
+    await refreshAfterMutation()
+  } finally {
+    resetPasswordSubmitting.value = false
+  }
+}
+
+function openRegisteredPortalStudentEmailDialog(row: RegisteredPortalStudentRecord) {
+  portalEmailTarget.value = row
+  portalEmailForm.subject = '博士生招生门户通知'
+  portalEmailForm.content = ''
+  portalEmailDialogVisible.value = true
+}
+
+function canViewRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
+  return (row.application_form_status === '已填写报名' || row.application_form_status === '驳回重填') && !!row.recruitment_application_id
+}
+
+function canReviewRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
+  return canViewRegisteredPortalApplication(row)
+    && !!row.recruitment_application_business_key
+    && row.recruitment_application_status === '报名已提交'
+}
+
+function canRollbackRegisteredPortalApplication(row: RegisteredPortalStudentRecord) {
+  return hasGrantedPermission(authStore.permissions, 'recruitment_registered_students:write')
+    && canViewRegisteredPortalApplication(row)
+    && !!row.recruitment_application_id
+    && !!String(row.recruitment_application_status || '').trim()
+}
+
+function inferRegisteredPortalRollbackStage(
+  row: RegisteredPortalStudentRecord,
+  detail: RecruitPortalApplicationDetail,
+): RegisteredPortalRollbackStageKey | '' {
+  const status = String(row.recruitment_application_status || detail.application_status || '').trim()
+  if (status === '报名已提交' || status === '驳回重填') {
+    return 'qualification_review'
+  }
+  if (status === '待背景评估') {
+    return 'background_assessment'
+  }
+  if (status === '待导师初筛-第一志愿') {
+    return 'advisor_screening_first'
+  }
+  if (status === '待导师初筛-第二志愿') {
+    return 'advisor_screening_second'
+  }
+  if (status === '待初筛确认') {
+    return 'initial_screening_confirmation'
+  }
+  if (status === '入营面试') {
+    return 'camp_interview'
+  }
+  if (status === '报名终止') {
+    if (detail.initial_screening_status === 'confirmed' || detail.initial_screening_result) {
+      return 'initial_screening_confirmation'
+    }
+    if (detail.advisor_screening_round === 'second_choice' || detail.second_choice_screening_score !== null && detail.second_choice_screening_score !== undefined) {
+      return 'advisor_screening_second'
+    }
+    if (detail.first_choice_screening_score !== null && detail.first_choice_screening_score !== undefined || detail.advisor_screening_status) {
+      return 'advisor_screening_first'
+    }
+    if ((detail.background_assessments || []).length > 0) {
+      return 'background_assessment'
+    }
+    return 'qualification_review'
+  }
+  return ''
+}
+
+const rollbackCurrentStage = computed(() => {
+  if (!rollbackTarget.value || !rollbackDetail.value) {
+    return ''
+  }
+  return inferRegisteredPortalRollbackStage(rollbackTarget.value, rollbackDetail.value)
+})
+
+const rollbackCurrentStageLabel = computed(() => {
+  const currentStage = rollbackCurrentStage.value
+  return registeredPortalRollbackStageCatalog.find((item) => item.value === currentStage)?.label || '未知环节'
+})
+
+const rollbackStageOptions = computed(() => {
+  const currentStage = rollbackCurrentStage.value
+  if (!currentStage || !rollbackDetail.value) {
+    return []
+  }
+  const currentRank = registeredPortalRollbackStageCatalog.find((item) => item.value === currentStage)?.rank || 0
+  const hasSecondChoice = rollbackDetail.value.advisor_screening_round === 'second_choice'
+    || (rollbackDetail.value.second_choice_screening_score !== null && rollbackDetail.value.second_choice_screening_score !== undefined)
+
+  return registeredPortalRollbackStageCatalog.filter((item) => {
+    if (item.rank >= currentRank) {
+      return false
+    }
+    if (item.value === 'advisor_screening_second' && !hasSecondChoice) {
+      return false
+    }
+    return true
+  })
+})
+
+async function loadPortalViewingWorkflowTask(businessKey?: string | null) {
+  const normalizedKey = String(businessKey || '').trim()
+  if (!normalizedKey) {
+    portalViewingWorkflowTask.value = null
+    return
+  }
+  portalWorkflowTaskLoading.value = true
+  try {
+    const response = await listWorkflowTasks({ page: 1, page_size: 20, module: '招生管理', keyword: normalizedKey })
+    portalViewingWorkflowTask.value = response.data.items.find((item) => item.business_key === normalizedKey) || null
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载审批任务失败'
+    showPortalNotice(message, 'error', '加载审批任务失败')
+    portalViewingWorkflowTask.value = null
+  } finally {
+    portalWorkflowTaskLoading.value = false
+  }
+}
+
+async function openRegisteredPortalApplicationDetail(row: RegisteredPortalStudentRecord) {
+  if (!canViewRegisteredPortalApplication(row) || !row.recruitment_application_id) {
+    showPortalNotice('当前学生尚未完成申报，无法查看填报内容', 'warning')
+    return
+  }
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.recruitment_application_id)
+    portalViewingApplication.value = response.data
+    portalApplicationDetailVisible.value = true
+    await loadPortalViewingWorkflowTask(row.recruitment_application_business_key || response.data.business_key)
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载填报详情失败'
+    showPortalNotice(message, 'error', '加载填报详情失败')
+  }
+}
+
+function resetRegisteredPortalRollbackDialog() {
+  rollbackTarget.value = null
+  rollbackDetail.value = null
+  rollbackForm.target_stage = ''
+  rollbackForm.comment = ''
+}
+
+async function openRegisteredPortalRollbackDialog(row: RegisteredPortalStudentRecord) {
+  if (!canRollbackRegisteredPortalApplication(row) || !row.recruitment_application_id) {
+    showPortalNotice('当前申请不支持退回环节', 'warning')
+    return
+  }
+  rollbackLoading.value = true
+  rollbackTarget.value = row
+  rollbackDetail.value = null
+  rollbackForm.target_stage = ''
+  rollbackForm.comment = ''
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.recruitment_application_id)
+    rollbackDetail.value = response.data
+    const stageOptions = rollbackStageOptions.value
+    if (!stageOptions.length) {
+      showPortalNotice('当前申请没有可退回的前序环节', 'warning')
+      resetRegisteredPortalRollbackDialog()
+      return
+    }
+    rollbackForm.target_stage = stageOptions[0].value
+    rollbackDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '加载可退回环节失败'
+    showPortalNotice(message, 'error', '加载可退回环节失败')
+    resetRegisteredPortalRollbackDialog()
+  } finally {
+    rollbackLoading.value = false
+  }
+}
+
+async function submitRegisteredPortalRollbackDialog() {
+  if (!rollbackTarget.value || !rollbackForm.target_stage) {
+    showPortalNotice('请选择目标环节', 'warning')
+    return
+  }
+  rollbackSubmitting.value = true
+  try {
+    const response = await rollbackRegisteredPortalStudentStage(rollbackTarget.value.id, {
+      target_stage: rollbackForm.target_stage,
+      comment: rollbackForm.comment?.trim() || undefined,
+    })
+    rollbackDialogVisible.value = false
+    if (portalViewingApplication.value?.application_id === rollbackTarget.value.recruitment_application_id) {
+      portalApplicationDetailVisible.value = false
+      portalViewingApplication.value = null
+      portalViewingWorkflowTask.value = null
+    }
+    await refreshAfterMutation()
+    showPortalNotice(`${response.data.message}${response.data.email_sent ? '，已发送邮件通知' : '，当前未发送邮件通知'}`, 'success')
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '退回环节失败'
+    showPortalNotice(message, 'error', '退回环节失败')
+  } finally {
+    rollbackSubmitting.value = false
+  }
+}
+
+async function handlePortalWorkflowAction(action: WorkflowActionOption) {
+  if (!portalViewingWorkflowTask.value) {
+    showPortalNotice('当前未找到可执行的审批任务', 'warning')
+    return
+  }
+  pendingPortalWorkflowAction.value = action
+  portalWorkflowComment.value = ''
+  portalWorkflowCommentDialogVisible.value = true
+}
+
+async function submitPortalWorkflowCommentDialog() {
+  if (!portalViewingWorkflowTask.value || !pendingPortalWorkflowAction.value) {
+    return
+  }
+  const currentAction = pendingPortalWorkflowAction.value
+  portalWorkflowActionSubmitting.value = true
+  try {
+    await executeWorkflowTaskAction(portalViewingWorkflowTask.value.id, {
+      action: currentAction.action,
+      comment: portalWorkflowComment.value.trim() || undefined,
+    })
+    portalWorkflowCommentDialogVisible.value = false
+    portalApplicationDetailVisible.value = false
+    portalViewingApplication.value = null
+    portalViewingWorkflowTask.value = null
+    showPortalNotice(`${currentAction.label}已完成`, 'success')
+    try {
+      await refreshAfterMutation()
+    } catch (refreshError) {
+      const refreshMessage = axios.isAxiosError(refreshError)
+        ? String(refreshError.response?.data?.detail || refreshError.message)
+        : '列表刷新失败，请手动刷新页面'
+      showPortalNotice(`操作已完成，但${refreshMessage}`, 'warning')
+    }
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message)
+      : `${currentAction.label}失败`
+    showPortalNotice(message, 'error', `${currentAction.label}失败`)
+  } finally {
+    portalWorkflowActionSubmitting.value = false
+  }
+}
+
+function resetPortalWorkflowCommentDialog() {
+  pendingPortalWorkflowAction.value = null
+  portalWorkflowComment.value = ''
+}
+
+function registeredPortalMainActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
+  return [
+    {
+      key: 'view-application',
+      label: '查看填报',
+      type: 'info',
+      disabled: !canViewRegisteredPortalApplication(row),
+      onClick: openRegisteredPortalApplicationDetail,
+    },
+    {
+      key: 'review-application',
+      label: '审批',
+      type: 'primary',
+      disabled: !canReviewRegisteredPortalApplication(row),
+      onClick: openRegisteredPortalApplicationDetail,
+    },
+    {
+      key: row.account_status === '启用' ? 'deactivate' : 'activate',
+      label: row.account_status === '启用' ? '停用账号' : '启用账号',
+      type: row.account_status === '启用' ? 'danger' : 'success',
+      onClick: row.account_status === '启用' ? handleDeactivateRegisteredPortalStudent : handleActivateRegisteredPortalStudent,
+    },
+  ]
+}
+
+async function submitPortalStudentEditor() {
+  if (!portalStudentEditorRef.value) {
+    return
+  }
+  portalStudentEditorSubmitting.value = true
+  try {
+    await portalStudentEditorRef.value.submitForm()
+    portalStudentEditorVisible.value = false
+    await refreshAfterMutation()
+    showPortalNotice('学生资料已保存并即时生效', 'success')
+  } finally {
+    portalStudentEditorSubmitting.value = false
+  }
+}
+
+function registeredPortalMoreActions(row: RegisteredPortalStudentRecord): TableRowAction<RegisteredPortalStudentRecord>[] {
+  const actions: TableRowAction<RegisteredPortalStudentRecord>[] = [
+    { key: 'reset-password', label: '重置密码', type: 'primary', disabled: row.account_status !== '启用', onClick: handleResetRegisteredPortalStudentPassword },
+    { key: 'send-email', label: '发送邮件', type: 'success', onClick: openRegisteredPortalStudentEmailDialog },
+  ]
+  if (isRegisteredPortalAcademyAdmin.value) {
+    actions.unshift({
+      key: 'impersonate',
+      label: '模拟学生',
+      type: 'success',
+      disabled: row.account_status !== '启用' || portalImpersonationSubmitting.value,
+      onClick: handleImpersonateRegisteredPortalStudent,
+    })
+  }
+  if (canRollbackRegisteredPortalApplication(row)) {
+    actions.unshift({ key: 'rollback-stage', label: '退回环节', type: 'warning', onClick: openRegisteredPortalRollbackDialog })
+  }
+  return actions
+}
+
+async function submitPortalEmailDialog() {
+  if (!portalEmailTarget.value) {
+    return
+  }
+  const subject = portalEmailForm.subject.trim()
+  const content = portalEmailForm.content.trim()
+  const recipient = portalEmailTarget.value.email || ''
+  if (!subject) {
+    await ElMessageBox.alert('请输入邮件主题。', '提示', { type: 'warning' })
+    return
+  }
+  if (!content) {
+    await ElMessageBox.alert('请输入邮件内容。', '提示', { type: 'warning' })
+    return
+  }
+  portalEmailSubmitting.value = true
+  try {
+    const response = await sendRegisteredPortalStudentEmail(portalEmailTarget.value.id, { subject, content })
+    portalEmailResultContext.value = {
+      recipient,
+      subject,
+    }
+    portalEmailResult.value = response.data
+    portalEmailDialogVisible.value = false
+    portalEmailResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message || '发送邮件失败')
+      : '发送邮件失败'
+    showPortalNotice(message, 'error', '发送邮件失败')
+  } finally {
+    portalEmailSubmitting.value = false
+  }
+}
+
+async function handleImpersonateRegisteredPortalStudent(row: RegisteredPortalStudentRecord) {
+  if (!isRegisteredPortalAcademyAdmin.value) {
+    await showPortalNotice('仅书院管理员可以使用模拟学生功能', 'warning', '权限不足')
+    return
+  }
+  if (row.account_status !== '启用') {
+    await showPortalNotice('仅启用状态的注册学生可以模拟登录', 'warning', '无法模拟')
+    return
+  }
+
+  portalImpersonationSubmitting.value = true
+  try {
+    const response = await impersonateRegisteredPortalStudent(row.id)
+    const launchUrl = new URL(response.data.launch_url, window.location.origin).toString()
+    window.location.assign(launchUrl)
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message || '模拟学生失败')
+      : '模拟学生失败'
+    await showPortalNotice(message, 'error', '模拟学生失败')
+  } finally {
+    portalImpersonationSubmitting.value = false
+  }
+}
+
+watch(() => studentForm.center_name, handleStudentCenterChange)
+watch(() => String(centerForm.director_id || ''), handleCenterDirectorChange)
+watch(() => centerForm.advisor_ids.slice(), syncCenterDirector)
+watch(() => portalEmailDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalEmailForm()
+  }
+})
+watch(() => portalEmailResultDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalEmailResultDialog()
+  }
+})
+watch(() => portalNoticeDialogVisible.value, (visible) => {
+  if (!visible) {
+    portalNotice.value = null
+  }
+})
+watch(() => exportJobResultDialogVisible.value, (visible) => {
+  if (!visible) {
+    exportJobResult.value = null
+  }
+})
+watch(() => resetPasswordDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetResetPasswordDialog()
+  }
+})
+watch(() => rollbackDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetRegisteredPortalRollbackDialog()
+  }
+})
+watch(() => portalWorkflowCommentDialogVisible.value, (visible) => {
+  if (!visible) {
+    resetPortalWorkflowCommentDialog()
+  }
+})
+watch(() => activeSection.value, () => {
+  dialogVisible.value = false
+  portalEmailDialogVisible.value = false
+  portalEmailResultDialogVisible.value = false
+  exportJobResultDialogVisible.value = false
+  resetPasswordDialogVisible.value = false
+  rollbackDialogVisible.value = false
+  portalWorkflowCommentDialogVisible.value = false
+  selectedCenterIds.value = []
+  selectedRegisteredPortalStudentIds.value = []
+  void loadSectionData()
+})
+
+onMounted(() => {
+  void bootstrap()
+})
+</script>
+
+<template>
+  <section class="registered-students-page" v-loading="bootstrapping">
+    <section class="query-panel">
+      <div class="query-panel__header">
+        <div>
+          <p class="section-tag">{{ sectionConfig.tag }}</p>
+          <h2>{{ sectionConfig.title }}</h2>
+        </div>
+        <div class="header-actions">
+          <el-button
+            v-if="activeSection === 'centers' && canMaintainCenterSection"
+            plain
+            type="danger"
+            :disabled="!selectedCenterIds.length"
+            @click="handleBatchDeleteCenters"
+          >
+            批量删除研究中心
+          </el-button>
+          <el-button
+            v-if="activeSection === 'portal-registrations'"
+            plain
+            type="primary"
+            :loading="exportSubmitting"
+            :disabled="!registeredStudentPager.pagination.total"
+            @click="handleExportAllRegisteredPortalStudents"
+          >
+            导出查询结果
+          </el-button>
+          <el-button
+            v-if="activeSection === 'portal-registrations'"
+            plain
+            type="primary"
+            :loading="exportSubmitting"
+            :disabled="!selectedRegisteredPortalStudentIds.length"
+            @click="handleExportRegisteredPortalStudents"
+          >
+            导出所选
+          </el-button>
+          <span class="summary-text">共 {{ sectionConfig.total }} 条记录</span>
+          <el-button v-if="canMutateSection" type="primary" round @click="openCreateDialog">{{ sectionConfig.createLabel }}</el-button>
+        </div>
+      </div>
+
+      <el-form v-if="isRecordSection" class="filter-form filter-form--default" :inline="true">
+        <el-form-item label="关键字">
+          <el-input v-model="studentFilters.keyword" placeholder="学号 / 姓名 / 研究中心" clearable />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="studentFilters.status" placeholder="全部状态" clearable style="width: 168px">
+            <el-option v-for="item in options.status_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="导师">
+          <el-select v-model="studentFilters.advisor_name" placeholder="全部导师" clearable filterable style="width: 180px">
+            <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="研究中心">
+          <el-select v-model="studentFilters.center_name" placeholder="全部研究中心" clearable filterable style="width: 180px">
+            <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-form v-else-if="isCenterSection" class="filter-form filter-form--default" :inline="true">
+        <el-form-item label="关键字">
+          <el-input v-model="centerFilters.keyword" placeholder="研究中心名称 / 负责人 / 导师团队" clearable />
+        </el-form-item>
+        <el-form-item label="是否启用">
+          <el-select v-model="centerFilters.is_enabled" placeholder="全部状态" clearable style="width: 160px">
+            <el-option v-for="item in centerEnabledOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="负责人">
+          <el-select v-model="centerFilters.director_id" placeholder="全部负责人" clearable filterable style="width: 180px">
+            <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-form v-else class="filter-form filter-form--portal">
+        <div class="filter-grid filter-grid--row-1">
+          <el-form-item label="关键字" class="filter-item filter-item--wide">
+            <el-input v-model="registeredPortalFilters.keyword" placeholder="报名号 / 姓名 / 手机号 / 邮箱 / 招生计划 / 导师" clearable />
+          </el-form-item>
+          <el-form-item label="报名状态" class="filter-item filter-item--compact">
+            <el-select v-model="registeredPortalFilters.application_form_status" placeholder="全部状态" clearable>
+              <el-option v-for="item in portalApplicationFormStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="申请流转状态" class="filter-item filter-item--compact">
+            <el-select v-model="registeredPortalFilters.recruitment_application_status" placeholder="全部流转状态" clearable filterable>
+              <el-option v-for="item in options.registered_portal_application_status_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="isRegisteredPortalAcademyAdmin" label="查看全部" class="filter-item filter-item--toggle">
+            <el-switch
+              v-model="registeredPortalFilters.show_all_background_assessed"
+              inline-prompt
+              active-text="全部"
+              inactive-text="隐藏已评"
+              @change="handleSearch"
+            />
+          </el-form-item>
+        </div>
+        <div class="filter-grid filter-grid--row-2">
+          <el-form-item label="第一志愿导师" class="filter-item filter-item--multi">
+            <el-select
+              v-model="registeredPortalFilters.first_choice_advisor_names"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              placeholder="全部第一志愿导师"
+            >
+              <el-option
+                v-for="item in options.registered_portal_first_choice_advisor_filter_options"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="第一志愿中心" class="filter-item filter-item--multi">
+            <el-select
+              v-model="registeredPortalFilters.first_choice_center_names"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              placeholder="全部第一志愿中心"
+            >
+              <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="第二志愿导师" class="filter-item filter-item--multi">
+            <el-select
+              v-model="registeredPortalFilters.second_choice_advisor_names"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              placeholder="全部第二志愿导师"
+            >
+              <el-option
+                v-for="item in options.registered_portal_second_choice_advisor_filter_options"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="第二志愿中心" class="filter-item filter-item--multi">
+            <el-select
+              v-model="registeredPortalFilters.second_choice_center_names"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              placeholder="全部第二志愿中心"
+            >
+              <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <div class="filter-grid filter-grid--row-3">
+          <el-form-item class="filter-actions">
+            <el-button type="primary" @click="handleSearch">查询</el-button>
+            <el-button @click="handleReset">重置</el-button>
+          </el-form-item>
+        </div>
+      </el-form>
+
+    </section>
+
+    <section class="table-panel">
+      <div class="table-host">
+        <el-table v-if="isRecordSection" :data="students" stripe border v-loading="loading" table-layout="fixed">
+          <el-table-column type="index" label="序号" width="64" align="center">
+            <template #default="scope">
+              {{ (studentPager.pagination.currentPage - 1) * studentPager.pagination.pageSize + scope.$index + 1 }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="student_no" label="学号" width="128" show-overflow-tooltip />
+          <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
+          <el-table-column prop="degree_type" label="学位类型" width="112" show-overflow-tooltip />
+          <el-table-column prop="advisor_name" label="导师" width="96" show-overflow-tooltip />
+          <el-table-column prop="center_name" label="所属研究中心" min-width="130" show-overflow-tooltip />
+          <el-table-column prop="enrollment_year" label="入学年份" width="96" />
+          <el-table-column label="当前状态" width="112">
+            <template #default="scope">
+              <el-tag :type="statusTagType(scope.row.status)">{{ scope.row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="phone_number" label="联系电话" width="128" show-overflow-tooltip />
+          <el-table-column prop="political_status" label="政治面貌" width="110" show-overflow-tooltip />
+          <el-table-column label="操作" width="118" align="left" fixed="right" class-name="operation-column">
+            <template #default="scope">
+              <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openStudentEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteStudent }]" />
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-table v-else-if="isCenterSection" :data="centers" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleCenterSelectionChange">
+          <el-table-column type="index" label="序号" width="64" align="center">
+            <template #default="scope">
+              {{ (centerPager.pagination.currentPage - 1) * centerPager.pagination.pageSize + scope.$index + 1 }}
+            </template>
+          </el-table-column>
+          <el-table-column v-if="canMaintainCenterSection" type="selection" width="44" />
+          <el-table-column prop="center_name" label="研究中心名称" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="director_name" label="负责人" width="120" show-overflow-tooltip />
+          <el-table-column label="导师团队" min-width="220" show-overflow-tooltip>
+            <template #default="scope">
+              <span :title="scope.row.advisor_names.join('、')">{{ scope.row.advisor_names.join('、') || '未配置' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="是否启用" width="110" align="center">
+            <template #default="scope">
+              <el-tag :type="scope.row.is_enabled ? 'success' : 'info'">{{ scope.row.is_enabled ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_date" label="创建日期" width="120" />
+          <el-table-column label="学生数" width="120" align="center">
+            <template #default="scope">
+              <div class="stat-stack">
+                <strong>{{ scope.row.member_student_count }}</strong>
+                <span>活跃 {{ scope.row.active_student_count }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="canMaintainCenterSection" label="操作" width="118" align="left" fixed="right" class-name="operation-column">
+            <template #default="scope">
+              <TableRowActions :row="scope.row" :main-actions="[{ key: 'edit', label: '编辑', type: 'primary', onClick: openCenterEditDialog }]" :more-actions="[{ key: 'delete', label: '删除', type: 'danger', onClick: handleDeleteCenter }]" />
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleRegisteredPortalStudentSelectionChange" @sort-change="handleRegisteredPortalSortChange">
+          <el-table-column type="index" label="序号" width="64" align="center">
+            <template #default="scope">
+              {{ (registeredStudentPager.pagination.currentPage - 1) * registeredStudentPager.pagination.pageSize + scope.$index + 1 }}
+            </template>
+          </el-table-column>
+          <el-table-column type="selection" width="44" />
+          <el-table-column prop="recruitment_application_candidate_no" label="报名号" width="126" show-overflow-tooltip />
+          <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
+          <el-table-column prop="phone_number" label="手机号" width="128" show-overflow-tooltip />
+          <el-table-column prop="email" label="邮箱" width="120" show-overflow-tooltip />
+          <el-table-column label="账号状态" width="96" align="center">
+            <template #default="scope">
+              <el-tag :type="portalAccountStatusTagType(scope.row.account_status)">{{ scope.row.account_status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="报名状态" width="96" align="center">
+            <template #default="scope">
+              <el-tag :type="portalApplicationFormStatusTagType(scope.row.application_form_status)">{{ scope.row.application_form_status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="selected_plan_name" label="招生计划" width="140" show-overflow-tooltip />
+          <el-table-column prop="first_choice_screening_score" label="第一志愿导师评分" width="116" sortable="custom" align="center">
+            <template #default="scope">
+              {{ scope.row.first_choice_screening_score ?? '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="second_choice_screening_score" label="第二志愿导师评分" width="116" sortable="custom" align="center">
+            <template #default="scope">
+              {{ scope.row.second_choice_screening_score ?? '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="first_choice_center_name" label="第一志愿中心" width="120" show-overflow-tooltip />
+          <el-table-column prop="second_choice_center_name" label="第二志愿中心" width="120" show-overflow-tooltip />
+          <el-table-column label="申请流转状态" width="104" align="center">
+            <template #default="scope">
+              <el-tag :type="portalRecruitmentStatusTagType(scope.row.recruitment_application_status)">{{ scope.row.recruitment_application_status || '未提交' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="registered_at" label="注册时间" width="136" show-overflow-tooltip />
+          <el-table-column label="操作" width="230" align="left" fixed="right" class-name="operation-column">
+            <template #default="scope">
+              <TableRowActions
+                :row="scope.row"
+                :main-actions="registeredPortalMainActions(scope.row)"
+                :more-actions="registeredPortalMoreActions(scope.row)"
+              />
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="pagination-bar">
+          <el-pagination
+            v-if="isRecordSection"
+            :current-page="studentPager.pagination.currentPage"
+            :page-size="studentPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="studentPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleStudentPageChange"
+            @size-change="handleStudentPageSizeChange"
+          />
+          <el-pagination
+            v-else-if="isCenterSection"
+            :current-page="centerPager.pagination.currentPage"
+            :page-size="centerPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="centerPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleCenterPageChange"
+            @size-change="handleCenterPageSizeChange"
+          />
+          <el-pagination
+            v-else
+            :current-page="registeredStudentPager.pagination.currentPage"
+            :page-size="registeredStudentPager.pagination.pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="registeredStudentPager.pagination.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleRegisteredStudentPageChange"
+            @size-change="handleRegisteredStudentPageSizeChange"
+          />
+        </div>
+      </div>
+    </section>
+
+    <RecruitmentPortalApplicationDrawer
+      v-model="portalApplicationDetailVisible"
+      :detail="portalViewingApplication"
+      :workflow-task="portalViewingWorkflowTask"
+      :workflow-task-loading="portalWorkflowTaskLoading"
+      :action-loading="portalWorkflowActionSubmitting"
+      @execute-action="handlePortalWorkflowAction"
+    />
+
+    <el-dialog
+      v-model="portalStudentEditorVisible"
+      :title="portalStudentEditorTitle"
+      width="96vw"
+      top="2vh"
+      destroy-on-close
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div v-loading="portalStudentEditorLoading" class="portal-student-editor-shell">
+        <PortalApplicationV2Form
+          v-if="portalStudentEditorRecord"
+          ref="portalStudentEditorRef"
+          active-section-id="basic-section"
+          admin-mode
+          :initial-student="portalStudentEditorRecord"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="portalStudentEditorVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalStudentEditorSubmitting" :disabled="!portalStudentEditorRecord" @click="submitPortalStudentEditor">
+          保存并生效
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="portalWorkflowCommentDialogVisible"
+      :title="pendingPortalWorkflowAction ? pendingPortalWorkflowAction.label : '审批处理'"
+      width="640px"
+      destroy-on-close
+    >
+      <div class="workflow-comment-dialog">
+        <p class="workflow-comment-dialog__hint">请输入审批意见，可留空后直接提交。</p>
+        <el-input
+          v-model="portalWorkflowComment"
+          type="textarea"
+          :rows="5"
+          maxlength="500"
+          show-word-limit
+          placeholder="审批意见（可选）"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="portalWorkflowCommentDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalWorkflowActionSubmitting" @click="submitPortalWorkflowCommentDialog">
+          {{ pendingPortalWorkflowAction?.label || '确认' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="rollbackDialogVisible" title="退回报名环节" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="rollbackTarget && rollbackDetail">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">学生姓名</span>
+              <strong>{{ rollbackTarget.full_name }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">业务编号</span>
+              <strong>{{ rollbackDetail.business_key || rollbackTarget.recruitment_application_business_key || '未生成' }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">当前环节</span>
+              <strong>{{ rollbackCurrentStageLabel }}</strong>
+            </div>
+          </div>
+          <p class="reset-password-hint">该功能仅平台管理员可见。系统会校验只能退回到当前之前的环节，并在处理后向学生发送邮件通知。</p>
+          <el-form label-width="88px" class="dialog-form">
+            <div class="dialog-grid">
+              <el-form-item label="目标环节" class="dialog-grid--full">
+                <el-select v-model="rollbackForm.target_stage" placeholder="请选择目标环节" :loading="rollbackLoading">
+                  <el-option v-for="item in rollbackStageOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="退回说明" class="dialog-grid--full">
+                <el-input
+                  v-model="rollbackForm.comment"
+                  type="textarea"
+                  :rows="4"
+                  maxlength="200"
+                  show-word-limit
+                  placeholder="请输入退回说明，可选"
+                />
+              </el-form-item>
+            </div>
+          </el-form>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="rollbackDialogVisible = false">取消</el-button>
+        <el-button type="warning" :loading="rollbackSubmitting" :disabled="!rollbackForm.target_stage" @click="submitRegisteredPortalRollbackDialog">
+          确认退回
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="portalNoticeDialogVisible" :title="portalNoticeDialogTitle" width="520px" destroy-on-close>
+      <el-result v-if="portalNotice" :icon="portalNotice.type" :title="portalNotice.title" :sub-title="portalNotice.message" />
+      <template #footer>
+        <el-button type="primary" @click="portalNoticeDialogVisible = false">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-if="canMutateSection"
+      v-model="dialogVisible"
+      :title="dialogMode === 'create' ? sectionConfig.createLabel : `编辑${sectionConfig.title.replace('管理', '')}`"
+      width="760px"
+      destroy-on-close
+    >
+      <el-form
+        v-if="isRecordSection"
+        ref="studentFormRef"
+        :model="studentForm"
+        :rules="studentRules"
+        label-width="96px"
+        class="dialog-form"
+      >
+        <div class="dialog-grid">
+          <el-form-item label="学号" prop="student_no">
+            <el-input v-model="studentForm.student_no" placeholder="例如 D20250012" />
+          </el-form-item>
+          <el-form-item label="姓名" prop="full_name">
+            <el-input v-model="studentForm.full_name" placeholder="请输入姓名" />
+          </el-form-item>
+          <el-form-item label="当前状态" prop="status">
+            <el-select v-model="studentForm.status" placeholder="请选择状态">
+              <el-option v-for="item in options.status_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="学位类型" prop="degree_type">
+            <el-select v-model="studentForm.degree_type" placeholder="请选择学位类型">
+              <el-option v-for="item in options.degree_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="研究中心" prop="center_name">
+            <el-select v-model="studentForm.center_name" placeholder="请选择研究中心" filterable>
+              <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="导师" prop="advisor_id">
+            <el-select v-model="studentForm.advisor_id" placeholder="请选择导师" filterable :disabled="!studentForm.center_name">
+              <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="入学年份" prop="enrollment_year">
+            <el-input-number v-model="studentForm.enrollment_year" :min="2018" :max="2100" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="联系电话">
+            <el-input v-model="studentForm.phone_number" placeholder="请输入联系电话" />
+          </el-form-item>
+          <el-form-item label="政治面貌">
+            <el-select v-model="studentForm.political_status" placeholder="请选择政治面貌" clearable filterable>
+              <el-option v-for="item in options.political_status_options" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+        </div>
+      </el-form>
+
+      <el-form
+        v-else-if="isCenterSection"
+        ref="centerFormRef"
+        :model="centerForm"
+        :rules="centerRules"
+        label-width="96px"
+        class="dialog-form"
+      >
+        <div class="dialog-grid">
+          <el-form-item label="中心名称" prop="center_name">
+            <el-input v-model="centerForm.center_name" placeholder="请输入中心名称" />
+          </el-form-item>
+          <el-form-item label="负责人" prop="director_id">
+            <el-select v-model="centerForm.director_id" placeholder="请选择负责人" filterable>
+              <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="导师团队" prop="advisor_ids" class="dialog-grid--full">
+            <el-select v-model="centerForm.advisor_ids" multiple filterable placeholder="请选择导师团队">
+              <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="是否启用">
+            <el-switch v-model="centerForm.is_enabled" inline-prompt active-text="启用" inactive-text="停用" />
+          </el-form-item>
+          <el-form-item label="创建日期">
+            <el-date-picker v-model="centerForm.created_date" type="date" value-format="YYYY-MM-DD" placeholder="请选择创建日期" />
+          </el-form-item>
+        </div>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitDialog">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="deleteCenterDialogVisible"
+      title="删除确认"
+      width="560px"
+      destroy-on-close
+      :close-on-click-modal="!deleteCenterSubmitting"
+      :close-on-press-escape="!deleteCenterSubmitting"
+      :show-close="!deleteCenterSubmitting"
+      @closed="deletingCenter = null"
+    >
+      <div v-if="deletingCenter" class="dialog-form delete-center-dialog">
+        <p class="delete-center-dialog__lead">确定删除这个研究中心吗？删除后不可恢复。</p>
+        <div class="delete-center-dialog__summary">
+          <div>
+            <span class="delete-center-dialog__label">研究中心</span>
+            <strong>{{ deletingCenter.center_name }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">负责人</span>
+            <strong>{{ deletingCenter.director_name || '未配置' }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">导师团队</span>
+            <strong>{{ deletingCenter.advisor_names.join('、') || '未配置' }}</strong>
+          </div>
+          <div>
+            <span class="delete-center-dialog__label">学生数</span>
+            <strong>{{ deletingCenter.member_student_count }} / 活跃 {{ deletingCenter.active_student_count }}</strong>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="deleteCenterSubmitting" @click="closeDeleteCenterDialog">取消</el-button>
+        <el-button type="danger" :loading="deleteCenterSubmitting" @click="submitDeleteCenter">确认删除</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="portalEmailDialogVisible" title="发送邮件" width="640px" destroy-on-close>
+      <el-form label-width="88px" class="dialog-form">
+        <div class="dialog-grid">
+          <el-form-item label="收件人" class="dialog-grid--full">
+            <el-input :model-value="portalEmailTarget?.email || ''" disabled />
+          </el-form-item>
+          <el-form-item label="主题" class="dialog-grid--full">
+            <el-input v-model="portalEmailForm.subject" maxlength="120" show-word-limit placeholder="请输入邮件主题" />
+          </el-form-item>
+          <el-form-item label="内容" class="dialog-grid--full">
+            <el-input v-model="portalEmailForm.content" type="textarea" :rows="8" placeholder="请输入邮件正文内容" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="portalEmailDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="portalEmailSubmitting" @click="submitPortalEmailDialog">发送</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="portalEmailResultDialogVisible" title="发送结果" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="portalEmailResultContext && portalEmailResult">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">收件人</span>
+              <strong>{{ portalEmailResultContext?.recipient }}</strong>
+            </div>
+            <div style="grid-column: span 2;">
+              <span class="reset-password-summary__label">主题</span>
+              <strong>{{ portalEmailResultContext?.subject }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ portalEmailResultMessage }}</p>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="portalEmailResultDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="exportJobResultDialogVisible" title="导出任务已创建" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="exportJobResult">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">导出范围</span>
+              <strong>{{ exportJobResult.scopeLabel }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">记录数量</span>
+              <strong>{{ exportJobResult.recordCount }}</strong>
+            </div>
+            <div style="grid-column: span 3;">
+              <span class="reset-password-summary__label">筛选说明</span>
+              <strong>{{ exportJobResult.filterSummary }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ exportJobResult.message }}</p>
+            <div class="reset-password-result__password export-job-result__hint">
+              <span>后续查看</span>
+              <strong>完成后请在右上角用户名旁的导出图标中查看下载地址或失败结果。</strong>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="exportJobResultDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="resetPasswordDialogVisible" :title="resetPasswordResult ? '重置密码成功' : '重置密码确认'" width="640px" destroy-on-close>
+      <div class="dialog-form reset-password-dialog">
+        <template v-if="resetPasswordTarget && !resetPasswordResult">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">学生姓名</span>
+              <strong>{{ resetPasswordTarget.full_name }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">注册邮箱</span>
+              <strong>{{ resetPasswordTarget.email }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">账号状态</span>
+              <strong>{{ resetPasswordTarget.account_status }}</strong>
+            </div>
+          </div>
+          <p class="reset-password-hint">
+            确认后系统将立即为该门户账号生成新的临时密码，并在邮件服务可用时发送重置通知邮件。
+          </p>
+        </template>
+        <template v-else-if="resetPasswordResult">
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ resetPasswordResultMessage }}</p>
+            <div v-if="resetPasswordResult.temporary_password" class="reset-password-result__password">
+              <span>临时密码</span>
+              <strong>{{ resetPasswordResult.temporary_password }}</strong>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="resetPasswordDialogVisible = false">{{ resetPasswordResult ? '关闭' : '取消' }}</el-button>
+        <el-button v-if="!resetPasswordResult" type="primary" :loading="resetPasswordSubmitting" @click="submitResetPasswordDialog">
+          确认重置
+        </el-button>
+      </template>
+    </el-dialog>
+  </section>
+</template>
+
+<style scoped>
+.registered-students-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.query-panel,
+.table-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.query-panel {
+  padding: 12px 14px 10px;
+}
+
+.table-panel {
+  padding: 10px 14px 12px;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.query-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.query-panel__header > div:first-child {
+  flex: 0 0 auto;
+}
+
+.content-stack,
+.state-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.content-stack {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.state-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.section-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.section-tag,
+.section-card h2 {
+  margin: 0;
+}
+
+.section-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 20px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.section-card__header > div:first-child {
+  flex: 0 0 auto;
+}
+
+.section-tag {
+  color: #909399;
+  font-size: 12px;
+}
+
+.section-card h2 {
+  margin-top: 4px;
+  color: #303133;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.summary-text {
+  color: #909399;
+  font-size: 12px;
+}
+
+.filter-form {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.filter-form--default {
+  padding: 10px 10px 0;
+  border-radius: 8px;
+  background: #f5f7fa;
+}
+
+.filter-form--portal {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f5f7fa;
+}
+
+.filter-grid {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 12px 16px !important;
+  width: 100% !important;
+  align-items: center !important;
+}
+
+.filter-grid--row-1 {
+  align-items: flex-start !important;
+}
+
+.filter-grid--row-2 {
+  align-items: center !important;
+}
+
+.filter-grid--row-3 {
+  justify-content: flex-start;
+}
+
+.filter-item {
+  margin-bottom: 0 !important;
+}
+
+.filter-item :deep(.el-form-item__label) {
+  padding-right: 8px;
+  color: #303133;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.filter-item :deep(.el-input),
+.filter-item :deep(.el-select),
+.filter-item :deep(.el-select__wrapper) {
+  width: 100%;
+}
+
+.filter-item--wide {
+  flex: 1 1 220px;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.filter-item--compact {
+  flex: 0 0 180px;
+}
+
+.filter-item--toggle {
+  flex: 0 0 auto;
+}
+
+.filter-item--multi {
+  flex: 1 1 200px;
+  min-width: 200px;
+}
+
+.filter-actions {
+  margin: 0 !important;
+}
+
+.filter-actions :deep(.el-form-item__content) {
+  display: flex;
+  gap: 8px;
+}
+
+.table-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  width: 100%;
+  position: relative;
+}
+
+/* 关键：覆盖全局 .el-table { overflow:hidden; border-radius:16px }，
+   否则右侧 fixed 列的阴影和背景会被裁剪，从而看不到"浮动"效果。 */
+.table-host :deep(.el-table) {
+  width: 1880px;
+  min-width: 100%;
+  table-layout: fixed;
+  overflow: visible !important;
+  border-radius: 0;
+}
+
+.table-host :deep(.el-table__inner-wrapper) {
+  position: relative;
+  overflow: visible !important;
+}
+
+.table-host :deep(.el-table__header-wrapper) {
+  background: #f1f7fd;
+}
+
+.table-host :deep(.el-table__body-wrapper) {
+  overflow: visible !important;
+}
+
+.table-host :deep(.el-table th.el-table__cell),
+.table-host :deep(.el-table td.el-table__cell) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* 操作列浮动效果：fixed="right" 已由 element-plus 渲染在 .el-table__fixed-right
+   包装中。下面主要确保该包装贴右、随竖滚且 z-index 高于普通单元。 */
+.table-host :deep(.el-table__fixed-right-patch) {
+  background-color: #f5f7fa;
+}
+
+.table-host :deep(.el-table__fixed-right-wrapper),
+.table-host :deep(.el-table__fixed-right) {
+  z-index: 9;
+  background-color: #ffffff;
+  box-shadow: -8px 0 10px -8px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.table-host :deep(.el-table__fixed-right-wrapper .el-table__header-wrapper),
+.table-host :deep(.el-table__fixed-right .el-table__header-wrapper) {
+  z-index: 11;
+  background-color: #f5f7fa;
+}
+
+.table-host :deep(.el-table__fixed-right-wrapper tbody tr:hover td),
+.table-host :deep(.el-table__fixed-right tbody tr:hover td) {
+  background-color: #f5f7fa !important;
+}
+
+/* 备用：以防某个版本中 el-table 没有生成 fixed 包装，
+   给 operation-column 单元加 sticky 作为兜底。 */
+.table-host :deep(.el-table .operation-column.el-table__cell) {
+  position: sticky;
+  right: 0;
+  z-index: 5;
+  background-color: inherit;
+}
+
+.table-host :deep(.el-table th.operation-column.el-table__cell) {
+  z-index: 6;
+  background-color: #f5f7fa;
+}
+.dialog-form {
+  padding-top: 8px;
+}
+
+.dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 16px;
+}
+
+.dialog-grid :deep(.el-select),
+.dialog-grid :deep(.el-input-number),
+.dialog-grid :deep(.el-date-editor) {
+  width: 100%;
+}
+
+.dialog-grid--full {
+  grid-column: 1 / -1;
+}
+
+.reset-password-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.workflow-comment-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-comment-dialog__hint {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+}
+
+.delete-center-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.delete-center-dialog__lead {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.delete-center-dialog__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.delete-center-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.delete-center-dialog__summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.reset-password-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reset-password-summary__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.reset-password-summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.reset-password-hint,
+.reset-password-result__message {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.reset-password-result {
+  display: grid;
+  gap: 14px;
+}
+
+.reset-password-result__password {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.reset-password-result__password span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.reset-password-result__password strong {
+  color: #1d4ed8;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+}
+
+.export-job-result__hint strong {
+  color: #0f766e;
+  font-size: 15px;
+  letter-spacing: normal;
+  line-height: 1.7;
+}
+
+@media (max-width: 1120px) {
+  .registered-students-page {
+    height: auto;
+  }
+
+  .dialog-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .delete-center-dialog__summary,
+  .reset-password-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .query-panel__header,
+  .header-actions {
+    display: grid;
+  }
+
+  .filter-grid {
+    gap: 6px 8px;
+  }
+
+  .filter-item--wide,
+  .filter-item--compact,
+  .filter-item--multi {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .registered-students-page,
+  .query-panel,
+  .table-host {
+    height: auto;
+    min-height: unset;
+    overflow: visible;
+  }
+}
+</style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

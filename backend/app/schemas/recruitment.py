@@ -559,6 +559,40 @@ class AdvisorScreeningSubmitItem(BaseModel):
         return score
 
 
+class AdvisorScreeningScoreUpdateRequest(BaseModel):
+    application_id: int
+    candidate_no: str
+    choice_name: str
+    advisor_score: float
+
+    @field_validator("candidate_no", "choice_name", mode="before")
+    @classmethod
+    def validate_text_fields(cls, value: str) -> str:
+        return str(value or "").strip()
+
+    @field_validator("choice_name")
+    @classmethod
+    def validate_choice_name(cls, value: str) -> str:
+        if value not in {"第一志愿", "第二志愿"}:
+            raise ValueError("choice_name 只能是 第一志愿 或 第二志愿")
+        return value
+
+    @field_validator("candidate_no")
+    @classmethod
+    def validate_candidate_no(cls, value: str) -> str:
+        if not value:
+            raise ValueError("candidate_no 不能为空")
+        return value
+
+    @field_validator("advisor_score")
+    @classmethod
+    def validate_advisor_score(cls, value: float) -> float:
+        score = float(value)
+        if score < 0 or score > 100:
+            raise ValueError("导师初筛分数必须在 0 到 100 之间")
+        return score
+
+
 class AdvisorScreeningBatchSubmitRequest(BaseModel):
     signature_base64: str | None = None
     items: list[AdvisorScreeningSubmitItem] = Field(default_factory=list)
@@ -610,6 +644,74 @@ class RecruitApplicationImportResult(BaseModel):
     issues: list[RecruitApplicationImportIssue]
 
 
+class CampOfferRecord(BaseModel):
+    id: int
+    candidate_no: str
+    plan_id: int
+    plan_name: str | None = None
+    is_sent_mail: bool = False
+    is_agree: bool | None = None
+    reason: str | None = None
+    student_name: str | None = None
+    student_email: str | None = None
+    student_phone: str | None = None
+    first_choice_advisor_name: str | None = None
+    first_choice_advisor_team_name: str | None = None
+    first_choice_screening_score: float | None = None
+    second_choice_advisor_name: str | None = None
+    second_choice_advisor_team_name: str | None = None
+    second_choice_screening_score: float | None = None
+    created_at: str | None = None
+    student_offer_submitted_at: str | None = None
+
+
+class CampOfferUpsert(BaseModel):
+    candidate_no: str
+    plan_id: int | None = None
+    is_sent_mail: bool = False
+    is_agree: bool | None = None
+    reason: str | None = None
+    student_offer_submitted_at: str | None = None
+
+    @field_validator("candidate_no", mode="before")
+    @classmethod
+    def validate_candidate_no(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("candidate_no 不能为空")
+        return text
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def validate_reason(cls, value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+    @field_validator("student_offer_submitted_at", mode="before")
+    @classmethod
+    def validate_student_offer_submitted_at(cls, value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+
+class CampOfferListResponse(PaginationResponseBase):
+    items: list[CampOfferRecord]
+
+
+class CampOfferImportIssue(BaseModel):
+    row_number: int
+    candidate_no: str | None = None
+    reason: str
+
+
+class CampOfferImportResult(BaseModel):
+    imported_count: int
+    skipped_count: int
+    plan_id: int
+    imported_ids: list[int]
+    issues: list[CampOfferImportIssue]
+
+
 class RecruitmentOptionsResponse(BaseModel):
     semester_options: list[SelectOption]
     plan_stage_options: list[SelectOption]
@@ -628,3 +730,119 @@ class RecruitStats(BaseModel):
     application_total: int
     pending_review_total: int
     pre_admit_total: int
+
+
+
+class CampOfferNotificationSendRequest(BaseModel):
+    candidate_nos: list[str] = Field(default_factory=list)
+    choice: str = Field(default="first")
+    template_id: str | int | None = None
+    simulate: bool = False
+    simulate_recipient: str | None = None
+
+    @field_validator("candidate_nos", mode="before")
+    @classmethod
+    def validate_candidate_nos(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [item for item in value.split(",")]
+        if not isinstance(value, list):
+            raise ValueError("candidate_nos 必须是字符串列表")
+        cleaned: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in cleaned:
+                cleaned.append(text)
+        return cleaned
+
+    @field_validator("choice", mode="before")
+    @classmethod
+    def validate_choice(cls, value: Any) -> str:
+        if value is None:
+            return "first"
+        text = str(value or "").strip().lower()
+        if text not in {"first", "second"}:
+            raise ValueError("choice 只能是 first 或 second")
+        return text
+
+    @field_validator("template_id", mode="before")
+    @classmethod
+    def validate_template_id(cls, value: Any) -> str | int | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError("template_id 必须是字符串或数字")
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.lower() in {"first", "second"}:
+            return text.lower()
+        # Uploaded templates are identified by a free-form alphanumeric
+        # token (e.g. uuid4 hex or a numeric id) produced by the
+        # /recruitment/camp-offers/templates upload endpoint. Accept any
+        # safe slug; the service layer is responsible for resolving the
+        # id back to a concrete file on disk.
+        if all(ch.isalnum() or ch in {"-", "_"} for ch in text) and len(text) <= 128:
+            return text
+        raise ValueError("template_id 必须是 first / second 或字母数字组合")
+
+    @field_validator("simulate_recipient", mode="before")
+    @classmethod
+    def validate_simulate_recipient(cls, value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "CampOfferNotificationSendRequest":
+        if not self.candidate_nos:
+            raise ValueError("candidate_nos 至少需要一个报名号")
+        if self.simulate and not self.simulate_recipient:
+            raise ValueError("模拟发送时必须填写 simulate_recipient")
+        return self
+
+
+class CampOfferNotificationSendResultItem(BaseModel):
+    candidate_no: str
+    email: str = ""
+    status: str
+    error: str = ""
+
+
+class CampOfferNotificationSendResponse(BaseModel):
+    message: str
+    choice: str
+    simulate: bool
+    simulate_recipient: str | None = None
+    template_path: str | None = None
+    success_count: int = 0
+    failure_count: int = 0
+    results: list[CampOfferNotificationSendResultItem] = Field(default_factory=list)
+
+
+class OfferTemplateRecord(BaseModel):
+    """A single offer-mail template entry (system builtin or user-uploaded)."""
+
+    id: str | int
+    filename: str
+    display_name: str
+    size_bytes: int = 0
+    uploaded_at: str | None = None
+    uploaded_by: str | None = None
+    is_builtin: bool = False
+    source: str = Field(default="uploaded")
+    builtin_key: str | None = None
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def validate_source(cls, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text not in {"builtin", "uploaded"}:
+            raise ValueError("source 只能是 builtin 或 uploaded")
+        return text
+
+
+class OfferTemplateListResponse(BaseModel):
+    items: list[OfferTemplateRecord] = Field(default_factory=list)

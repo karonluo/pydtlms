@@ -591,6 +591,285 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
                 return [self._normalize_recruitment_application_row(dict(row)) for row in cur.fetchall()], total
 
+    def _normalize_camp_offer_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(row)
+        normalized["candidate_no"] = str(normalized.get("candidate_no") or "").strip()
+        normalized["plan_id"] = int(normalized.get("plan_id") or 0)
+        normalized["is_sent_mail"] = bool(normalized.get("is_sent_mail") or False)
+        normalized["is_agree"] = normalized.get("is_agree")
+        normalized["reason"] = str(normalized.get("reason") or "").strip() or None
+        normalized["student_name"] = str(normalized.get("student_name") or "").strip() or None
+        normalized["student_email"] = str(normalized.get("student_email") or "").strip() or None
+        normalized["student_phone"] = str(normalized.get("student_phone") or "").strip() or None
+        normalized["first_choice_advisor_name"] = str(normalized.get("first_choice_advisor_name") or "").strip() or None
+        normalized["first_choice_advisor_team_name"] = str(normalized.get("first_choice_advisor_team_name") or "").strip() or None
+        normalized["first_choice_screening_score"] = self._to_optional_float(normalized.get("first_choice_screening_score"))
+        normalized["second_choice_advisor_name"] = str(normalized.get("second_choice_advisor_name") or "").strip() or None
+        normalized["second_choice_advisor_team_name"] = str(normalized.get("second_choice_advisor_team_name") or "").strip() or None
+        normalized["second_choice_screening_score"] = self._to_optional_float(normalized.get("second_choice_screening_score"))
+        normalized["created_at"] = self._stringify_datetime(normalized.get("created_at"))
+        normalized["student_offer_submitted_at"] = self._stringify_datetime(normalized.get("student_offer_submitted_at"))
+        return normalized
+
+    def get_latest_recruitment_plan_id(self) -> int | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM dtlms_recruitment_plans
+                    WHERE is_deleted = FALSE
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return int(row["id"] or 0) or None
+
+    def list_camp_offers_page(
+        self,
+        *,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        is_sent_mail: bool | None = None,
+        is_agree: bool | None = None,
+        first_choice_advisor: str | None = None,
+        first_choice_team: str | None = None,
+        first_choice_score_op: str | None = None,
+        first_choice_score: float | None = None,
+        second_choice_advisor: str | None = None,
+        second_choice_team: str | None = None,
+        second_choice_score_op: str | None = None,
+        second_choice_score: float | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        self.ensure_schema()
+        offset = max(page - 1, 0) * page_size
+        where_clauses = ["1=1"]
+        params: list[Any] = []
+
+        if keyword and str(keyword).strip():
+            keyword_like = f"%{str(keyword).strip()}%"
+            where_clauses.append("(offer.candidate_no ILIKE %s OR COALESCE(app.student_name, '') ILIKE %s)")
+            params.extend([keyword_like, keyword_like])
+        if plan_id is not None:
+            where_clauses.append("offer.plan_id = %s")
+            params.append(int(plan_id))
+        if is_sent_mail is not None:
+            where_clauses.append("COALESCE(offer.is_sent_mail, FALSE) = %s")
+            params.append(bool(is_sent_mail))
+        if is_agree is not None:
+            where_clauses.append("offer.is_agree = %s")
+            params.append(bool(is_agree))
+        if first_choice_advisor and str(first_choice_advisor).strip():
+            where_clauses.append("app.first_choice ILIKE %s")
+            params.append("%" + str(first_choice_advisor).strip() + "%")
+        if first_choice_team and str(first_choice_team).strip():
+            where_clauses.append("first_team.team_names ILIKE %s")
+            params.append("%" + str(first_choice_team).strip() + "%")
+        _score_ops = { "eq": "=", "ne": "<>", "gt": ">", "ge": ">=", "lt": "<", "le": "<=" }
+        if first_choice_score is not None and first_choice_score_op in _score_ops:
+            where_clauses.append("app.first_choice_screening_score " + _score_ops[first_choice_score_op] + " %s")
+            params.append(float(first_choice_score))
+        if second_choice_advisor and str(second_choice_advisor).strip():
+            where_clauses.append("app.second_choice ILIKE %s")
+            params.append("%" + str(second_choice_advisor).strip() + "%")
+        if second_choice_team and str(second_choice_team).strip():
+            where_clauses.append("second_team.team_names ILIKE %s")
+            params.append("%" + str(second_choice_team).strip() + "%")
+        if second_choice_score is not None and second_choice_score_op in _score_ops:
+            where_clauses.append("app.second_choice_screening_score " + _score_ops[second_choice_score_op] + " %s")
+            params.append(float(second_choice_score))
+
+        where_sql = " AND ".join(where_clauses)
+
+        normalized_sort_by = str(sort_by or "").strip()
+        normalized_sort_order = "ASC" if str(sort_order or "").strip().lower() == "asc" else "DESC"
+        order_sql = "ORDER BY offer.created_at DESC NULLS LAST, offer.id DESC"
+        if normalized_sort_by == "first_choice_screening_score":
+            order_sql = f"ORDER BY app.first_choice_screening_score {normalized_sort_order} NULLS LAST, offer.created_at DESC NULLS LAST, offer.id DESC"
+        elif normalized_sort_by == "second_choice_screening_score":
+            order_sql = f"ORDER BY app.second_choice_screening_score {normalized_sort_order} NULLS LAST, offer.created_at DESC NULLS LAST, offer.id DESC"
+
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                count_sql = f"""
+                    SELECT COUNT(*) AS total
+                    FROM dtlms_plan_offer offer
+                    LEFT JOIN dtlms_recruitment_applications app ON app.candidate_no = offer.candidate_no AND app.is_deleted = FALSE
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(team.team_name, ',') AS team_names
+                        FROM dtlms_team_advisors adv
+                        LEFT JOIN dtlms_users u ON adv.advisor_user_id = u.id
+                        LEFT JOIN dtlms_teams team ON adv.team_id = team.id
+                        WHERE u.full_name = app.first_choice
+                    ) first_team ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(team.team_name, ',') AS team_names
+                        FROM dtlms_team_advisors adv
+                        LEFT JOIN dtlms_users u ON adv.advisor_user_id = u.id
+                        LEFT JOIN dtlms_teams team ON adv.team_id = team.id
+                        WHERE u.full_name = app.second_choice
+                    ) second_team ON TRUE
+                    WHERE {where_sql}
+                """
+                self._execute_dynamic(cur, count_sql, params)
+                total_row = cur.fetchone()
+                total = int(total_row["total"] if total_row else 0)
+
+                page_sql = f"""
+                    SELECT
+                        offer.id,
+                        offer.candidate_no,
+                        offer.plan_id,
+                        plan.plan_name,
+                        COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
+                        offer.is_agree,
+                        COALESCE(offer.reson, '') AS reason,
+                        app.student_name,
+                        ps.email AS student_email,
+                        ps.phone_number AS student_phone,
+                        app.first_choice AS first_choice_advisor_name,
+                        first_team.team_names AS first_choice_advisor_team_name,
+                        app.first_choice_screening_score,
+                        app.second_choice AS second_choice_advisor_name,
+                        second_team.team_names AS second_choice_advisor_team_name,
+                        app.second_choice_screening_score,
+                        offer.created_at,
+                        offer.submitted_at AS student_offer_submitted_at
+                    FROM dtlms_plan_offer offer
+                    LEFT JOIN dtlms_recruitment_plans plan ON plan.id = offer.plan_id
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            student_name,
+                            portal_student_id,
+                            first_choice,
+                            first_choice_screening_score,
+                            second_choice,
+                            second_choice_screening_score
+                        FROM dtlms_recruitment_applications app2
+                        WHERE app2.candidate_no = offer.candidate_no AND app2.is_deleted = FALSE
+                        ORDER BY app2.id DESC
+                        LIMIT 1
+                    ) app ON TRUE
+                    LEFT JOIN dtlms_portal_students ps ON ps.id = app.portal_student_id
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(team.team_name, ',') AS team_names
+                        FROM dtlms_team_advisors adv
+                        LEFT JOIN dtlms_users u ON adv.advisor_user_id = u.id
+                        LEFT JOIN dtlms_teams team ON adv.team_id = team.id
+                        WHERE u.full_name = app.first_choice
+                    ) first_team ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(team.team_name, ',') AS team_names
+                        FROM dtlms_team_advisors adv
+                        LEFT JOIN dtlms_users u ON adv.advisor_user_id = u.id
+                        LEFT JOIN dtlms_teams team ON adv.team_id = team.id
+                        WHERE u.full_name = app.second_choice
+                    ) second_team ON TRUE
+                    WHERE {where_sql}
+                    {order_sql}
+                    LIMIT %s OFFSET %s
+                """
+                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
+                rows = [self._normalize_camp_offer_row(dict(row)) for row in cur.fetchall()]
+                return rows, total
+
+    def get_camp_offer_detail(self, offer_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        offer.id,
+                        offer.candidate_no,
+                        offer.plan_id,
+                        plan.plan_name,
+                        COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
+                        offer.is_agree,
+                        COALESCE(offer.reson, '') AS reason,
+                        app.student_name,
+                        ps.email AS student_email,
+                        ps.phone_number AS student_phone,
+                        app.first_choice AS first_choice_advisor_name,
+                        first_team.team_names AS first_choice_advisor_team_name,
+                        app.first_choice_screening_score,
+                        app.second_choice AS second_choice_advisor_name,
+                        second_team.team_names AS second_choice_advisor_team_name,
+                        app.second_choice_screening_score,
+                        offer.created_at,
+                        offer.submitted_at AS student_offer_submitted_at
+                    FROM dtlms_plan_offer offer
+                    LEFT JOIN dtlms_recruitment_plans plan ON plan.id = offer.plan_id
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            student_name,
+                            portal_student_id,
+                            first_choice,
+                            first_choice_screening_score,
+                            second_choice,
+                            second_choice_screening_score
+                        FROM dtlms_recruitment_applications app2
+                        WHERE app2.candidate_no = offer.candidate_no AND app2.is_deleted = FALSE
+                        ORDER BY app2.id DESC
+                        LIMIT 1
+                    ) app ON TRUE
+                    LEFT JOIN dtlms_portal_students ps ON ps.id = app.portal_student_id
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(team.team_name, ',') AS team_names
+                        FROM dtlms_team_advisors adv
+                        LEFT JOIN dtlms_users u ON adv.advisor_user_id = u.id
+                        LEFT JOIN dtlms_teams team ON adv.team_id = team.id
+                        WHERE u.full_name = app.first_choice
+                    ) first_team ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(team.team_name, ',') AS team_names
+                        FROM dtlms_team_advisors adv
+                        LEFT JOIN dtlms_users u ON adv.advisor_user_id = u.id
+                        LEFT JOIN dtlms_teams team ON adv.team_id = team.id
+                        WHERE u.full_name = app.second_choice
+                    ) second_team ON TRUE
+                    WHERE offer.id = %s
+                    LIMIT 1
+                    """,
+                    (int(offer_id),),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return self._normalize_camp_offer_row(dict(row))
+
+    def find_camp_offer_by_candidate_plan(self, *, candidate_no: str, plan_id: int) -> dict[str, Any] | None:
+        self.ensure_schema()
+        normalized_candidate_no = str(candidate_no or "").strip()
+        if not normalized_candidate_no:
+            return None
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM dtlms_plan_offer
+                    WHERE candidate_no = %s AND plan_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (normalized_candidate_no, int(plan_id)),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
     def list_background_assessments(self, application_id: int) -> list[dict[str, Any]]:
         """Execute query logic for `list_background_assessments`."""
         self.ensure_schema()

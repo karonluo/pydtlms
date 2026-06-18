@@ -80,6 +80,75 @@ export type DashboardRecruitmentAdvisorChoiceDistributionResponse = {
 }
 
 
+export type DashboardRecruitmentApplicationStatusItem = {
+  application_status_state: string
+  count: number
+}
+
+
+export type DashboardRecruitmentApplicationStatusResponse = {
+  items: DashboardRecruitmentApplicationStatusItem[]
+}
+
+
+export type DashboardRecruitmentFirstChoicePendingGradingItem = {
+  advisor_name: string
+  student_count: number
+}
+
+
+export type DashboardRecruitmentFirstChoicePendingGradingResponse = {
+  total: number
+  page: number
+  page_size: number
+  items: DashboardRecruitmentFirstChoicePendingGradingItem[]
+}
+
+
+export type DashboardRecruitmentFirstChoicePendingStudentItem = {
+  application_id: number
+  candidate_no: string
+  student_name: string
+}
+
+
+export type DashboardRecruitmentFirstChoicePendingStudentListResponse = {
+  total: number
+  page: number
+  page_size: number
+  items: DashboardRecruitmentFirstChoicePendingStudentItem[]
+}
+
+
+export type DashboardRecruitmentSecondChoicePendingStudentItem = {
+  application_id: number
+  candidate_no: string
+  student_name: string
+}
+
+
+export type DashboardRecruitmentSecondChoicePendingStudentListResponse = {
+  total: number
+  page: number
+  page_size: number
+  items: DashboardRecruitmentSecondChoicePendingStudentItem[]
+}
+
+
+export type DashboardRecruitmentSecondChoicePendingGradingItem = {
+  advisor_name: string
+  student_count: number
+}
+
+
+export type DashboardRecruitmentSecondChoicePendingGradingResponse = {
+  total: number
+  page: number
+  page_size: number
+  items: DashboardRecruitmentSecondChoicePendingGradingItem[]
+}
+
+
 export type DashboardUndergraduateSchoolStudentItem = {
   recruitment_application_id: number
   student_name: string
@@ -117,6 +186,39 @@ export function getDashboardUndergraduateSchoolGroupDistribution() {
 
 export function getDashboardRecruitmentAdvisorChoiceDistribution() {
   return http.get<DashboardRecruitmentAdvisorChoiceDistributionResponse>('/dashboard/recruitment-advisor-choice-distribution')
+}
+
+
+export function getDashboardRecruitmentApplicationStatusStats() {
+  return http.get<DashboardRecruitmentApplicationStatusResponse>('/dashboard/recruitment-application-status-stats')
+}
+
+
+export function getDashboardFirstChoicePendingGradingStatistics(params: { page?: number; page_size?: number; advisor_name?: string } = {}) {
+  return http.get<DashboardRecruitmentFirstChoicePendingGradingResponse>('/dashboard/recruitment-first-choice-pending-grading-statistics', {
+    params,
+  })
+}
+
+
+export function getDashboardFirstChoicePendingStudentList(params: { page?: number; page_size?: number; advisor_name?: string; advisor_id?: string; keyword?: string } = {}) {
+  return http.get<DashboardRecruitmentFirstChoicePendingStudentListResponse>('/dashboard/recruitment-first-choice-pending-students', {
+    params,
+  })
+}
+
+
+export function getDashboardSecondChoicePendingGradingStatistics(params: { page?: number; page_size?: number; advisor_name?: string } = {}) {
+  return http.get<DashboardRecruitmentSecondChoicePendingGradingResponse>('/dashboard/recruitment-second-choice-pending-grading-statistics', {
+    params,
+  })
+}
+
+
+export function getDashboardSecondChoicePendingStudentList(params: { page?: number; page_size?: number; advisor_name?: string; advisor_id?: string; keyword?: string } = {}) {
+  return http.get<DashboardRecruitmentSecondChoicePendingStudentListResponse>('/dashboard/recruitment-second-choice-pending-students', {
+    params,
+  })
 }
 
 

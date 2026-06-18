@@ -12,9 +12,12 @@ import { getChinaResidentIdValidationMessage, normalizeChinaResidentIdNumber } f
 import { useServerPagination } from '../../composables/useServerPagination'
 import { useAuthStore } from '../../stores/auth'
 import {
+  getAdvisorScreeningPendingApplicationsCount,
+  getAdvisorScreeningSubmittedApplicationsCount,
   confirmInitialScreening,
   createRecruitmentApplication,
   createRecruitmentPlan,
+  createAdvisorScreeningExportJob,
   deleteRecruitmentPlan,
   deleteRecruitmentApplication,
   downloadRecruitmentTemplate,
@@ -30,10 +33,12 @@ import {
   listRecruitmentPlans,
   rescoreAdvisorScreeningSubmittedApplication,
   submitAdvisorScreeningBatch,
+  updateAdvisorScreeningScore,
   uploadRecruitmentBrochureImage,
   updateRecruitmentApplication,
   updateRecruitmentPlan,
   type AdvisorScreeningBatchSubmitRequest,
+  type AdvisorScreeningScoreUpdateRequest,
   type InitialScreeningConfirmationRequest,
   type RecruitApplicationRecord,
   type RecruitPortalApplicationDetail,
@@ -349,6 +354,7 @@ const selectedAdvisorScreeningIds = ref<number[]>([])
 const selectedInitialScreeningIds = ref<number[]>([])
 const advisorScreeningBatchConfirmDialogVisible = ref(false)
 const advisorScreeningDrafts = reactive<Record<number, { advisor_score?: number }>>({})
+const advisorScreeningSavingIds = reactive<Record<number, boolean>>({})
 const initialScreeningDrafts = reactive<Record<number, { result: 'passed' | 'rejected'; comment: string }>>({})
 
 const planFormRef = ref<FormInstance>()
@@ -417,10 +423,20 @@ const showPhoneColumn = computed(() => !isScreeningSection.value && !isCompactAp
 const showReviewerColumn = computed(() => !isScreeningSection.value && !isCompactApplicationTable.value)
 const showApplicationPagination = computed(() => !isAdvisorScreeningSection.value)
 const advisorScreeningTab = ref<'pending' | 'submitted'>('pending')
+const advisorScreeningPendingCount = ref(0)
+const advisorScreeningSubmittedCount = ref(0)
 const advisorScreeningSubmittedLoading = ref(false)
 const advisorScreeningSubmittedRows = ref<AdvisorScreeningSubmittedApplicationRecord[]>([])
 const advisorScreeningSubmittedPagination = useServerPagination()
 const advisorScreeningPendingRows = ref<RecruitApplicationRecord[]>([])
+const advisorScreeningExportSubmitting = ref(false)
+const advisorScreeningExportResultDialogVisible = ref(false)
+const advisorScreeningExportResult = ref<{
+  scopeLabel: string
+  filterSummary: string
+  message: string
+  downloadHint: string
+} | null>(null)
 const advisorScreeningSubmittedFilters = reactive({
   keyword: '',
 })
@@ -430,6 +446,9 @@ const advisorScreeningRescoreTarget = ref<AdvisorScreeningSubmittedApplicationRe
 const advisorScreeningRescoreNoticeDialogVisible = ref(false)
 const advisorScreeningRescoreNotice = ref<{ title: string; message: string; type: 'success' | 'warning' | 'error' | 'info' } | null>(null)
 const advisorScreeningRescoreNoticeDialogTitle = computed(() => advisorScreeningRescoreNotice.value?.title || '提示')
+const advisorScreeningBatchNoticeDialogVisible = ref(false)
+const advisorScreeningBatchNotice = ref<{ title: string; message: string; type: 'success' | 'warning' | 'error' | 'info' } | null>(null)
+const advisorScreeningBatchNoticeDialogTitle = computed(() => advisorScreeningBatchNotice.value?.title || '提示')
 const isAdvisorScreeningPendingTab = computed(() => isAdvisorScreeningSection.value && advisorScreeningTab.value === 'pending')
 const isAdvisorScreeningSubmittedTab = computed(() => isAdvisorScreeningSection.value && advisorScreeningTab.value === 'submitted')
 const applicationActionColumnWidth = computed(() => {
@@ -487,6 +506,9 @@ const applicationSectionSummary = computed(() => {
   }
   return selectedPlan.value ? `已筛选计划：${selectedPlan.value.plan_name}，默认展示注册学生中“报名已提交”及后续环节` : '默认展示注册学生中“报名已提交”及后续环节'
 })
+
+const advisorScreeningPendingTabLabel = computed(() => `待提交(${advisorScreeningPendingCount.value})`)
+const advisorScreeningSubmittedTabLabel = computed(() => `已提交(${advisorScreeningSubmittedCount.value})`)
 
 const applicationStatusOptions = computed(() => {
   if (isPlanSection.value) {
@@ -705,6 +727,7 @@ async function loadApplications() {
   applicationsLoading.value = true
   try {
     if (isAdvisorScreeningSection.value) {
+      await loadAdvisorScreeningTabCounts()
       applications.value = []
       applicationPager.sync(0)
       selectedAdvisorScreeningIds.value = []
@@ -774,6 +797,13 @@ function handleAdvisorScreeningTabChange(tab: 'pending' | 'submitted') {
   }
 }
 
+function getAdvisorScreeningRowNo(rowIndex: number) {
+  if (advisorScreeningTab.value === 'submitted') {
+    return (advisorScreeningSubmittedPagination.pagination.currentPage - 1) * advisorScreeningSubmittedPagination.pagination.pageSize + rowIndex + 1
+  }
+  return rowIndex + 1
+}
+
 async function loadAdvisorScreeningPendingRows() {
   if (!isAdvisorScreeningSection.value || advisorScreeningTab.value !== 'pending') {
     advisorScreeningPendingRows.value = []
@@ -810,14 +840,30 @@ async function loadAdvisorScreeningPendingRows() {
   }
 }
 
+async function loadAdvisorScreeningTabCounts() {
+  try {
+    const [pendingResponse, submittedResponse] = await Promise.all([
+      getAdvisorScreeningPendingApplicationsCount(),
+      getAdvisorScreeningSubmittedApplicationsCount(),
+    ])
+    advisorScreeningPendingCount.value = pendingResponse.data.total
+    advisorScreeningSubmittedCount.value = submittedResponse.data.total
+  } catch {
+    advisorScreeningPendingCount.value = 0
+    advisorScreeningSubmittedCount.value = 0
+  }
+}
+
 async function handleAdvisorScreeningPendingSearch() {
   selectedAdvisorScreeningIds.value = []
+  await loadAdvisorScreeningTabCounts()
   await loadAdvisorScreeningPendingRows()
 }
 
 async function handleAdvisorScreeningPendingReset() {
   applicationFilters.keyword = ''
   selectedAdvisorScreeningIds.value = []
+  await loadAdvisorScreeningTabCounts()
   await loadAdvisorScreeningPendingRows()
 }
 
@@ -851,12 +897,14 @@ function formatSubmittedDateTime(value?: string | null) {
 
 function handleAdvisorScreeningSubmittedSearch() {
   advisorScreeningSubmittedPagination.pagination.currentPage = 1
+  void loadAdvisorScreeningTabCounts()
   void loadAdvisorScreeningSubmittedRows()
 }
 
 function handleAdvisorScreeningSubmittedReset() {
   advisorScreeningSubmittedFilters.keyword = ''
   advisorScreeningSubmittedPagination.pagination.currentPage = 1
+  void loadAdvisorScreeningTabCounts()
   void loadAdvisorScreeningSubmittedRows()
 }
 
@@ -902,6 +950,15 @@ function showAdvisorScreeningRescoreNotice(message: string, type: 'success' | 'w
   advisorScreeningRescoreNoticeDialogVisible.value = true
 }
 
+function showAdvisorScreeningBatchNotice(message: string, type: 'success' | 'warning' | 'error' | 'info' = 'info', title?: string) {
+  advisorScreeningBatchNotice.value = {
+    title: title || (type === 'success' ? '操作成功' : type === 'warning' ? '提醒' : type === 'error' ? '操作失败' : '提示'),
+    message,
+    type,
+  }
+  advisorScreeningBatchNoticeDialogVisible.value = true
+}
+
 async function submitAdvisorScreeningRescore() {
   const target = advisorScreeningRescoreTarget.value
   if (!target) {
@@ -913,6 +970,7 @@ async function submitAdvisorScreeningRescore() {
     advisorScreeningRescoreDialogVisible.value = false
     advisorScreeningRescoreTarget.value = null
     showAdvisorScreeningRescoreNotice(`${target.full_name} 的已提交记录已回退到导师初筛。`, 'success', '重新评分完成')
+    await loadAdvisorScreeningTabCounts()
     await loadAdvisorScreeningSubmittedRows()
   } catch (error) {
     const message = axios.isAxiosError(error)
@@ -945,6 +1003,53 @@ function syncAdvisorScreeningDrafts(rows: RecruitApplicationRecord[]) {
       }
     }
   })
+}
+
+function resolveAdvisorScreeningChoiceName(row: RecruitApplicationRecord) {
+  return row.advisor_screening_round === 'second_choice' ? '第二志愿' : '第一志愿'
+}
+
+async function saveAdvisorScreeningScoreOnBlur(row: RecruitApplicationRecord) {
+  if (!isAdvisorScreeningSection.value || advisorScreeningTab.value !== 'pending') {
+    return
+  }
+  if (!canOperateAdvisorScreening.value || isAdvisorScreeningLocked(row)) {
+    return
+  }
+  const draft = advisorScreeningDrafts[row.id]
+  const score = Number(draft?.advisor_score)
+  if (draft?.advisor_score === undefined || Number.isNaN(score)) {
+    return
+  }
+  if (score < 0 || score > 100) {
+    ElMessage.warning('导师初筛分数必须在 0 到 100 之间')
+    return
+  }
+  if (advisorScreeningSavingIds[row.id]) {
+    return
+  }
+  const payload: AdvisorScreeningScoreUpdateRequest = {
+    application_id: row.id,
+    candidate_no: row.candidate_no || '',
+    choice_name: resolveAdvisorScreeningChoiceName(row),
+    advisor_score: score,
+  }
+  advisorScreeningSavingIds[row.id] = true
+  try {
+    const response = await updateAdvisorScreeningScore(payload)
+    const updatedRow = response.data
+    if (!advisorScreeningDrafts[row.id]) {
+      advisorScreeningDrafts[row.id] = { advisor_score: undefined }
+    }
+    advisorScreeningDrafts[row.id].advisor_score = resolveAdvisorExistingScore(updatedRow)
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message)
+      : '导师评分保存失败'
+    ElMessage.error(message)
+  } finally {
+    advisorScreeningSavingIds[row.id] = false
+  }
 }
 
 function syncInitialScreeningDrafts(rows: RecruitApplicationRecord[]) {
@@ -1010,7 +1115,7 @@ function openAdvisorBatchSubmitDialog() {
     return
   }
   if (advisorBatchMixedScreeningRounds.value) {
-    ElMessage.warning('批量提交仅支持同一志愿轮次，请只勾选第一志愿或第二志愿记录')
+    showAdvisorScreeningBatchNotice('批量提交仅支持同一志愿轮次，请只勾选第一志愿或第二志愿记录', 'warning', '批量提交提醒')
     return
   }
   advisorScreeningBatchConfirmDialogVisible.value = true
@@ -1022,7 +1127,7 @@ function closeAdvisorBatchSubmitDialog() {
 
 async function submitAdvisorBatchScreening() {
   if (advisorBatchMixedScreeningRounds.value) {
-    ElMessage.warning('批量提交仅支持同一志愿轮次，请只勾选第一志愿或第二志愿记录')
+    showAdvisorScreeningBatchNotice('批量提交仅支持同一志愿轮次，请只勾选第一志愿或第二志愿记录', 'warning', '批量提交提醒')
     return
   }
   applicationWorkflowActionSubmitting.value = true
@@ -1702,6 +1807,34 @@ async function handleTemplateExport() {
     exportSubmitting.value = false
   }
 }
+
+async function handleAdvisorScreeningExport() {
+  advisorScreeningExportSubmitting.value = true
+  try {
+    const response = await createAdvisorScreeningExportJob({
+      ids: [],
+      keyword: isAdvisorScreeningSubmittedTab.value ? advisorScreeningSubmittedFilters.keyword || undefined : applicationFilters.keyword || undefined,
+      advisor_names: [],
+      first_choice_advisor_names: [],
+      second_choice_advisor_names: [],
+      export_scope: isAdvisorScreeningSubmittedTab.value ? 'advisor_screening_submitted' : 'advisor_screening_pending',
+    })
+    advisorScreeningExportResult.value = {
+      scopeLabel: isAdvisorScreeningSubmittedTab.value ? '已提交' : '待提交',
+      filterSummary: isAdvisorScreeningSubmittedTab.value
+        ? `关键字：${advisorScreeningSubmittedFilters.keyword.trim() || '全部'}`
+        : `关键字：${applicationFilters.keyword.trim() || '全部'}`,
+      message: response.data.message || '已开始导出，请稍后在导出任务中下载',
+      downloadHint: '完成后请在右上角用户名旁的导出图标中查看下载地址或失败结果。',
+    }
+    advisorScreeningExportResultDialogVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error) ? String(error.response?.data?.detail || error.message) : '导出失败'
+    ElMessage.error(message)
+  } finally {
+    advisorScreeningExportSubmitting.value = false
+  }
+}
 async function handleTemplateDownload() {
   templateSubmitting.value = true
   try {
@@ -1985,8 +2118,8 @@ onMounted(() => {
 
       <div v-if="isAdvisorScreeningSection && canAccessCurrentSection" class="advisor-screening-tabs">
         <el-tabs :model-value="advisorScreeningTab" class="advisor-screening-tabs__nav" @tab-change="handleAdvisorScreeningTabChange">
-          <el-tab-pane label="待提交" name="pending" />
-          <el-tab-pane label="已提交" name="submitted" />
+          <el-tab-pane :label="advisorScreeningPendingTabLabel" name="pending" />
+          <el-tab-pane :label="advisorScreeningSubmittedTabLabel" name="submitted" />
         </el-tabs>
         <div v-if="isAdvisorScreeningPendingTab" class="advisor-screening-pending-panel">
           <el-form inline :model="applicationFilters" class="advisor-screening-pending-panel__filter">
@@ -1998,12 +2131,18 @@ onMounted(() => {
               <el-button @click="handleAdvisorScreeningPendingReset">重置</el-button>
             </el-form-item>
           </el-form>
+          <div class="advisor-screening-submitted-panel__actions">
+            <el-button type="primary" :loading="advisorScreeningExportSubmitting" @click="handleAdvisorScreeningExport">导出待提交</el-button>
+          </div>
         </div>
         <div v-if="isAdvisorScreeningPendingTab" class="advisor-screening-floating-action">
           <el-button type="primary" size="large" round :disabled="!selectedAdvisorScreeningIds.length || !canOperateAdvisorScreening" :loading="applicationWorkflowActionSubmitting" @click="openAdvisorBatchSubmitDialog">
             批量提交
           </el-button>
           <span class="advisor-screening-floating-action__hint">已勾选 {{ selectedAdvisorScreeningIds.length }} 条</span>
+        </div>
+        <div v-if="isAdvisorScreeningSubmittedTab" class="advisor-screening-submitted-panel__actions">
+          <el-button type="primary" :loading="advisorScreeningExportSubmitting" @click="handleAdvisorScreeningExport">导出已提交</el-button>
         </div>
       </div>
 
@@ -2022,6 +2161,11 @@ onMounted(() => {
             width="48"
             :selectable="(row: RecruitApplicationRecord) => isAdvisorScreeningSection ? canOperateAdvisorScreening && !isAdvisorScreeningLocked(row) : canOperateInitialScreening && !isInitialScreeningLocked(row)"
           />
+          <el-table-column v-if="isAdvisorScreeningSection" label="序号" width="72" align="center">
+            <template #default="scope">
+              {{ getAdvisorScreeningRowNo(scope.$index) }}
+            </template>
+          </el-table-column>
           <el-table-column v-if="isPlanSection" prop="candidate_no" label="报名号" width="126" show-overflow-tooltip />
           <el-table-column v-else prop="business_key" label="业务编号" min-width="132" show-overflow-tooltip />
           <el-table-column prop="student_name" label="姓名" width="96" show-overflow-tooltip />
@@ -2044,7 +2188,7 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column v-if="isPlanSection" prop="registered_at" label="注册时间" width="160" show-overflow-tooltip />
-          <el-table-column v-if="isInitialScreeningSection" prop="second_choice" label="第二志愿" min-width="92" show-overflow-tooltip />
+          <el-table-column v-if="isInitialScreeningSection" prop="first_choice" label="第一志愿" min-width="92" show-overflow-tooltip />
           <el-table-column v-if="showIntendedAdvisorColumn && !isPlanSection" prop="intended_advisor_name" label="意向导师" width="88" show-overflow-tooltip />
           <el-table-column v-if="showPhoneColumn && !isPlanSection" prop="phone_number" label="电话" width="112" show-overflow-tooltip />
           <el-table-column v-if="showMaterialStatusColumn && !isPlanSection" label="材料状态" width="92">
@@ -2069,7 +2213,7 @@ onMounted(() => {
           </el-table-column>
           <el-table-column v-if="isAdvisorScreeningSection" label="导师评分" width="118">
             <template #default="scope">
-              <el-input-number v-model="advisorScreeningDrafts[scope.row.id].advisor_score" :min="0" :max="100" :precision="2" :step="1" size="small" style="width: 100%" :disabled="advisorScreeningTab === 'submitted' || !canOperateAdvisorScreening || isAdvisorScreeningLocked(scope.row)" />
+              <el-input-number v-model="advisorScreeningDrafts[scope.row.id].advisor_score" :min="0" :max="100" :precision="2" :step="1" size="small" style="width: 100%" :disabled="advisorScreeningTab === 'submitted' || !canOperateAdvisorScreening || isAdvisorScreeningLocked(scope.row)" @blur="saveAdvisorScreeningScoreOnBlur(scope.row)" />
             </template>
           </el-table-column>
           <el-table-column v-if="isAdvisorScreeningSection" label="自动结论" min-width="112">
@@ -2084,6 +2228,7 @@ onMounted(() => {
               {{ formatInitialScreeningScore(scope.row.first_choice_screening_score, '等待初筛') }}
             </template>
           </el-table-column>
+          <el-table-column v-if="isInitialScreeningSection" prop="second_choice" label="第二志愿" min-width="92" show-overflow-tooltip />
           <el-table-column v-if="isInitialScreeningSection" prop="second_choice_screening_score" label="第二志愿分数" width="120" show-overflow-tooltip>
             <template #default="scope">
               {{ formatInitialScreeningScore(scope.row.second_choice_screening_score) }}
@@ -2130,6 +2275,11 @@ onMounted(() => {
         </div>
 
         <el-table v-if="isAdvisorScreeningSubmittedTab" :data="advisorScreeningSubmittedRows" stripe border v-loading="advisorScreeningSubmittedLoading">
+          <el-table-column label="序号" width="72" align="center">
+            <template #default="scope">
+              {{ getAdvisorScreeningRowNo(scope.$index) }}
+            </template>
+          </el-table-column>
           <el-table-column prop="candidate_no" label="报名号" min-width="132" show-overflow-tooltip />
           <el-table-column prop="choice_name" label="志愿" width="92" show-overflow-tooltip />
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
@@ -2214,7 +2364,12 @@ onMounted(() => {
             </div>
             <div style="grid-column: span 2;">
               <span class="management-confirm-dialog__label">提醒</span>
-              <strong>执行后将把该学生回退到导师初筛环节，请确认后再继续。</strong>
+              <el-alert
+                title="执行后将把该学生回退到导师初筛环节，请确认后再继续。"
+                type="warning"
+                :closable="false"
+                show-icon
+              />
             </div>
           </div>
         </div>
@@ -2224,10 +2379,60 @@ onMounted(() => {
         </template>
       </el-dialog>
 
-      <el-dialog v-model="advisorScreeningRescoreNoticeDialogVisible" :title="advisorScreeningRescoreNoticeDialogTitle" width="520px" destroy-on-close>
-        <el-result v-if="advisorScreeningRescoreNotice" :icon="advisorScreeningRescoreNotice.type" :title="advisorScreeningRescoreNotice.title" :sub-title="advisorScreeningRescoreNotice.message" />
+      <el-dialog v-model="advisorScreeningExportResultDialogVisible" title="导出任务已创建" width="640px" destroy-on-close>
+        <div v-if="advisorScreeningExportResult" class="dialog-form reset-password-dialog">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">导出范围</span>
+              <strong>{{ advisorScreeningExportResult.scopeLabel }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">筛选说明</span>
+              <strong>{{ advisorScreeningExportResult.filterSummary }}</strong>
+            </div>
+            <div style="grid-column: span 2;">
+              <span class="reset-password-summary__label">任务说明</span>
+              <strong>{{ advisorScreeningExportResult.message }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">{{ advisorScreeningExportResult.downloadHint }}</p>
+          </div>
+        </div>
+        <template #footer>
+          <el-button type="primary" @click="advisorScreeningExportResultDialogVisible = false">确定</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="advisorScreeningRescoreNoticeDialogVisible" :title="advisorScreeningRescoreNoticeDialogTitle" width="640px" destroy-on-close>
+        <div v-if="advisorScreeningRescoreNotice" class="dialog-form reset-password-dialog">
+          <div class="reset-password-summary">
+            <div>
+              <span class="reset-password-summary__label">提示类型</span>
+              <strong>{{ advisorScreeningRescoreNotice.title }}</strong>
+            </div>
+            <div>
+              <span class="reset-password-summary__label">结果状态</span>
+              <strong>{{ advisorScreeningRescoreNotice.type }}</strong>
+            </div>
+            <div style="grid-column: span 2;">
+              <span class="reset-password-summary__label">通知内容</span>
+              <strong>{{ advisorScreeningRescoreNotice.message }}</strong>
+            </div>
+          </div>
+          <div class="reset-password-result">
+            <p class="reset-password-result__message">处理结果已生成，请关闭后继续操作。</p>
+          </div>
+        </div>
         <template #footer>
           <el-button type="primary" @click="advisorScreeningRescoreNoticeDialogVisible = false">确定</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="advisorScreeningBatchNoticeDialogVisible" :title="advisorScreeningBatchNoticeDialogTitle" width="520px" destroy-on-close>
+        <el-result v-if="advisorScreeningBatchNotice" :icon="advisorScreeningBatchNotice.type" :title="advisorScreeningBatchNotice.title" :sub-title="advisorScreeningBatchNotice.message" />
+        <template #footer>
+          <el-button type="primary" @click="advisorScreeningBatchNoticeDialogVisible = false">确定</el-button>
         </template>
       </el-dialog>
 
@@ -2865,6 +3070,46 @@ onMounted(() => {
   margin: 0;
   color: #606266;
   line-height: 1.7;
+}
+
+.reset-password-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.reset-password-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.reset-password-summary__label {
+  display: block;
+  margin-bottom: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.reset-password-summary strong {
+  color: #303133;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.reset-password-result {
+  display: grid;
+  gap: 14px;
+}
+
+.reset-password-result__message {
+  margin: 0;
+  color: #606266;
+  line-height: 1.7;
+  white-space: pre-line;
 }
 
 .delete-application-dialog__lead {

@@ -80,6 +80,27 @@ class FakePostgresStateStore:
     def load_team_state(self):
         raise AttributeError("load_team_state")
 
+    def list_centers_page(self, *, keyword=None, is_enabled=None, director_id=None, page=1, page_size=10):
+        del keyword, is_enabled, director_id, page, page_size
+        runtime_state = self.load_state() or {}
+        items: list[dict] = []
+        for team in runtime_state.get("teams", []) or []:
+            items.append(
+                {
+                    "id": team.get("id"),
+                    "center_name": team.get("team_name") or team.get("center_name"),
+                    "team_name": team.get("team_name") or team.get("center_name"),
+                    "director_name": team.get("lead_advisor_name") or team.get("director_name"),
+                    "lead_user_name": team.get("lead_advisor_name") or team.get("director_name"),
+                    "advisor_names": list(team.get("advisor_names") or []),
+                    "is_enabled": team.get("is_enabled", True),
+                    "created_date": team.get("created_date"),
+                    "member_student_count": team.get("member_student_count"),
+                    "active_student_count": team.get("active_student_count"),
+                }
+            )
+        return items, len(items)
+
     def list_dict_options(self, dict_type: str) -> list[dict]:
         return list(self.dict_options_map.get(dict_type, []))
 
@@ -203,7 +224,23 @@ class FakePostgresStateStore:
         del application_id
         return None
 
-    def list_recruitment_applications_page(self, *, keyword=None, plan_id=None, status=None, advisor_name=None, advisor_names=None, page=1, page_size=10):
+    def _advisor_user_id_by_username(self, username):
+        if str(username or "").strip() == "student-admin":
+            return 101
+        return None
+
+    def list_recruitment_applications_page(
+        self,
+        *,
+        keyword=None,
+        plan_id=None,
+        status=None,
+        advisor_name=None,
+        advisor_user_id=None,
+        advisor_names=None,
+        page=1,
+        page_size=10,
+    ):
         rows = [] if self.recruitment_application_rows is None else [dict(item) for item in self.recruitment_application_rows]
         if plan_id is not None:
             rows = [item for item in rows if int(item.get("plan_id") or 0) == int(plan_id)]
@@ -224,6 +261,8 @@ class FakePostgresStateStore:
                     and str(item.get("first_choice") or item.get("intended_advisor_name") or "") == normalized_advisor_name
                 )
             ]
+        if advisor_user_id is not None:
+            rows = [item for item in rows if int(item.get("first_choice_id") or 0) == int(advisor_user_id) or int(item.get("second_choice_id") or 0) == int(advisor_user_id)]
         normalized_advisor_names = {str(item).strip() for item in (advisor_names or []) if str(item).strip()}
         if normalized_advisor_names:
             rows = [
@@ -291,6 +330,7 @@ class FakePostgresStateStore:
         *,
         workflow_task=None,
         counters=None,
+        persist_portal_student=True,
     ) -> None:
         self.portal_application_submissions.append(
             {
@@ -299,6 +339,7 @@ class FakePostgresStateStore:
                 "operation_log": operation_log,
                 "workflow_task": workflow_task,
                 "counters": counters,
+                "persist_portal_student": persist_portal_student,
             }
         )
 
@@ -793,6 +834,8 @@ def _build_recruitment_application_payload():
 def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name: str):
     from app.schemas.portal import PortalApplicationUpsert
 
+    advisor_name = advisor_name or "刘亚"
+
     return PortalApplicationUpsert(
         plan_id=plan_id,
         profile={
@@ -821,6 +864,10 @@ def _build_portal_application_payload(plan_id: int, team_name: str, advisor_name
         selected_team_name=team_name,
         selected_advisor_user_id=11,
         selected_advisor_name=advisor_name,
+        first_choice=advisor_name,
+        first_choice_screening_score=88,
+        second_choice="王青",
+        second_choice_screening_score=75,
         intended_field=team_name,
         source_channel="上海人工智能实验室官网",
         english_proficiencies=[
@@ -2179,6 +2226,52 @@ def test_submit_advisor_screening_batch_first_choice_pass_moves_to_confirmation(
     assert len(fake_postgres.advisor_screening_batches) == 1
     assert fake_postgres.advisor_screening_batches[0]["batch_payload"]["advisor_name"] == "刘亚"
     assert fake_mailer.recruitment_status_calls[-1]["application_status"] == "待导师初筛-第一志愿"
+
+
+def test_submit_advisor_screening_batch_allows_platform_admin_override(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    fake_mailer = FakeNotificationEmailService()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+    monkeypatch.setattr("app.services.management_service.NotificationEmailService", lambda **kwargs: fake_mailer)
+
+    store = RuntimeManagementStore()
+    application = store.create_recruitment_application(
+        _build_recruitment_application_payload().model_copy(
+            update={
+                "email": "screening-admin@example.com",
+                "intended_advisor_name": "刘亚",
+                "first_choice": "刘亚",
+                "second_choice": "王青",
+            }
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    task_id = store.state["workflow_tasks"][0]["id"]
+    _advance_recruitment_application_to_advisor_screening(store, task_id)
+
+    response = store.submit_advisor_screening_batch(
+        AdvisorScreeningBatchSubmitRequest(
+            signature_base64="data:image/png;base64,abc123",
+            items=[
+                {
+                    "application_id": application.id,
+                    "advisor_score": 91,
+                }
+            ],
+        ),
+        principal={"username": "admin", "full_name": "管理员", "roles": ["platform_admin"]},
+    )
+
+    current_task = next(item for item in store.state["workflow_tasks"] if item["id"] == task_id)
+    current_application = next(item for item in store.state["recruitment_applications"] if item["id"] == application.id)
+    assert response.batch_id == 1
+    assert response.screening_round == "first_choice"
+    assert response.submitted_count == 1
+    assert current_task["node_key"] == "initial_screening_confirmation"
+    assert current_application["application_status"] == "待初筛确认"
+    assert current_application["initial_screening_status"] == "pending"
+    assert current_application["first_choice_screening_score"] == pytest.approx(91)
 
 
 def test_submit_advisor_screening_batch_rejects_duplicate_round_submission(monkeypatch) -> None:
@@ -4396,15 +4489,26 @@ def test_export_registered_portal_students_includes_undergraduate_fields(monkeyp
                 {
                     "preference_order": 1,
                     "team_id": None,
-                    "advisor_name": available_team.lead_advisor_name,
-                    "advisor_user_id": None,
+                    "advisor_name": "刘亚",
+                    "advisor_user_id": 11,
                     "is_optional": False,
+                },
+                {
+                    "preference_order": 2,
+                    "team_id": None,
+                    "advisor_name": "王青",
+                    "advisor_user_id": 12,
+                    "is_optional": True,
                 }
             ],
             "selected_team_id": None,
             "selected_team_name": available_team.team_name,
-            "selected_advisor_user_id": None,
-            "selected_advisor_name": available_team.lead_advisor_name,
+            "selected_advisor_user_id": 11,
+            "selected_advisor_name": "刘亚",
+            "first_choice": "刘亚",
+            "second_choice": "王青",
+            "first_choice_screening_score": 88,
+            "second_choice_screening_score": 75,
             "education_experiences": [
                 {
                     "sort_order": 1,
@@ -4435,16 +4539,31 @@ def test_export_registered_portal_students_includes_undergraduate_fields(monkeyp
     payload = PortalApplicationUpsert.model_validate(payload_data)
     store.submit_portal_application(registration.student.id, payload)
 
+    runtime_student = next(item for item in store.state["portal_students"] if item["id"] == registration.student.id)
+    runtime_application = next(item for item in store.state["recruitment_applications"] if int(item.get("portal_student_id") or 0) == registration.student.id)
+    runtime_application["first_choice_screening_score"] = 88
+    runtime_application["second_choice_screening_score"] = 75
+
+    def _get_portal_student_detail(_: int) -> dict:
+        return runtime_student
+
+    fake_postgres.get_portal_student_detail = _get_portal_student_detail
+
     content = store.export_registered_portal_students([registration.student.id])
 
     workbook = load_workbook(BytesIO(content), data_only=True)
     worksheet = workbook.active
     assert worksheet is not None
     rows = list(worksheet.iter_rows(values_only=True))
+    assert len(rows) >= 2
     exported_row = dict(zip(rows[0], rows[1], strict=False))
 
     assert exported_row["姓名"] == "导出本科学生"
     assert exported_row["报名状态"] == "已填写报名"
+    assert exported_row["第一志愿导师评分"] == "88"
+    assert exported_row["第二志愿导师评分"] == "75"
+    assert exported_row["第一志愿导师所属研究中心"] == "前沿探索中心"
+    assert exported_row["第二志愿导师所属研究中心"] == "通用智能中心"
     assert exported_row["本科教育阶段"] == "本科在读"
     assert exported_row["本科学校"] == "东南大学"
     assert exported_row["本科专业"] == "人工智能"
@@ -4498,16 +4617,84 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
                 {
                     "preference_order": 1,
                     "team_id": None,
-                    "advisor_name": available_team.lead_advisor_name,
-                    "advisor_user_id": None,
+                    "advisor_name": "刘亚",
+                    "advisor_user_id": 11,
                     "is_optional": False,
+                },
+                {
+                    "preference_order": 2,
+                    "team_id": None,
+                    "advisor_name": "王青",
+                    "advisor_user_id": 12,
+                    "is_optional": True,
                 }
             ],
             "selected_team_id": None,
             "selected_team_name": available_team.team_name,
-            "selected_advisor_user_id": None,
-            "selected_advisor_name": available_team.lead_advisor_name,
+            "selected_advisor_user_id": 11,
+            "selected_advisor_name": "刘亚",
+            "first_choice": "刘亚",
+            "first_choice_screening_score": 88,
+            "second_choice": "王青",
+            "second_choice_screening_score": 75,
             "source_channel_other": "老师推荐",
+            "practice_experiences": [
+                {
+                    "start_month": "2023-07",
+                    "end_month": "2023-12",
+                    "organization_name": "某研究院",
+                    "position_name": "实习生",
+                    "responsibility_text": "参与研究支持",
+                    "verifier_name": "实践导师",
+                    "verifier_phone": "13800003333",
+                }
+            ],
+                "education_experiences": [
+                    {
+                        "sort_order": 1,
+                        "education_stage": "高中毕业",
+                        "start_month": "2018-09",
+                        "end_month": "2021-06",
+                        "school_name": "无锡市第一中学",
+                        "verifier_name": "高中班主任",
+                        "verifier_phone": "13800002222",
+                    },
+                    {
+                        "sort_order": 2,
+                        "education_stage": "本科在读",
+                        "start_month": "2021-09",
+                        "end_month": "2025-06",
+                        "school_name": "东南大学",
+                        "major_name": "人工智能",
+                        "average_score": "91.5",
+                        "gpa": "3.8",
+                        "ranking": "5/120",
+                        "verifier_name": "本科辅导员",
+                        "verifier_phone": "13800002222",
+                        "transcript_attachment_url": "/portal-attachments/uploads/student-7/transcript/transcript-a.pdf",
+                    }
+                ],
+            "family_members": [
+                {
+                        "member_name": "张三",
+                    "relation_type": "父亲",
+                    "employer_name": "某公司",
+                    "job_title": "工程师",
+                    "contact_phone": "13800004444",
+                }
+            ],
+            "achievement_records": [
+                {
+                        "achievement_type": "论文发表",
+                        "achievement_month": "2025-06",
+                    "paper_title": "一篇论文",
+                        "author_order": "第一作者",
+                    "journal_or_conference": "某会议",
+                    "award_name": "",
+                    "description_text": "研究成果摘要",
+                    "responsibility_text": "第一作者",
+                }
+            ],
             "personal_statement": {
                 **payload_data["personal_statement"],
                 "supporting_material_attachment_url": "/portal-attachments/uploads/student-7/material/support-a.pdf",
@@ -4523,6 +4710,8 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
     store.save_portal_application_draft(draft_registration.student.id, PortalApplicationDraftUpsert.model_validate(payload_data))
 
     runtime_student = next(item for item in store.state["portal_students"] if item["id"] == draft_registration.student.id)
+    runtime_student["application_draft"]["first_choice_screening_score"] = 88
+    runtime_student["application_draft"]["second_choice_screening_score"] = 75
 
     def _get_portal_student_detail(_: int) -> dict:
         return runtime_student
@@ -4547,6 +4736,12 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
     exported_row = dict(zip(rows[0], rows[1], strict=False))
     assert exported_row["姓名"] == "草稿导出学生"
     assert exported_row["报名状态"] == "未填写报名"
+    assert exported_row["第一志愿导师"] == "刘亚"
+    assert exported_row["第二志愿导师"] == "王青"
+    assert exported_row["第一志愿导师评分"] == "88"
+    assert exported_row["第二志愿导师评分"] == "75"
+    assert exported_row["第一志愿导师所属研究中心"] == "前沿探索中心"
+    assert exported_row["第二志愿导师所属研究中心"] == "通用智能中心"
     assert str(exported_row["证件照附件"]).startswith("https://admissions.pjlab.org.cn/")
     assert str(exported_row["证件照附件"]).endswith("profile_photo/photo-a.jpg")
     assert str(exported_row["个人陈述简历附件"]).startswith("https://admissions.pjlab.org.cn/")
@@ -4556,8 +4751,16 @@ def test_export_registered_portal_students_supports_filtered_full_export_with_sa
     assert exported_row["信息来源渠道"] == "上海人工智能实验室官网"
     assert exported_row["其他信息来源"] == "老师推荐"
     assert exported_row["声明内容"] == "我已知悉报名要求"
-    assert '"profile": true' in str(exported_row["声明进度快照JSON"])
-    assert '"source_channel_other": "老师推荐"' in str(exported_row["报名草稿JSON"])
+    assert "{" not in str(exported_row["教育经历摘要"])
+    assert "{" not in str(exported_row["实践经历摘要"])
+    assert "{" not in str(exported_row["家庭情况摘要"])
+    assert "{" not in str(exported_row["科研成果摘要"])
+    assert "东南大学" in str(exported_row["教育经历摘要"])
+    assert "某研究院" in str(exported_row["实践经历摘要"])
+    assert "张父" in str(exported_row["家庭情况摘要"])
+    assert "一篇论文" in str(exported_row["科研成果摘要"])
+    assert "声明进度快照JSON" not in rows[0]
+    assert "报名草稿JSON" not in rows[0]
 
 
 def test_export_registered_portal_students_maps_returned_to_rejected_status(monkeypatch) -> None:
@@ -4584,6 +4787,14 @@ def test_export_registered_portal_students_maps_returned_to_rejected_status(monk
         available_team.team_name,
         available_team.lead_advisor_name,
     )
+    payload.preferences.append(
+        {
+            "preference_order": 2,
+            "advisor_name": "王青",
+            "advisor_user_id": 12,
+            "is_optional": True,
+        }
+    )
     store.submit_portal_application(registration.student.id, PortalApplicationUpsert.model_validate(payload.model_dump(mode="python")))
 
     runtime_student = next(item for item in store.state["portal_students"] if item["id"] == registration.student.id)
@@ -4592,6 +4803,7 @@ def test_export_registered_portal_students_maps_returned_to_rejected_status(monk
     for application in store.state["recruitment_applications"]:
         if int(application.get("portal_student_id") or 0) == registration.student.id:
             application["application_status"] = "returned"
+            application["first_choice_screening_score"] = 91
 
     def _get_portal_student_detail(_: int) -> dict:
         return runtime_student
@@ -4614,6 +4826,10 @@ def test_export_registered_portal_students_maps_returned_to_rejected_status(monk
 
     assert exported_row["姓名"] == "退回状态学生"
     assert exported_row["报名状态"] == "驳回重填"
+    assert exported_row["第一志愿导师"] == "刘亚"
+    assert exported_row["第二志愿导师"] == "王青"
+    assert exported_row["第一志愿导师评分"] == "91"
+    assert exported_row["第二志愿导师评分"] is None
 
 
 def test_build_registered_portal_student_export_row_does_not_truncate_repeated_groups(monkeypatch) -> None:
@@ -4673,7 +4889,15 @@ def test_build_registered_portal_student_export_row_does_not_truncate_repeated_g
     )
 
     records = [
-        store._build_registered_portal_student_export_row(first_student, None, None, None, None, None),
+        store._build_registered_portal_student_export_row(
+            first_student,
+            None,
+            None,
+            None,
+            None,
+            None,
+            second_choice_advisor_name="导师乙",
+        ),
         store._build_registered_portal_student_export_row(second_student, None, None, None, None, None),
     ]
 
@@ -4683,8 +4907,8 @@ def test_build_registered_portal_student_export_row_does_not_truncate_repeated_g
     first_row = dict(zip(rows[0], rows[1], strict=False))
     second_row = dict(zip(rows[0], rows[2], strict=False))
 
-    assert first_row["志愿2导师"] == "导师乙"
-    assert second_row["志愿2导师"] is None
+    assert first_row["第二志愿导师"] == "导师乙"
+    assert second_row["第二志愿导师"] is None
     assert first_row["教育经历4学校名称"] == "博士A"
     assert second_row["教育经历4学校名称"] is None
 
@@ -4730,6 +4954,293 @@ def test_create_registered_portal_student_export_job_completes_and_can_download(
 
     assert file_name.endswith(".xlsx")
     assert content
+
+
+def test_create_registered_portal_student_export_job_supports_advisor_screening_scope(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    pending_rows = [
+        {
+            "portal_student_id": 7001,
+            "plan_id": 1,
+            "candidate_no": "C20260616001",
+            "business_key": "BK20260616001",
+            "student_name": "导师导出学生1",
+            "advisor_screening_round": "first_choice",
+            "first_choice": "刘亚",
+            "second_choice": "王青",
+            "first_choice_screening_score": 82,
+            "second_choice_screening_score": 76,
+            "application_status": "advisor_screening_pending",
+            "advisor_screening_status": "pending",
+            "applied_at": "2026-06-16 01:22:12",
+            "first_choice_screening_submitted_at": None,
+            "second_choice_screening_submitted_at": None,
+        },
+        {
+            "portal_student_id": 7002,
+            "plan_id": 1,
+            "candidate_no": "C20260616002",
+            "business_key": "BK20260616002",
+            "student_name": "导师导出学生2",
+            "advisor_screening_round": "first_choice",
+            "first_choice": "刘亚",
+            "second_choice": "王青",
+            "first_choice_screening_score": 81,
+            "second_choice_screening_score": 75,
+            "application_status": "advisor_screening_pending",
+            "advisor_screening_status": "pending",
+            "applied_at": "2026-06-16 01:22:13",
+            "first_choice_screening_submitted_at": None,
+            "second_choice_screening_submitted_at": None,
+        },
+        {
+            "portal_student_id": 7003,
+            "plan_id": 1,
+            "candidate_no": "C20260616003",
+            "business_key": "BK20260616003",
+            "student_name": "导师导出学生3",
+            "advisor_screening_round": "first_choice",
+            "first_choice": "刘亚",
+            "second_choice": "王青",
+            "first_choice_screening_score": 83,
+            "second_choice_screening_score": 74,
+            "application_status": "advisor_screening_pending",
+            "advisor_screening_status": "pending",
+            "applied_at": "2026-06-16 01:22:14",
+            "first_choice_screening_submitted_at": None,
+            "second_choice_screening_submitted_at": None,
+        },
+    ]
+
+    pending_calls: list[dict[str, object]] = []
+
+    def fake_list_advisor_screening_pending_applications(**kwargs):
+        pending_calls.append(kwargs)
+        return pending_rows
+
+    monkeypatch.setattr("app.services.management_service_students.list_advisor_screening_pending_applications", fake_list_advisor_screening_pending_applications)
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.auth import Principal
+    from app.schemas.student import RegisteredPortalStudentExportRequest
+
+    class ImmediateExecutor:
+        def submit(self, fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            return None
+
+    monkeypatch.setattr(RuntimeManagementStoreStudentsMixin, "_registered_portal_export_executor", ImmediateExecutor())
+
+    store = RuntimeManagementStore()
+    principal = Principal(username="liuya", full_name="刘亚", roles=["advisor"], permissions=["students:read"])
+
+    def get_portal_student_detail(student_id: int) -> dict:
+        return {
+            "id": int(student_id),
+            "full_name": f"导师导出学生{int(student_id) - 7000}",
+        "phone_number": "13800007777",
+        "email": "advisor-export@example.com",
+        "id_number": "320000199909099977",
+        "selected_plan_id": 1,
+        "account_status": "启用",
+        "submitted_at": "2026-06-16 01:22:12",
+        "recruitment_application_status": "待导师初筛-第一志愿",
+        "first_choice": "刘亚",
+        "second_choice": "王青",
+        "application_draft": {
+            "preferences": [
+                {"preference_order": 1, "advisor_name": "刘亚", "is_optional": False},
+                {"preference_order": 2, "advisor_name": "王青", "is_optional": True},
+            ],
+            "personal_statement": {"personal_statement_text": "导师初筛导出测试"},
+        },
+        }
+
+    fake_postgres.get_portal_student_detail = get_portal_student_detail
+
+    response = store.create_registered_portal_student_export_job(
+        RegisteredPortalStudentExportRequest(export_scope="advisor_screening_pending"),
+        principal=principal,
+    )
+    jobs = store.list_registered_portal_student_export_jobs(principal=principal)
+
+    assert response.job.job_id
+    assert jobs.items[0].status == "completed"
+    assert jobs.items[0].download_url
+    assert jobs.items[0].file_name.startswith("导师初筛导出_")
+
+    file_name, content = store.get_registered_portal_student_export_job_download(response.job.job_id, principal=principal)
+    workbook = load_workbook(BytesIO(content), data_only=True)
+    worksheet = workbook.active
+    rows = list(worksheet.iter_rows(values_only=True))
+    assert len(rows) >= 2
+    exported_row = dict(zip(rows[0], rows[1], strict=False))
+
+    assert file_name.endswith(".xlsx")
+    assert "报名草稿JSON" not in rows[0]
+    assert "声明进度快照JSON" not in rows[0]
+    assert exported_row["姓名"] == "导师导出学生1"
+    assert exported_row["申请流转状态"] == "advisor_screening_pending"
+    assert pending_calls == [{"keyword": None, "advisor_username": "liuya", "advisor_name": "刘亚", "advisor_user_id": 19}]
+
+
+def test_create_advisor_screening_submitted_export_job_uses_total_page_size(monkeypatch) -> None:
+    fake_postgres = FakePostgresStateStore()
+    monkeypatch.setattr("app.services.management_service.PostgresStateStore", lambda: fake_postgres)
+
+    from app.schemas.auth import Principal
+    from app.schemas.student import RegisteredPortalStudentExportRequest
+
+    submitted_rows = [
+        SimpleNamespace(
+            student_id=8001,
+            plan_id=1,
+            application_status="advisor_screening_submitted",
+            application_id=9001,
+            business_key="BK20260617001",
+            first_choice="刘亚",
+            second_choice="王青",
+            first_choice_screening_submitted_at="2026-06-16 01:22:12",
+        ),
+        SimpleNamespace(
+            student_id=8002,
+            plan_id=1,
+            application_status="advisor_screening_submitted",
+            application_id=9002,
+            business_key="BK20260617002",
+            first_choice="刘亚",
+            second_choice="王青",
+            first_choice_screening_submitted_at="2026-06-16 01:22:13",
+        ),
+        SimpleNamespace(
+            student_id=8003,
+            plan_id=1,
+            application_status="advisor_screening_submitted",
+            application_id=9003,
+            business_key="BK20260617003",
+            first_choice="刘亚",
+            second_choice="王青",
+            first_choice_screening_submitted_at="2026-06-16 01:22:14",
+        ),
+    ]
+
+    submitted_calls: list[dict[str, object]] = []
+
+    def fake_count_advisor_screening_submitted_applications(**kwargs):
+        submitted_calls.append({"kind": "count", **kwargs})
+        return len(submitted_rows)
+
+    def fake_list_advisor_screening_submitted_applications(**kwargs):
+        submitted_calls.append({"kind": "list", **kwargs})
+        assert int(kwargs["page_size"]) == len(submitted_rows)
+        return SimpleNamespace(items=submitted_rows, total=len(submitted_rows))
+
+    monkeypatch.setattr(
+        "app.services.management_service_students.count_advisor_screening_submitted_applications",
+        fake_count_advisor_screening_submitted_applications,
+    )
+    monkeypatch.setattr(
+        "app.services.management_service_students.list_advisor_screening_submitted_applications",
+        fake_list_advisor_screening_submitted_applications,
+    )
+
+    class ImmediateExecutor:
+        def submit(self, fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            return None
+
+    monkeypatch.setattr(RuntimeManagementStoreStudentsMixin, "_registered_portal_export_executor", ImmediateExecutor())
+
+    store = RuntimeManagementStore()
+    principal = Principal(username="liuya", full_name="刘亚", roles=["advisor"], permissions=["students:read"])
+
+    def get_portal_student_detail(student_id: int) -> dict:
+        return {
+            "id": int(student_id),
+            "full_name": f"导师导出已提交学生{int(student_id) - 8000}",
+            "phone_number": "13800007777",
+            "email": "advisor-submitted-export@example.com",
+            "id_number": "320000199909099977",
+            "selected_plan_id": 1,
+            "account_status": "启用",
+            "submitted_at": "2026-06-16 01:22:12",
+            "recruitment_application_status": "待导师初筛-第一志愿",
+            "first_choice": "刘亚",
+            "second_choice": "王青",
+            "application_draft": {
+                "preferences": [
+                    {"preference_order": 1, "advisor_name": "刘亚", "is_optional": False},
+                    {"preference_order": 2, "advisor_name": "王青", "is_optional": True},
+                ],
+                "personal_statement": {"personal_statement_text": "导师初筛导出测试"},
+            },
+        }
+
+    fake_postgres.get_portal_student_detail = get_portal_student_detail
+
+    response = store.create_registered_portal_student_export_job(
+        RegisteredPortalStudentExportRequest(export_scope="advisor_screening_submitted", keyword="导师"),
+        principal=principal,
+    )
+    jobs = store.list_registered_portal_student_export_jobs(principal=principal)
+
+    assert response.job.job_id
+    assert jobs.items[0].status == "completed"
+    assert jobs.items[0].download_url
+    assert jobs.items[0].file_name.startswith("导师初筛导出_")
+
+
+def test_count_advisor_screening_submitted_applications_accepts_keyword_and_advisor_filters(monkeypatch) -> None:
+    from app.services.advisor_screening_submitted_service import count_advisor_screening_submitted_applications
+
+    captured: dict[str, object] = {}
+
+    class FakeCursor:
+        def execute(self, query, params=None):
+            captured["query"] = str(query)
+            captured["params"] = list(params or [])
+
+        def fetchone(self):
+            return {"total": 63}
+
+        def fetchall(self):
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeConn:
+        row_factory = None
+
+        def cursor(self):
+            return FakeCursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeStore:
+        def _connect(self, *_args, **_kwargs):
+            return FakeConn()
+
+        def _execute_dynamic(self, cur, query, params):
+            cur.execute(query, params)
+
+        def _advisor_user_id_by_username(self, username):
+            captured["advisor_username"] = username
+            return 19
+
+    monkeypatch.setattr("app.services.advisor_screening_submitted_service.query_store", FakeStore())
+
+    total = count_advisor_screening_submitted_applications(keyword="张", advisor_name="张伟楠", advisor_user_id=19)
+
+    assert total == 63
+    assert captured["params"] == ["张伟楠", 19, "%张%", "%张%", "张伟楠", 19, "%张%", "%张%", 1, 0]
 
 
 def test_get_student_stats_includes_registered_portal_student_counts(monkeypatch) -> None:

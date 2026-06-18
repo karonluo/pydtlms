@@ -879,6 +879,7 @@ class PortalStudentRecord(BaseModel):
     english_level: str | None = None
     family_info: str | None = None
     education_experience: str | None = None
+    education_experiences: list[PortalEducationExperienceItem] = Field(default_factory=list)
     practice_experience: str | None = None
     personal_profile: str | None = None
     recommendation_notes: str | None = None
@@ -917,9 +918,13 @@ class PortalStudentRecord(BaseModel):
             if any(value is not None for value in profile_payload.values()):
                 data["profile"] = profile_payload
 
+        structured_education_experiences = _parse_model_list(data.get("education_experiences"), PortalEducationExperienceItem)
+        if structured_education_experiences:
+            data["education_experiences"] = [item.model_dump(mode="python", exclude_none=False) for item in structured_education_experiences]
+
         if data.get("application_draft") is None:
             preferences: list[dict[str, Any]] = []
-            education_experiences = _parse_model_list(data.get("education_experience"), PortalEducationExperienceItem)
+            education_experiences = structured_education_experiences or _parse_model_list(data.get("education_experience"), PortalEducationExperienceItem)
             practice_experiences = _parse_model_list(data.get("practice_experience"), PortalPracticeExperienceItem)
             family_members = _parse_model_list(data.get("family_info"), PortalFamilyMemberItem)
             english_proficiencies = _parse_model_list(data.get("english_level"), PortalEnglishProficiencyItem)
@@ -973,6 +978,11 @@ class PortalStudentRecord(BaseModel):
         elif isinstance(data.get("application_draft"), dict):
             draft_payload = PortalApplicationDraftRecord.model_validate(data.get("application_draft") or {})
             data["application_draft"] = _populate_application_draft_fallbacks(draft_payload, data).model_dump(mode="python", exclude_none=False)
+
+        if not data.get("education_experiences"):
+            education_experiences = _parse_model_list(data.get("education_experience"), PortalEducationExperienceItem)
+            if education_experiences:
+                data["education_experiences"] = education_experiences
         return data
 
 

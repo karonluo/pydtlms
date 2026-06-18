@@ -2,8 +2,6 @@
 import {
   DataAnalysis,
   DocumentChecked,
-  Histogram,
-  Reading,
   UserFilled,
   WarningFilled,
 } from '@element-plus/icons-vue'
@@ -22,6 +20,11 @@ import { use, init, type ComposeOption, type ECharts } from 'echarts/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import {
+  getDashboardFirstChoicePendingStudentList,
+  getDashboardSecondChoicePendingStudentList,
+  getDashboardSecondChoicePendingGradingStatistics,
+  getDashboardFirstChoicePendingGradingStatistics,
+  getDashboardRecruitmentApplicationStatusStats,
   getDashboardRecruitmentAdvisorChoiceDistribution,
   getDashboardRecruitmentAdvisorChoiceStudents,
   getDashboardOverview,
@@ -31,6 +34,11 @@ import {
   getDashboardUndergraduateSchoolStudents,
   type DashboardRecruitmentAdvisorChoiceDistribution,
   type DashboardRecruitmentAdvisorChoiceDistributionResponse,
+  type DashboardRecruitmentFirstChoicePendingGradingResponse,
+  type DashboardRecruitmentFirstChoicePendingStudentListResponse,
+  type DashboardRecruitmentSecondChoicePendingGradingResponse,
+  type DashboardRecruitmentSecondChoicePendingStudentListResponse,
+  type DashboardRecruitmentApplicationStatusResponse,
   type DashboardUndergraduateSchoolGroupDistribution,
   type DashboardUndergraduateSchoolGroupDistributionResponse,
   type DashboardOverview,
@@ -74,9 +82,13 @@ type AdvisorChoiceDisplayItem = {
   percentage: number
 }
 
+type FirstChoicePendingStudentItem = DashboardRecruitmentFirstChoicePendingStudentListResponse['items'][number]
+type SecondChoicePendingStudentItem = DashboardRecruitmentSecondChoicePendingStudentListResponse['items'][number]
+
 const schoolRankingChartRef = ref<HTMLDivElement>()
 const loading = ref(false)
 const overview = ref<DashboardOverview | null>(null)
+const recruitmentApplicationStatusStats = ref<DashboardRecruitmentApplicationStatusResponse>({ items: [] })
 const schoolGroupDistribution = ref<DashboardUndergraduateSchoolGroupDistributionResponse>({ total_applications: 0, groups: [] })
 const advisorChoiceDistribution = ref<DashboardRecruitmentAdvisorChoiceDistributionResponse>({ choices: [] })
 const schoolRankings = ref<DashboardUndergraduateSchoolRankingItem[]>([])
@@ -98,6 +110,38 @@ const selectedAdvisorChoicePagedStudents = computed(() => {
 const selectedAdvisorChoiceDialogVisible = ref(false)
 const selectedAdvisorChoiceListLoading = ref(false)
 const selectedAdvisorChoiceDialogSource = ref<AdvisorChoiceStudentDialogSource | null>(null)
+const firstChoicePendingGradingDialogVisible = ref(false)
+const firstChoicePendingGradingListLoading = ref(false)
+const firstChoicePendingGradingPaginationPage = ref(1)
+const firstChoicePendingGradingPageSize = ref(10)
+const firstChoicePendingGradingTotal = ref(0)
+const firstChoicePendingGradingItems = ref<DashboardRecruitmentFirstChoicePendingGradingResponse['items']>([])
+const firstChoicePendingGradingAdvisorKeyword = ref('')
+const firstChoicePendingStudentDialogVisible = ref(false)
+const firstChoicePendingStudentListLoading = ref(false)
+const firstChoicePendingStudentPaginationPage = ref(1)
+const firstChoicePendingStudentPageSize = ref(10)
+const firstChoicePendingStudentTotal = ref(0)
+const firstChoicePendingStudentItems = ref<DashboardRecruitmentFirstChoicePendingStudentListResponse['items']>([])
+const firstChoicePendingStudentKeyword = ref('')
+const firstChoicePendingStudentDialogTitle = ref('')
+const firstChoicePendingStudentAdvisorName = ref('')
+const secondChoicePendingStudentDialogVisible = ref(false)
+const secondChoicePendingStudentListLoading = ref(false)
+const secondChoicePendingStudentPaginationPage = ref(1)
+const secondChoicePendingStudentPageSize = ref(10)
+const secondChoicePendingStudentTotal = ref(0)
+const secondChoicePendingStudentItems = ref<DashboardRecruitmentSecondChoicePendingStudentListResponse['items']>([])
+const secondChoicePendingStudentKeyword = ref('')
+const secondChoicePendingStudentDialogTitle = ref('')
+const secondChoicePendingStudentAdvisorName = ref('')
+const secondChoicePendingGradingDialogVisible = ref(false)
+const secondChoicePendingGradingListLoading = ref(false)
+const secondChoicePendingGradingPaginationPage = ref(1)
+const secondChoicePendingGradingPageSize = ref(10)
+const secondChoicePendingGradingTotal = ref(0)
+const secondChoicePendingGradingItems = ref<DashboardRecruitmentSecondChoicePendingGradingResponse['items']>([])
+const secondChoicePendingGradingAdvisorKeyword = ref('')
 const portalApplicationDetailVisible = ref(false)
 const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
 const portalViewingWorkflowTask = ref<WorkflowTaskRecord | null>(null)
@@ -106,6 +150,8 @@ const portalWorkflowActionSubmitting = ref(false)
 const portalWorkflowCommentDialogVisible = ref(false)
 const pendingPortalWorkflowAction = ref<WorkflowActionOption | null>(null)
 const portalWorkflowComment = ref('')
+const firstChoicePendingStudentDetailLoadingId = ref<number | null>(null)
+const secondChoicePendingStudentDetailLoadingId = ref<number | null>(null)
 const schoolGroupPieChartRefs = ref<Record<string, HTMLDivElement | null>>({})
 const advisorChoicePieChartRefs = ref<Record<string, HTMLDivElement | null>>({})
 let schoolRankingChart: ECharts | undefined
@@ -114,45 +160,46 @@ let advisorChoicePieCharts: Record<string, ECharts | undefined> = {}
 
 const schoolGroupPalette = ['#2e9bea', '#36b59a', '#e4a53d', '#e47857', '#8d72d9', '#4675bb', '#60c4a4', '#f0b45a', '#d86666', '#7a8796']
 
-const iconMap: Record<string, unknown> = {
-  学生总量: UserFilled,
-  开放招生计划: Histogram,
-  在途审批: WarningFilled,
-  招生计划: Histogram,
-  待审核申请: DataAnalysis,
-  预录取池: Histogram,
-  培养方案: Reading,
-  科研报告待审: Reading,
-  外出研修在途: Reading,
-  论文总量: DocumentChecked,
-  盲审待办: DocumentChecked,
-  待答辩: DocumentChecked,
-  待处理审批: WarningFilled,
-  处理中审批: DataAnalysis,
-  超期审批: WarningFilled,
+const recruitmentApplicationStatusCardMap: Record<string, { icon: unknown; status: 'healthy' | 'attention' | 'warning' }> = {
+  报名已提交未审核: { icon: DataAnalysis, status: 'healthy' },
+  驳回重填: { icon: WarningFilled, status: 'attention' },
+  等待背景评估: { icon: DataAnalysis, status: 'healthy' },
+  等待第一志愿导师评分: { icon: UserFilled, status: 'warning' },
+  等待第二志愿导师评分: { icon: UserFilled, status: 'warning' },
+  等待初筛确认: { icon: DocumentChecked, status: 'attention' },
+  报名已经终止: { icon: WarningFilled, status: 'warning' },
 }
+
+const recruitmentApplicationStatusOrder = [
+  '报名已提交未审核',
+  '驳回重填',
+  '等待背景评估',
+  '等待第一志愿导师评分',
+  '等待第二志愿导师评分',
+  '等待初筛确认',
+  '报名已经终止',
+]
 
 const summaryCards = computed(() => {
   if (!overview.value) {
     return []
   }
 
-  const cards = [
-    ...overview.value.recruitment_metrics.slice(0, 2),
-    ...overview.value.lifecycle_coverage.slice(0, 1),
-    ...overview.value.training_metrics.slice(0, 1),
-    ...overview.value.degree_metrics.slice(0, 1),
-    ...overview.value.workflow_metrics.slice(0, 1),
-  ]
+  const statusMap = new Map(recruitmentApplicationStatusStats.value.items.map((item) => [item.application_status_state, item.count]))
 
-  return cards.map((card) => ({
-    title: card.label,
-    value: card.value,
-    description: card.trend || card.target || '',
-    status: (card.status === 'attention' || card.status === 'warning' ? card.status : 'healthy') as 'healthy' | 'attention' | 'warning',
-    icon: iconMap[card.label] || DataAnalysis,
-  }))
+  return recruitmentApplicationStatusOrder.map((title) => {
+    const matched = recruitmentApplicationStatusCardMap[title]
+    return {
+      title,
+      value: String(statusMap.get(title) || 0),
+      status: matched?.status || 'healthy',
+      icon: matched?.icon || DataAnalysis,
+      clickable: title === '等待第一志愿导师评分' || title === '等待第二志愿导师评分',
+    }
+  })
 })
+
+const firstChoicePendingGradingPagedItems = computed(() => firstChoicePendingGradingItems.value)
 
 const selectedSchoolStudentStats = computed(() => {
   const counter = new Map<string, number>()
@@ -180,10 +227,12 @@ async function loadOverview() {
   loading.value = true
   try {
     const { data: overviewData } = await getDashboardOverview()
+    const { data: statusStatsData } = await getDashboardRecruitmentApplicationStatusStats()
     const { data: rankingData } = await getDashboardUndergraduateSchoolRankings(20)
     const { data: groupDistributionData } = await getDashboardUndergraduateSchoolGroupDistribution()
     const { data: advisorChoiceData } = await getDashboardRecruitmentAdvisorChoiceDistribution()
     overview.value = overviewData
+    recruitmentApplicationStatusStats.value = statusStatsData
     schoolRankings.value = rankingData.items
     schoolGroupDistribution.value = groupDistributionData
     advisorChoiceDistribution.value = advisorChoiceData
@@ -196,6 +245,258 @@ async function loadOverview() {
   } finally {
     loading.value = false
   }
+}
+
+async function openFirstChoicePendingGradingDialog() {
+  firstChoicePendingGradingDialogVisible.value = true
+  firstChoicePendingGradingListLoading.value = true
+  try {
+    const { data } = await getDashboardFirstChoicePendingGradingStatistics({
+      page: firstChoicePendingGradingPaginationPage.value,
+      page_size: firstChoicePendingGradingPageSize.value,
+      advisor_name: firstChoicePendingGradingAdvisorKeyword.value.trim() || undefined,
+    })
+    firstChoicePendingGradingTotal.value = data.total
+    firstChoicePendingGradingItems.value = data.items
+    firstChoicePendingGradingPaginationPage.value = data.page
+    firstChoicePendingGradingPageSize.value = data.page_size
+  } catch {
+    firstChoicePendingGradingItems.value = []
+    firstChoicePendingGradingTotal.value = 0
+    ElMessage.error('加载第一志愿导师未提交评分统计失败')
+  } finally {
+    firstChoicePendingGradingListLoading.value = false
+  }
+}
+
+async function openFirstChoicePendingStudentDialog(advisorName: string, page = 1, pageSize = firstChoicePendingStudentPageSize.value) {
+  firstChoicePendingStudentDialogTitle.value = `${advisorName} - 学生清单`
+  firstChoicePendingStudentAdvisorName.value = advisorName
+  firstChoicePendingStudentPaginationPage.value = page
+  firstChoicePendingStudentPageSize.value = pageSize
+  firstChoicePendingStudentDialogVisible.value = true
+  firstChoicePendingStudentListLoading.value = true
+  try {
+    const { data } = await getDashboardFirstChoicePendingStudentList({
+      page,
+      page_size: pageSize,
+      advisor_name: firstChoicePendingStudentAdvisorName.value,
+      keyword: firstChoicePendingStudentKeyword.value.trim() || undefined,
+    })
+    firstChoicePendingStudentTotal.value = data.total
+    firstChoicePendingStudentItems.value = data.items
+    firstChoicePendingStudentPaginationPage.value = data.page
+    firstChoicePendingStudentPageSize.value = data.page_size
+  } catch {
+    firstChoicePendingStudentItems.value = []
+    firstChoicePendingStudentTotal.value = 0
+    ElMessage.error('加载第一志愿导师未提交学生清单失败')
+  } finally {
+    firstChoicePendingStudentListLoading.value = false
+  }
+}
+
+async function handleFirstChoicePendingStudentCellClick(advisorName: string) {
+  if (!advisorName) {
+    return
+  }
+  await openFirstChoicePendingStudentDialog(advisorName)
+}
+
+async function reloadFirstChoicePendingStudentDialog() {
+  if (!firstChoicePendingStudentAdvisorName.value) {
+    return
+  }
+  await openFirstChoicePendingStudentDialog(
+    firstChoicePendingStudentAdvisorName.value,
+    firstChoicePendingStudentPaginationPage.value,
+    firstChoicePendingStudentPageSize.value,
+  )
+}
+
+async function handleFirstChoicePendingStudentCurrentChange(page: number) {
+  firstChoicePendingStudentPaginationPage.value = page
+  await reloadFirstChoicePendingStudentDialog()
+}
+
+async function handleFirstChoicePendingStudentPageSizeChange(size: number) {
+  firstChoicePendingStudentPageSize.value = size
+  firstChoicePendingStudentPaginationPage.value = 1
+  await reloadFirstChoicePendingStudentDialog()
+}
+
+async function handleFirstChoicePendingStudentSearch() {
+  firstChoicePendingStudentPaginationPage.value = 1
+  await reloadFirstChoicePendingStudentDialog()
+}
+
+async function openFirstChoicePendingStudentDetail(row: FirstChoicePendingStudentItem) {
+  if (!row.application_id) {
+    ElMessage.warning('当前学生缺少报名申请记录')
+    return
+  }
+  firstChoicePendingStudentDetailLoadingId.value = row.application_id
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.application_id)
+    portalViewingApplication.value = response.data
+    portalApplicationDetailVisible.value = true
+    await loadPortalViewingWorkflowTask(response.data.business_key)
+  } catch {
+    portalViewingWorkflowTask.value = null
+    ElMessage.error('加载学生报名详情失败')
+  } finally {
+    firstChoicePendingStudentDetailLoadingId.value = null
+  }
+}
+
+async function openSecondChoicePendingStudentDialog(advisorName: string, page = 1, pageSize = secondChoicePendingStudentPageSize.value) {
+  secondChoicePendingStudentDialogTitle.value = `${advisorName} - 学生清单`
+  secondChoicePendingStudentAdvisorName.value = advisorName
+  secondChoicePendingStudentPaginationPage.value = page
+  secondChoicePendingStudentPageSize.value = pageSize
+  secondChoicePendingStudentDialogVisible.value = true
+  secondChoicePendingStudentListLoading.value = true
+  try {
+    const { data } = await getDashboardSecondChoicePendingStudentList({
+      page,
+      page_size: pageSize,
+      advisor_name: secondChoicePendingStudentAdvisorName.value,
+      keyword: secondChoicePendingStudentKeyword.value.trim() || undefined,
+    })
+    secondChoicePendingStudentTotal.value = data.total
+    secondChoicePendingStudentItems.value = data.items
+    secondChoicePendingStudentPaginationPage.value = data.page
+    secondChoicePendingStudentPageSize.value = data.page_size
+  } catch {
+    secondChoicePendingStudentItems.value = []
+    secondChoicePendingStudentTotal.value = 0
+    ElMessage.error('加载第二志愿导师未提交学生清单失败')
+  } finally {
+    secondChoicePendingStudentListLoading.value = false
+  }
+}
+
+async function handleSecondChoicePendingStudentCellClick(advisorName: string) {
+  if (!advisorName) {
+    return
+  }
+  await openSecondChoicePendingStudentDialog(advisorName)
+}
+
+async function reloadSecondChoicePendingStudentDialog() {
+  if (!secondChoicePendingStudentAdvisorName.value) {
+    return
+  }
+  await openSecondChoicePendingStudentDialog(
+    secondChoicePendingStudentAdvisorName.value,
+    secondChoicePendingStudentPaginationPage.value,
+    secondChoicePendingStudentPageSize.value,
+  )
+}
+
+async function handleSecondChoicePendingStudentCurrentChange(page: number) {
+  secondChoicePendingStudentPaginationPage.value = page
+  await reloadSecondChoicePendingStudentDialog()
+}
+
+async function handleSecondChoicePendingStudentPageSizeChange(size: number) {
+  secondChoicePendingStudentPageSize.value = size
+  secondChoicePendingStudentPaginationPage.value = 1
+  await reloadSecondChoicePendingStudentDialog()
+}
+
+async function handleSecondChoicePendingStudentSearch() {
+  secondChoicePendingStudentPaginationPage.value = 1
+  await reloadSecondChoicePendingStudentDialog()
+}
+
+async function openSecondChoicePendingStudentDetail(row: SecondChoicePendingStudentItem) {
+  if (!row.application_id) {
+    ElMessage.warning('当前学生缺少报名申请记录')
+    return
+  }
+  secondChoicePendingStudentDetailLoadingId.value = row.application_id
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.application_id)
+    portalViewingApplication.value = response.data
+    portalApplicationDetailVisible.value = true
+    await loadPortalViewingWorkflowTask(response.data.business_key)
+  } catch {
+    portalViewingWorkflowTask.value = null
+    ElMessage.error('加载学生报名详情失败')
+  } finally {
+    secondChoicePendingStudentDetailLoadingId.value = null
+  }
+}
+
+async function handleFirstChoicePendingGradingCardClick(cardTitle: string) {
+  if (cardTitle !== '等待第一志愿导师评分') {
+    return
+  }
+  firstChoicePendingGradingPaginationPage.value = 1
+  await openFirstChoicePendingGradingDialog()
+}
+
+async function handleFirstChoicePendingGradingSearch() {
+  firstChoicePendingGradingPaginationPage.value = 1
+  await openFirstChoicePendingGradingDialog()
+}
+
+async function openSecondChoicePendingGradingDialog() {
+  secondChoicePendingGradingDialogVisible.value = true
+  secondChoicePendingGradingListLoading.value = true
+  try {
+    const { data } = await getDashboardSecondChoicePendingGradingStatistics({
+      page: secondChoicePendingGradingPaginationPage.value,
+      page_size: secondChoicePendingGradingPageSize.value,
+      advisor_name: secondChoicePendingGradingAdvisorKeyword.value.trim() || undefined,
+    })
+    secondChoicePendingGradingTotal.value = data.total
+    secondChoicePendingGradingItems.value = data.items
+    secondChoicePendingGradingPaginationPage.value = data.page
+    secondChoicePendingGradingPageSize.value = data.page_size
+  } catch {
+    secondChoicePendingGradingItems.value = []
+    secondChoicePendingGradingTotal.value = 0
+    ElMessage.error('加载第二志愿导师未提交评分统计失败')
+  } finally {
+    secondChoicePendingGradingListLoading.value = false
+  }
+}
+
+async function handleSecondChoicePendingGradingCardClick(cardTitle: string) {
+  if (cardTitle !== '等待第二志愿导师评分') {
+    return
+  }
+  secondChoicePendingGradingPaginationPage.value = 1
+  await openSecondChoicePendingGradingDialog()
+}
+
+async function handleSecondChoicePendingGradingSearch() {
+  secondChoicePendingGradingPaginationPage.value = 1
+  await openSecondChoicePendingGradingDialog()
+}
+
+async function handleSecondChoicePendingGradingCurrentChange(page: number) {
+  secondChoicePendingGradingPaginationPage.value = page
+  await openSecondChoicePendingGradingDialog()
+}
+
+async function handleSecondChoicePendingGradingPageSizeChange(size: number) {
+  secondChoicePendingGradingPageSize.value = size
+  secondChoicePendingGradingPaginationPage.value = 1
+  await openSecondChoicePendingGradingDialog()
+}
+
+async function handleFirstChoicePendingGradingCurrentChange(page: number) {
+  firstChoicePendingGradingPaginationPage.value = page
+  await openFirstChoicePendingGradingDialog()
+}
+
+async function handleFirstChoicePendingGradingPageSizeChange(size: number) {
+  firstChoicePendingGradingPageSize.value = size
+  firstChoicePendingGradingPaginationPage.value = 1
+  await openFirstChoicePendingGradingDialog()
 }
 
 function setSchoolGroupPieChartRef(dictType: string, element: unknown) {
@@ -740,15 +1041,25 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="dashboard-grid" v-loading="loading">
-    <KpiCard
-      v-for="card in summaryCards"
-      :key="card.title"
-      :title="card.title"
-      :value="card.value"
-      :description="card.description"
-      :status="card.status"
-      :icon="card.icon"
-    />
+    <section class="page-card dashboard-panel full-span dashboard-status-summary">
+      <div class="page-heading">
+        <div>
+          <h2>学生报名状态统计</h2>
+        </div>
+      </div>
+      <div class="dashboard-status-grid">
+        <KpiCard
+          v-for="card in summaryCards"
+          :key="card.title"
+          :title="card.title"
+          :value="card.value"
+          :status="card.status"
+          :icon="card.icon"
+          :class="{ 'is-clickable': card.clickable }"
+          @click="card.title === '等待第一志愿导师评分' ? handleFirstChoicePendingGradingCardClick(card.title) : handleSecondChoicePendingGradingCardClick(card.title)"
+        />
+      </div>
+    </section>
 
     <section class="page-card dashboard-panel full-span">
       <div class="page-heading">
@@ -932,6 +1243,162 @@ onBeforeUnmount(() => {
       </div>
     </el-dialog>
 
+    <el-dialog v-model="firstChoicePendingGradingDialogVisible" title="第一志愿导师未提交打分同学数统计清单" width="860px" destroy-on-close>
+      <div class="school-student-summary">
+        <div class="dashboard-filters-row">
+          <el-input v-model="firstChoicePendingGradingAdvisorKeyword" clearable placeholder="导师姓名" style="width: 320px" />
+          <el-button type="primary" @click="handleFirstChoicePendingGradingSearch">查询</el-button>
+        </div>
+      </div>
+      <el-table :data="firstChoicePendingGradingPagedItems" v-loading="firstChoicePendingGradingListLoading" border stripe>
+        <el-table-column label="第一志愿导师" min-width="260">
+          <template #default="scope">
+            {{ scope.row.advisor_name || '未命名导师' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="未提交打分同学数" min-width="180" align="right">
+          <template #default="scope">
+            {{ scope.row.student_count }}
+          </template>
+        </el-table-column>
+        <el-table-column label="学生清单" min-width="140">
+          <template #default="scope">
+            <el-button link type="primary" @click="handleFirstChoicePendingStudentCellClick(scope.row.advisor_name)">查看学生清单</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          :current-page="firstChoicePendingGradingPaginationPage"
+          :page-size="firstChoicePendingGradingPageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="firstChoicePendingGradingTotal"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleFirstChoicePendingGradingCurrentChange"
+          @size-change="handleFirstChoicePendingGradingPageSizeChange"
+        />
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="firstChoicePendingStudentDialogVisible" :title="firstChoicePendingStudentDialogTitle || '第一志愿导师未提交学生清单'" width="980px" destroy-on-close>
+      <div class="school-student-summary">
+        <div class="school-student-summary__total">
+          <strong>共 {{ firstChoicePendingStudentTotal }} 名学生</strong>
+        </div>
+        <div class="dashboard-filters-row">
+          <el-input v-model="firstChoicePendingStudentKeyword" clearable placeholder="关键字" style="width: 320px" />
+          <el-button type="primary" @click="handleFirstChoicePendingStudentSearch">查询</el-button>
+        </div>
+      </div>
+      <el-table :data="firstChoicePendingStudentItems" v-loading="firstChoicePendingStudentListLoading" border stripe>
+        <el-table-column prop="student_name" label="学生姓名" min-width="180" />
+        <el-table-column prop="candidate_no" label="报名号" min-width="160" />
+        <el-table-column label="操作" min-width="120">
+          <template #default="scope">
+            <el-button
+              link
+              type="primary"
+              :loading="firstChoicePendingStudentDetailLoadingId === scope.row.application_id"
+              @click="openFirstChoicePendingStudentDetail(scope.row)"
+            >
+              查看详情
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          :current-page="firstChoicePendingStudentPaginationPage"
+          :page-size="firstChoicePendingStudentPageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="firstChoicePendingStudentTotal"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleFirstChoicePendingStudentCurrentChange"
+          @size-change="handleFirstChoicePendingStudentPageSizeChange"
+        />
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="secondChoicePendingGradingDialogVisible" title="第二志愿导师未提交打分同学数统计清单" width="860px" destroy-on-close>
+      <div class="school-student-summary">
+        <div class="dashboard-filters-row">
+          <el-input v-model="secondChoicePendingGradingAdvisorKeyword" clearable placeholder="导师姓名" style="width: 320px" />
+          <el-button type="primary" @click="handleSecondChoicePendingGradingSearch">查询</el-button>
+        </div>
+      </div>
+      <el-table :data="secondChoicePendingGradingItems" v-loading="secondChoicePendingGradingListLoading" border stripe>
+        <el-table-column label="第二志愿导师" min-width="260">
+          <template #default="scope">
+            {{ scope.row.advisor_name || '未命名导师' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="未提交打分同学数" min-width="180" align="right">
+          <template #default="scope">
+            {{ scope.row.student_count }}
+          </template>
+        </el-table-column>
+        <el-table-column label="学生清单" min-width="140">
+          <template #default="scope">
+            <el-button link type="primary" @click="handleSecondChoicePendingStudentCellClick(scope.row.advisor_name)">查看学生清单</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          :current-page="secondChoicePendingGradingPaginationPage"
+          :page-size="secondChoicePendingGradingPageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="secondChoicePendingGradingTotal"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleSecondChoicePendingGradingCurrentChange"
+          @size-change="handleSecondChoicePendingGradingPageSizeChange"
+        />
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="secondChoicePendingStudentDialogVisible" :title="secondChoicePendingStudentDialogTitle || '第二志愿导师未提交学生清单'" width="980px" destroy-on-close>
+      <div class="school-student-summary">
+        <div class="school-student-summary__total">
+          <strong>共 {{ secondChoicePendingStudentTotal }} 名学生</strong>
+        </div>
+        <div class="dashboard-filters-row">
+          <el-input v-model="secondChoicePendingStudentKeyword" clearable placeholder="关键字" style="width: 320px" />
+          <el-button type="primary" @click="handleSecondChoicePendingStudentSearch">查询</el-button>
+        </div>
+      </div>
+      <el-table :data="secondChoicePendingStudentItems" v-loading="secondChoicePendingStudentListLoading" border stripe>
+        <el-table-column prop="student_name" label="学生姓名" min-width="180" />
+        <el-table-column prop="candidate_no" label="报名号" min-width="160" />
+        <el-table-column label="操作" min-width="120">
+          <template #default="scope">
+            <el-button
+              link
+              type="primary"
+              :loading="secondChoicePendingStudentDetailLoadingId === scope.row.application_id"
+              @click="openSecondChoicePendingStudentDetail(scope.row)"
+            >
+              查看详情
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="pagination-bar">
+        <el-pagination
+          :current-page="secondChoicePendingStudentPaginationPage"
+          :page-size="secondChoicePendingStudentPageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="secondChoicePendingStudentTotal"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handleSecondChoicePendingStudentCurrentChange"
+          @size-change="handleSecondChoicePendingStudentPageSizeChange"
+        />
+      </div>
+    </el-dialog>
+
     <RecruitmentPortalApplicationDrawer
       v-model="portalApplicationDetailVisible"
       :detail="portalViewingApplication"
@@ -967,6 +1434,51 @@ onBeforeUnmount(() => {
     </el-dialog>
   </section>
 </template>
+
+<style scoped>
+.dashboard-status-summary {
+  gap: 16px;
+}
+
+.dashboard-status-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.dashboard-status-grid :deep(.kpi-card) {
+  width: 100%;
+  min-width: 0;
+}
+
+.dashboard-status-grid :deep(.kpi-card.is-clickable) {
+  cursor: pointer;
+}
+
+.dashboard-status-grid :deep(.kpi-card.is-clickable:hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(24, 56, 87, 0.1);
+}
+
+@media (max-width: 1600px) {
+  .dashboard-status-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1200px) {
+  .dashboard-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
 
 <style scoped>
 .dashboard-grid {

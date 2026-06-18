@@ -9,6 +9,16 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
 class Principal(BaseModel):
     username: str
     full_name: str

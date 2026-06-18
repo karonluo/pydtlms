@@ -11,6 +11,7 @@ export const MENU_ACCESS_ENTRIES: MenuAccessEntry[] = [
   { path: '/recruitment/news', requiredPermission: 'news_management:read' },
   { path: '/recruitment/advisor-screening', requiredPermission: 'recruitment_advisor_screening:read' },
   { path: '/recruitment/initial-screening-confirmation', requiredPermission: 'recruitment_initial_screening_confirmation:read' },
+  { path: '/recruitment/camp-offers', requiredPermission: 'recruitment_camp_offer:read' },
   { path: '/students/records', requiredPermission: 'students:read' },
   { path: '/students/centers', requiredPermission: 'research_center:read' },
   { path: '/training/plans', requiredPermission: 'training:read' },

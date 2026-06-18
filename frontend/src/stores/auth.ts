@@ -232,6 +232,18 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function refreshSession() {
+    if (!localStorage.getItem('dtlms-refresh-token')) {
+      throw new Error('refresh token missing')
+    }
+    const response = await axios.post<{ access_token: string; refresh_token: string }>(
+      `${apiBaseUrl}/auth/refresh`,
+      { refresh_token: localStorage.getItem('dtlms-refresh-token') },
+    )
+    localStorage.setItem('dtlms-access-token', response.data.access_token)
+    localStorage.setItem('dtlms-refresh-token', response.data.refresh_token)
+  }
+
   async function saveProfile(payload: Pick<UserProfile, 'full_name' | 'phone_number' | 'email' | 'theme_color'>) {
     const response = await http.put<UserProfile>('/auth/profile', payload)
     profile.value = response.data
@@ -273,6 +285,7 @@ export const useAuthStore = defineStore('auth', () => {
     applyThemeColor,
     hydrateSession,
     login,
+    refreshSession,
     logout,
     saveProfile,
     changePassword,

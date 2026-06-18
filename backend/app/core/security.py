@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
-from app.core.session_store import create_login_session, revoke_session, validate_session
+from app.core.session_store import create_login_session, renew_session, revoke_session, validate_session
 
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -59,6 +59,37 @@ def create_refresh_token(subject: str, roles: list[str], session_id: str) -> str
         "exp": expires_at,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def refresh_token_bundle(refresh_token: str) -> tuple[str, str]:
+    try:
+        payload = jwt.decode(refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        ) from exc
+
+    session_id = payload.get("sid")
+    if not session_id or payload.get("type") != "refresh":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+
+    session_payload = validate_session(session_id, token_type="refresh")
+    if not session_payload or session_payload.get("username") != payload.get("sub"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired, please login again")
+
+    renewed_payload = renew_session(session_id)
+    if not renewed_payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired, please login again")
+
+    username = str(renewed_payload.get("username") or payload.get("sub") or "")
+    roles = list(renewed_payload.get("roles") or payload.get("roles") or [])
+    permissions = list(renewed_payload.get("permissions") or session_payload.get("permissions") or [])
+    full_name = str(renewed_payload.get("full_name") or session_payload.get("full_name") or username)
+    return (
+        create_access_token(username, roles, permissions, session_id=session_id, full_name=full_name),
+        create_refresh_token(username, roles, session_id=session_id),
+    )
 
 
 def create_token_bundle(subject: str, roles: list[str], permissions: list[str], full_name: str | None = None) -> tuple[str, str]:

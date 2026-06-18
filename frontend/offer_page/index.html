@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- 移动端适配核心 -->
+    <title>入营名单确认</title>
+    <link rel="stylesheet" href="style.css"> <!-- 关联样式表 -->
+</head>
+<body>
+    <div class="container">
+        <!-- 邮件图标 -->
+        <div class="icon-wrapper">
+            <svg class="email-icon" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+            </svg>
+        </div>
+
+        <!-- 标题 -->
+        <h1>入营名单确认</h1>
+
+        <!-- 重要事项卡片 -->
+        <div class="important-box">
+            <div class="section-title">
+                <span class="info-icon">ⓘ</span>
+                <span>确认说明</span>
+            </div>
+
+            <div class="sub-section">
+                <p class="highlight-text">提交规则</p>
+                <p>请填写学生邮箱、密码，并选择确认或拒绝。系统会先校验邮箱对应的报名号与密码，再提交确认结果。</p>
+            </div>
+
+            <div class="sub-section">
+                <p class="highlight-text">数据来源</p>
+                <ul>
+                    <li>邮箱用于从报名申请表中定位报名号</li>
+                    <li>密码用于校验学生身份</li>
+                    <li>提交结果会写入入营名单表</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 选择区域 -->
+        <div class="choice-section">
+            <h2>您的选择</h2>
+            <div class="radio-group">
+                <label class="radio-item active">
+                    <input type="radio" name="choice" value="accept" checked>
+                    <span class="radio-custom"></span>
+                    <div class="radio-content">
+                        <p class="radio-title">确认入营</p>
+                        <p class="radio-desc">同意参加本次入营</p>
+                    </div>
+                    <span class="check-icon">✔</span>
+                </label>
+                <label class="radio-item">
+                    <input type="radio" name="choice" value="reject">
+                    <span class="radio-custom"></span>
+                    <div class="radio-content">
+                        <p class="radio-title">拒绝入营</p>
+                        <p class="radio-desc">放弃本次入营资格</p>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+                <!-- 账号密码表单 -->
+        <div class="form-section">
+            <div class="form-group">
+                        <label for="email">邮箱地址</label>
+                        <input type="email" id="email" placeholder="请输入学生邮箱">
+            </div>
+                    <div class="form-group">
+                <label for="password">密码</label>
+                        <input type="password" id="password" placeholder="请输入学生密码">
+            </div>
+        </div>
+
+        <!-- 提交按钮 -->
+        <button class="submit-btn">提交确认</button>
+
+        <!-- 底部提示 -->
+        <p class="footer-tip">提交前请确认邮箱与密码无误，提交后会写入入营名单记录。</p>
+    </div>
+</body>
+</html>

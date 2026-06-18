@@ -272,6 +272,10 @@ function openAdvisorSignatureDialog() {
     ElMessage.warning('未找到申请记录，无法提交导师初筛')
     return
   }
+  if (!showAdvisorScreeningTools.value) {
+    ElMessage.warning('当前申请不在导师初筛环节，请刷新后重试')
+    return
+  }
   if (advisorScreeningForm.advisor_score === undefined || advisorScreeningForm.advisor_score === null || Number.isNaN(Number(advisorScreeningForm.advisor_score))) {
     ElMessage.warning('请先填写导师初筛分数')
     return
@@ -287,6 +291,10 @@ function openAdvisorSignatureDialog() {
 function submitAdvisorScreening() {
   if (!props.detail?.application_id) {
     ElMessage.warning('未找到申请记录，无法提交导师初筛')
+    return
+  }
+  if (!showAdvisorScreeningTools.value) {
+    ElMessage.warning('当前申请不在导师初筛环节，请刷新后重试')
     return
   }
   if (!signatureDirty.value) {

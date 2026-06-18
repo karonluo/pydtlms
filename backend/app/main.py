@@ -1,5 +1,6 @@
 import json
 from time import perf_counter
+from threading import Thread
 
 import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
@@ -10,10 +11,15 @@ from app.core.config import settings
 from app.core.exceptions import DatabaseUnavailableError
 from app.core.logging import configure_logging
 from app.core.security import decode_token
+from app.scheduled_task_services.initial_screening_confirmation_service import (
+    run_initial_screening_confirmation_scheduler_once,
+    sleep_initial_screening_confirmation_timeout,
+)
 from app.services.management_service import store
 
 
 logger = configure_logging()
+_INITIAL_SCREENING_CONFIRMATION_SCHEDULER_THREAD: Thread | None = None
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -43,6 +49,12 @@ _AUDIT_MODULE_BY_SEGMENT = {
     "degree": "学位管理",
     "workflow": "流程中心",
     "news": "招生宣传",
+}
+
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
 }
 
 app = FastAPI(
@@ -146,6 +158,12 @@ def _resolve_business_audit_descriptor(request: Request) -> tuple[str, str, str,
     return None
 
 
+def _apply_no_cache_headers(response: Response) -> Response:
+    for header_name, header_value in _NO_CACHE_HEADERS.items():
+        response.headers[header_name] = header_value
+    return response
+
+
 @app.middleware("http")
 async def record_backoffice_operation_audit(request: Request, call_next):
     should_audit = _is_backoffice_write_request(request)
@@ -189,6 +207,12 @@ async def record_backoffice_operation_audit(request: Request, call_next):
                     )
                 except Exception as exc:
                     logger.warning("Record backoffice operation audit failed: %s", exc)
+
+
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    return _apply_no_cache_headers(response)
 
 
 @app.exception_handler(DatabaseUnavailableError)
@@ -271,10 +295,35 @@ def healthcheck() -> dict[str, str]:
     }
 
 
+def _start_initial_screening_confirmation_scheduler() -> None:
+    global _INITIAL_SCREENING_CONFIRMATION_SCHEDULER_THREAD
+    if _INITIAL_SCREENING_CONFIRMATION_SCHEDULER_THREAD is not None and _INITIAL_SCREENING_CONFIRMATION_SCHEDULER_THREAD.is_alive():
+        return
+
+    def _run() -> None:
+        logger.info("Initial screening confirmation scheduler started")
+        while True:
+            try:
+                result = run_initial_screening_confirmation_scheduler_once()
+                logger.info("Initial screening confirmation scheduler result: %s", result)
+            except Exception as exc:
+                logger.warning("Initial screening confirmation scheduler failed: %s", exc)
+            sleep_initial_screening_confirmation_timeout()
+
+    _INITIAL_SCREENING_CONFIRMATION_SCHEDULER_THREAD = Thread(
+        target=_run,
+        name="initial-screening-confirmation-scheduler",
+        daemon=True,
+    )
+    _INITIAL_SCREENING_CONFIRMATION_SCHEDULER_THREAD.start()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     startup_begin = perf_counter()
     if settings.frontend_dev_proxy_enabled:
         logger.info("Frontend dev proxy enabled: %s", settings.frontend_dev_proxy_target)
+    if settings.initial_screening_confirmation_smtp_enabled:
+        _start_initial_screening_confirmation_scheduler()
     logger.info("Runtime management store will initialize lazily on first use; startup does not warm or persist runtime state")
     logger.info("DTLMS backend startup complete in %.3fs", perf_counter() - startup_begin)

@@ -1266,6 +1266,7 @@ class RuntimeManagementStorePortalMixin:
                 application_status = str(persisted_application["application_status"])
 
             try:
+                self._persist_portal_student_change(student, None)
                 if persisted_application is not None:
                     self._persist_portal_application_submission(
                         student,
@@ -1274,9 +1275,8 @@ class RuntimeManagementStorePortalMixin:
                         workflow_task=workflow_task,
                         created_application=created_application,
                         created_workflow_task=created_workflow_task,
+                        persist_portal_student=False,
                     )
-                else:
-                    self._persist_portal_student_change(student, None)
             except Exception:
                 logger.exception("Portal application submission persistence failed for student %s", student_id)
                 raise

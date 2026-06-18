@@ -36,8 +36,8 @@ class PostgresStateStoreQueryStudentsMixin:
                         t.team_name,
                         COALESCE(t.department_name, '') AS department_name,
                         COALESCE(t.discipline_name, '') AS discipline_name,
-                        COALESCE(t.lead_user_id, lead.user_id) AS lead_user_id,
-                        COALESCE(lead.full_name, '') AS lead_advisor_name,
+                        t.lead_user_id,
+                        COALESCE(lead.full_name, '') AS lead_user_name,
                         COALESCE(advisor_names.advisor_names, ARRAY[]::text[]) AS advisor_names,
                         COALESCE(advisor_names.advisor_user_ids, ARRAY[]::bigint[]) AS advisor_ids,
                         COALESCE(advisor_names.advisor_relation_ids, ARRAY[]::bigint[]) AS advisor_relation_ids,
@@ -46,7 +46,7 @@ class PostgresStateStoreQueryStudentsMixin:
                         COALESCE(TO_CHAR(t.established_on, 'YYYY-MM-DD'), TO_CHAR(t.created_at::date, 'YYYY-MM-DD')) AS established_on,
                         t.description
                     FROM dtlms_teams t
-                    LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
+                    LEFT JOIN dtlms_users lead ON lead.id = t.lead_user_id AND lead.is_deleted = FALSE
                     LEFT JOIN LATERAL (
                         SELECT
                             array_agg(advisor_rows.advisor_name ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_names,
@@ -55,16 +55,16 @@ class PostgresStateStoreQueryStudentsMixin:
                         FROM (
                             SELECT DISTINCT
                                 ta.id AS relation_id,
-                                COALESCE(ta.advisor_user_id, advisor.user_id) AS advisor_user_id,
-                                advisor.full_name AS advisor_name,
-                                CASE WHEN ta.advisor_role = 'lead' THEN 0 ELSE 1 END AS sort_role
+                                ta.advisor_user_id,
+                                COALESCE(advisor.full_name, '') AS advisor_name,
+                                1 AS sort_role
                             FROM dtlms_team_advisors ta
-                            JOIN dtlms_advisors advisor ON advisor.id = ta.advisor_id AND advisor.is_deleted = FALSE
+                            JOIN dtlms_users advisor ON advisor.id = ta.advisor_user_id AND advisor.is_deleted = FALSE
                             WHERE ta.team_id = t.id AND ta.is_deleted = FALSE
                         ) advisor_rows
                     ) advisor_names ON TRUE
                     WHERE t.is_deleted = FALSE
-                    ORDER BY t.id
+                    ORDER BY t.id DESC
                     """
                 )
                 rows = cur.fetchall()
@@ -74,10 +74,9 @@ class PostgresStateStoreQueryStudentsMixin:
                 "id": int(row["id"]),
                 "team_code": row["team_code"],
                 "team_name": row["team_name"],
-                "department_name": row["department_name"],
                 "discipline_name": row["discipline_name"],
                 "lead_user_id": int(row.get("lead_user_id") or 0) or None,
-                "lead_advisor_name": row["lead_advisor_name"] or None,
+                "lead_user_name": row["lead_user_name"] or None,
                 "advisor_names": list(row["advisor_names"] or []),
                 "advisor_ids": [int(item) for item in (row.get("advisor_ids") or []) if item is not None],
                 "advisor_relation_ids": [int(item) for item in (row.get("advisor_relation_ids") or []) if item is not None],
@@ -313,6 +312,7 @@ class PostgresStateStoreQueryStudentsMixin:
                 profile = self._derive_portal_profile(student)
                 if profile is not None:
                     student["profile"] = profile
+                existing_application_draft = student.get("application_draft") if isinstance(student.get("application_draft"), dict) else None
 
                 selected_plan_id = student.get("selected_plan_id")
                 cur.execute(
@@ -334,7 +334,14 @@ class PostgresStateStoreQueryStudentsMixin:
                 )
                 application = cur.fetchone()
                 if not application:
-                    student["application_draft"] = self._build_portal_application_draft_from_tables(student, None)
+                    tables_draft = self._build_portal_application_draft_from_tables(student, None)
+                    if tables_draft is not None:
+                        student["application_draft"] = (
+                            self._merge_portal_application_draft(tables_draft, existing_application_draft)
+                            or tables_draft
+                        )
+                    elif existing_application_draft is not None:
+                        student["application_draft"] = existing_application_draft
                     return student
 
                 application_id = int(application["id"])
@@ -390,6 +397,9 @@ class PostgresStateStoreQueryStudentsMixin:
                     (application_id,),
                 )
                 education_experiences = [dict(item) for item in cur.fetchall()]
+                student["education_experiences"] = education_experiences
+                if not student.get("education_experience") and education_experiences:
+                    student["education_experience"] = self._json_payload(education_experiences)
                 cur.execute(
                     """
                     SELECT start_month, end_month, organization_name, position_name, responsibility_text,
@@ -505,7 +515,7 @@ class PostgresStateStoreQueryStudentsMixin:
                     }
                     for item in cur.fetchall()
                 ]
-                student["application_draft"] = {
+                application_draft = {
                     "selected_plan_id": int(application.get("plan_id") or student.get("selected_plan_id") or 0) or None,
                     "source_channel": application.get("source_channel"),
                     "source_channel_other": application.get("source_channel_other"),
@@ -519,6 +529,12 @@ class PostgresStateStoreQueryStudentsMixin:
                     "declaration": dict(declaration_row) if declaration_row else {"has_read_declaration": bool(student.get("signed_agreement"))},
                     "submitted_at": None if self._portal_resubmittable_application_status(application.get("application_status")) else self._stringify_datetime(application.get("applied_at")) or student.get("submitted_at"),
                 }
+                if self._portal_resubmittable_application_status(application.get("application_status")):
+                    merged_application_draft = self._merge_portal_application_draft(application_draft, existing_application_draft)
+                else:
+                    merged_application_draft = self._merge_portal_application_draft(existing_application_draft, application_draft)
+                student["application_draft"] = merged_application_draft or application_draft
+
                 personal_statement = student["application_draft"]["personal_statement"]
                 if not personal_statement.get("resume_attachment_url"):
                     personal_statement["resume_attachment_url"] = next(
@@ -660,6 +676,10 @@ class PostgresStateStoreQueryStudentsMixin:
         advisor_names: list[str] | None = None,
         first_choice_advisor_names: list[str] | None = None,
         second_choice_advisor_names: list[str] | None = None,
+        first_choice_center_names: list[str] | None = None,
+        second_choice_center_names: list[str] | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -722,6 +742,16 @@ class PostgresStateStoreQueryStudentsMixin:
             where_clauses.append("COALESCE(latest_application.second_choice, '') = ANY(%s)")
             params.append(normalized_second_choice_advisor_names)
 
+        normalized_first_choice_center_names = [str(item).strip() for item in (first_choice_center_names or []) if str(item).strip()]
+        if normalized_first_choice_center_names:
+            where_clauses.append("COALESCE(latest_application.first_choice_center_name, '') = ANY(%s)")
+            params.append(normalized_first_choice_center_names)
+
+        normalized_second_choice_center_names = [str(item).strip() for item in (second_choice_center_names or []) if str(item).strip()]
+        if normalized_second_choice_center_names:
+            where_clauses.append("COALESCE(latest_application.second_choice_center_name, '') = ANY(%s)")
+            params.append(normalized_second_choice_center_names)
+
         normalized_background_assessed_username = str(exclude_background_assessed_username or "").strip()
         if normalized_background_assessed_username:
             where_clauses.append(
@@ -743,36 +773,86 @@ class PostgresStateStoreQueryStudentsMixin:
         latest_application_sql = """
             LEFT JOIN LATERAL (
                 SELECT
-                    ra.id,
-                    ra.business_key,
-                    ra.candidate_no,
-                    ra.application_status,
-                    ra.applied_at,
-                    COALESCE(NULLIF(BTRIM(pref1.advisor_name), ''), NULLIF(BTRIM(ra.first_choice), '')) AS first_choice,
-                    COALESCE(NULLIF(BTRIM(pref2.advisor_name), ''), NULLIF(BTRIM(ra.second_choice), '')) AS second_choice
-                FROM dtlms_recruitment_applications ra
-                LEFT JOIN LATERAL (
-                    SELECT pref.advisor_name
-                    FROM dtlms_portal_application_preferences pref
-                    WHERE pref.application_id = ra.id
-                      AND pref.preference_order = 1
-                    ORDER BY pref.id ASC
+                    app.id,
+                    app.business_key,
+                    app.candidate_no,
+                    app.application_status,
+                    app.applied_at,
+                    app.first_choice,
+                    app.second_choice,
+                    app.first_choice_screening_score,
+                    app.second_choice_screening_score,
+                    fc.center_name AS first_choice_center_name,
+                    sc.center_name AS second_choice_center_name
+                FROM (
+                    SELECT
+                        ra.id,
+                        ra.business_key,
+                        ra.candidate_no,
+                        ra.application_status,
+                        ra.applied_at,
+                        ra.first_choice_screening_score,
+                        ra.second_choice_screening_score,
+                        COALESCE(NULLIF(BTRIM(pref1.advisor_name), ''), NULLIF(BTRIM(ra.first_choice), '')) AS first_choice,
+                        COALESCE(NULLIF(BTRIM(pref2.advisor_name), ''), NULLIF(BTRIM(ra.second_choice), '')) AS second_choice
+                    FROM dtlms_recruitment_applications ra
+                    LEFT JOIN LATERAL (
+                        SELECT pref.advisor_name
+                        FROM dtlms_portal_application_preferences pref
+                        WHERE pref.application_id = ra.id
+                          AND pref.preference_order = 1
+                        ORDER BY pref.id ASC
+                        LIMIT 1
+                    ) pref1 ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT pref.advisor_name
+                        FROM dtlms_portal_application_preferences pref
+                        WHERE pref.application_id = ra.id
+                          AND pref.preference_order = 2
+                        ORDER BY pref.id ASC
+                        LIMIT 1
+                    ) pref2 ON TRUE
+                    WHERE ra.is_deleted = FALSE AND ra.portal_student_id = ps.id
+                    ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC,
+                             ra.id DESC
                     LIMIT 1
-                ) pref1 ON TRUE
+                ) app
                 LEFT JOIN LATERAL (
-                    SELECT pref.advisor_name
-                    FROM dtlms_portal_application_preferences pref
-                    WHERE pref.application_id = ra.id
-                      AND pref.preference_order = 2
-                    ORDER BY pref.id ASC
+                    SELECT t.team_name AS center_name
+                    FROM dtlms_users u
+                    JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                    JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                    JOIN dtlms_team_advisors ta ON ta.advisor_user_id = u.id AND ta.is_deleted = FALSE
+                    JOIN dtlms_teams t ON t.id = ta.team_id AND t.is_deleted = FALSE
+                    WHERE u.full_name = app.first_choice
+                      AND u.is_deleted = FALSE
+                      AND r.role_code = 'advisor'
+                    ORDER BY t.id DESC
                     LIMIT 1
-                ) pref2 ON TRUE
-                WHERE ra.is_deleted = FALSE AND ra.portal_student_id = ps.id
-                ORDER BY COALESCE(ra.applied_at, ra.created_at) DESC,
-                         ra.id DESC
-                LIMIT 1
+                ) fc ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT t.team_name AS center_name
+                    FROM dtlms_users u
+                    JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                    JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                    JOIN dtlms_team_advisors ta ON ta.advisor_user_id = u.id AND ta.is_deleted = FALSE
+                    JOIN dtlms_teams t ON t.id = ta.team_id AND t.is_deleted = FALSE
+                    WHERE u.full_name = app.second_choice
+                      AND u.is_deleted = FALSE
+                      AND r.role_code = 'advisor'
+                    ORDER BY t.id DESC
+                    LIMIT 1
+                ) sc ON TRUE
             ) latest_application ON TRUE
         """
+
+        normalized_sort_by = str(sort_by or "").strip()
+        normalized_sort_order = "ASC" if str(sort_order or "").strip().lower() == "asc" else "DESC"
+        order_sql = "ORDER BY ps.created_at DESC, ps.id DESC"
+        if normalized_sort_by == "first_choice_screening_score":
+            order_sql = f"ORDER BY latest_application.first_choice_screening_score {normalized_sort_order} NULLS LAST, ps.created_at DESC, ps.id DESC"
+        elif normalized_sort_by == "second_choice_screening_score":
+            order_sql = f"ORDER BY latest_application.second_choice_screening_score {normalized_sort_order} NULLS LAST, ps.created_at DESC, ps.id DESC"
 
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
@@ -807,12 +887,18 @@ class PostgresStateStoreQueryStudentsMixin:
                         latest_application.candidate_no AS recruitment_application_candidate_no,
                         latest_application.business_key AS recruitment_application_business_key,
                         latest_application.application_status,
-                        latest_application.applied_at
+                        latest_application.applied_at,
+                        latest_application.first_choice,
+                        latest_application.second_choice,
+                        latest_application.first_choice_center_name,
+                        latest_application.second_choice_center_name,
+                        latest_application.first_choice_screening_score,
+                        latest_application.second_choice_screening_score
                     FROM dtlms_portal_students ps
                     LEFT JOIN dtlms_recruitment_plans rp ON rp.id = ps.selected_plan_id
                     {latest_application_sql}
                     WHERE {where_sql}
-                    ORDER BY ps.created_at DESC, ps.id DESC
+                    {order_sql}
                     LIMIT %s OFFSET %s
                 """
                 self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
@@ -843,7 +929,7 @@ class PostgresStateStoreQueryStudentsMixin:
                     OR EXISTS (
                         SELECT 1
                         FROM dtlms_team_advisors ta_keyword
-                        JOIN dtlms_advisors advisor_keyword ON advisor_keyword.id = ta_keyword.advisor_id AND advisor_keyword.is_deleted = FALSE
+                        JOIN dtlms_users advisor_keyword ON advisor_keyword.id = ta_keyword.advisor_user_id AND advisor_keyword.is_deleted = FALSE
                         WHERE ta_keyword.team_id = t.id
                           AND ta_keyword.is_deleted = FALSE
                           AND advisor_keyword.full_name ILIKE %s
@@ -856,7 +942,7 @@ class PostgresStateStoreQueryStudentsMixin:
             where_clauses.append("t.team_status = %s" if is_enabled else "t.team_status <> %s")
             params.append("active")
         if director_id:
-            where_clauses.append("COALESCE(t.lead_user_id, lead.user_id, 0) = %s")
+            where_clauses.append("COALESCE(t.lead_user_id, lead.id, 0) = %s")
             params.append(int(director_id))
         if self._needs_center_scope_filter(principal):
             username = str(self._principal_field_value(principal, "username") or "").strip()
@@ -865,7 +951,7 @@ class PostgresStateStoreQueryStudentsMixin:
             where_clauses.append(
                 """
                 (
-                    COALESCE(t.lead_user_id, lead.user_id, 0) = (
+                    COALESCE(t.lead_user_id, lead.id, 0) = (
                         SELECT u.id
                         FROM dtlms_users u
                         WHERE u.username = %s
@@ -875,10 +961,10 @@ class PostgresStateStoreQueryStudentsMixin:
                     OR EXISTS (
                         SELECT 1
                         FROM dtlms_team_advisors ta_scope
-                        LEFT JOIN dtlms_advisors advisor_scope ON advisor_scope.id = ta_scope.advisor_id AND advisor_scope.is_deleted = FALSE
+                                                JOIN dtlms_users advisor_scope ON advisor_scope.id = ta_scope.advisor_user_id AND advisor_scope.is_deleted = FALSE
                         WHERE ta_scope.team_id = t.id
                           AND ta_scope.is_deleted = FALSE
-                          AND COALESCE(ta_scope.advisor_user_id, advisor_scope.user_id, 0) = (
+                                                    AND advisor_scope.id = (
                               SELECT u.id
                               FROM dtlms_users u
                               WHERE u.username = %s
@@ -899,7 +985,7 @@ class PostgresStateStoreQueryStudentsMixin:
                 count_sql = f"""
                     SELECT COUNT(*) AS total
                     FROM dtlms_teams t
-                    LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
+                    LEFT JOIN dtlms_users lead ON lead.id = t.lead_user_id AND lead.is_deleted = FALSE
                     WHERE {where_sql}
                 """
                 self._execute_dynamic(cur, count_sql, params)
@@ -910,8 +996,8 @@ class PostgresStateStoreQueryStudentsMixin:
                     SELECT
                         t.id,
                         t.team_name,
-                        COALESCE(t.lead_user_id, lead.user_id) AS director_id,
-                        lead.full_name AS director_name,
+                        t.lead_user_id AS director_id,
+                        COALESCE(lead.full_name, '') AS director_name,
                         COALESCE(advisor_names.advisor_names, '') AS advisor_names,
                         COALESCE(advisor_names.advisor_ids, ARRAY[]::bigint[]) AS advisor_ids,
                         COALESCE(advisor_names.advisor_relation_ids, ARRAY[]::bigint[]) AS advisor_relation_ids,
@@ -920,7 +1006,7 @@ class PostgresStateStoreQueryStudentsMixin:
                         COALESCE(student_stats.member_student_count, 0) AS member_student_count,
                         COALESCE(student_stats.active_student_count, 0) AS active_student_count
                     FROM dtlms_teams t
-                    LEFT JOIN dtlms_advisors lead ON lead.id = t.lead_advisor_id AND lead.is_deleted = FALSE
+                    LEFT JOIN dtlms_users lead ON lead.id = t.lead_user_id AND lead.is_deleted = FALSE
                     LEFT JOIN LATERAL (
                         SELECT
                             string_agg(advisor_rows.advisor_name, '、' ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_names,
@@ -929,11 +1015,11 @@ class PostgresStateStoreQueryStudentsMixin:
                         FROM (
                             SELECT DISTINCT
                                 ta.id AS relation_id,
-                                COALESCE(ta.advisor_user_id, advisor.user_id) AS advisor_user_id,
+                                ta.advisor_user_id AS advisor_user_id,
                                 advisor.full_name AS advisor_name,
-                                CASE WHEN ta.advisor_role = 'lead' THEN 0 ELSE 1 END AS sort_role
+                                1 AS sort_role
                             FROM dtlms_team_advisors ta
-                            JOIN dtlms_advisors advisor ON advisor.id = ta.advisor_id AND advisor.is_deleted = FALSE
+                            JOIN dtlms_users advisor ON advisor.id = ta.advisor_user_id AND advisor.is_deleted = FALSE
                             WHERE ta.team_id = t.id AND ta.is_deleted = FALSE
                         ) advisor_rows
                     ) advisor_names ON TRUE

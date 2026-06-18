@@ -70,8 +70,8 @@ function handleDropdownCommand(key: string) {
 .table-row-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: 8px;
   white-space: nowrap;
   width: 100%;
 }

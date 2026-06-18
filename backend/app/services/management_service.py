@@ -5,6 +5,7 @@ from .management_service_core import RuntimeManagementStoreCoreMixin
 from .management_service_workflow import RuntimeManagementStoreWorkflowMixin
 from .management_service_portal import RuntimeManagementStorePortalMixin
 from .management_service_recruitment import RuntimeManagementStoreRecruitmentMixin
+from .management_service_research_centers import RuntimeManagementStoreResearchCenterMixin
 from .management_service_students import RuntimeManagementStoreStudentsMixin
 from .management_service_academic import RuntimeManagementStoreAcademicMixin
 from .management_service_system import RuntimeManagementStoreSystemMixin
@@ -12,6 +13,7 @@ from .management_service_system import RuntimeManagementStoreSystemMixin
 
 class RuntimeManagementStore(
     RuntimeManagementStoreSystemMixin,
+    RuntimeManagementStoreResearchCenterMixin,
     RuntimeManagementStoreAcademicMixin,
     RuntimeManagementStoreStudentsMixin,
     RuntimeManagementStoreRecruitmentMixin,

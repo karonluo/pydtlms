@@ -8,10 +8,11 @@ from app.core.security import (
     create_token_bundle,
     logout_session,
     record_user_login,
+    refresh_token_bundle,
     update_system_user_password,
     oauth2_scheme,
 )
-from app.schemas.auth import PasswordChangeRequest, Principal, TokenResponse, UserProfile, UserProfileUpdate
+from app.schemas.auth import PasswordChangeRequest, Principal, RefreshTokenRequest, RefreshTokenResponse, TokenResponse, UserProfile, UserProfileUpdate
 from app.services.management_service import store
 
 
@@ -74,3 +75,12 @@ def change_password(payload: PasswordChangeRequest, principal: Principal = Depen
 def logout(token: str = Depends(oauth2_scheme), principal: Principal = Depends(get_current_principal)) -> dict[str, str]:
     logout_session(token)
     return {"message": "Logged out"}
+
+
+@router.post("/refresh", response_model=RefreshTokenResponse)
+def refresh(payload: RefreshTokenRequest) -> RefreshTokenResponse:
+    access_token, refresh_token = refresh_token_bundle(payload.refresh_token)
+    return RefreshTokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )

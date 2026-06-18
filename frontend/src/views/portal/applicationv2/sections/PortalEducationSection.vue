@@ -28,8 +28,7 @@ const props = defineProps<{
 }>()
 
 const displayedEducationItems = computed(() => (props.form.education_experiences || [])
-  .map((item, actualIndex) => ({ item, actualIndex }))
-  .reverse())
+  .map((item, actualIndex) => ({ item, actualIndex })))
 </script>
 
 <template>

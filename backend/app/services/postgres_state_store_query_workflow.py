@@ -234,3 +234,77 @@ class PostgresStateStoreQueryWorkflowMixin:
                 )
                 row = cur.fetchone()
                 return self._normalize_workflow_task_snapshot_row(dict(row)) if row else None
+
+    def get_workflow_task_snapshot_by_business_key(self, business_key: str) -> dict[str, Any] | None:
+        """Execute query logic for `get_workflow_task_snapshot_by_business_key`."""
+        normalized_business_key = str(business_key or "").strip()
+        if not normalized_business_key:
+            return None
+
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        ht.id_ AS task_key,
+                        ht.business_key_,
+                        ht.name_ AS title,
+                        ht.start_time_,
+                        ht.due_date_,
+                        ht.priority_,
+                        ht.proc_def_id_,
+                        ht.proc_inst_id_,
+                        ht.exec_id_,
+                        ht.task_def_key_,
+                        pd.key_ AS process_definition_key,
+                        pd.name_ AS process_definition_name,
+                        vars.workflow_name,
+                        vars.business_module,
+                        vars.applicant_name,
+                        vars.current_handler,
+                        vars.current_node,
+                        vars.task_status,
+                        vars.latest_comment,
+                        vars.form_summary,
+                        vars.flow_code,
+                        vars.node_key,
+                        vars.entity_id,
+                        vars.candidate_groups,
+                        vars.history_entries
+                    FROM dtlms_wf_hi_taskinst ht
+                    JOIN dtlms_wf_re_procdef pd ON pd.id_ = ht.proc_def_id_
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            MAX(CASE WHEN latest_var.name_ = 'workflowName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS workflow_name,
+                            MAX(CASE WHEN latest_var.name_ = 'businessModule' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS business_module,
+                            MAX(CASE WHEN latest_var.name_ = 'applicantName' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS applicant_name,
+                            MAX(CASE WHEN latest_var.name_ = 'currentHandler' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_handler,
+                            MAX(CASE WHEN latest_var.name_ = 'currentNode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS current_node,
+                            MAX(CASE WHEN latest_var.name_ = 'taskStatus' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS task_status,
+                            MAX(CASE WHEN latest_var.name_ = 'latestComment' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS latest_comment,
+                            MAX(CASE WHEN latest_var.name_ = 'formSummary' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS form_summary,
+                            MAX(CASE WHEN latest_var.name_ = 'flowCode' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS flow_code,
+                            MAX(CASE WHEN latest_var.name_ = 'nodeKey' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS node_key,
+                            MAX(CASE WHEN latest_var.name_ = 'entityId' THEN COALESCE(latest_var.text_value_, latest_var.json_value_->>'value') END) AS entity_id,
+                            MAX(CASE WHEN latest_var.name_ = 'candidateGroups' THEN latest_var.json_value_::text END)::jsonb AS candidate_groups,
+                            MAX(CASE WHEN latest_var.name_ = 'historyEntries' THEN latest_var.json_value_::text END)::jsonb AS history_entries
+                        FROM (
+                            SELECT DISTINCT ON (hv.name_)
+                                hv.name_,
+                                hv.text_value_,
+                                hv.json_value_
+                            FROM dtlms_wf_hi_varinst hv
+                            WHERE hv.proc_inst_id_ = ht.proc_inst_id_
+                            ORDER BY hv.name_, hv.last_updated_time_ DESC, hv.id_ DESC
+                        ) latest_var
+                    ) vars ON TRUE
+                    WHERE ht.business_key_ = %s
+                    ORDER BY ht.start_time_ DESC, ht.id_ DESC
+                    LIMIT 1
+                    """,
+                    (normalized_business_key,),
+                )
+                row = cur.fetchone()
+                return self._normalize_workflow_task_snapshot_row(dict(row)) if row else None

@@ -45,11 +45,14 @@ def list_advisor_screening_pending_applications(
         "( first_choice = %s OR first_choice_id = %s )",
         "( first_choice_screening_submitted_at IS NULL )",
         "ra.application_status = 'initial_screening_first'",
+        # "( first_choice IS NOT NULL AND TRIM(first_choice) != '')",
+        
     ]
     second_where = [
         "( second_choice = %s OR second_choice_id = %s )",
         "( second_choice_screening_submitted_at IS NULL AND first_choice_screening_submitted_at IS NOT NULL)",
         "ra.application_status = 'initial_screening_second'",
+        # "( second_choice IS NOT NULL AND TRIM(second_choice) != '' )",
     ]
     first_params: list[Any] = []
     second_params: list[Any] = []
@@ -120,3 +123,19 @@ def list_advisor_screening_pending_applications(
         with conn.cursor() as cur:
             query_store._execute_dynamic(cur, query_sql, params)
             return [_normalize_pending_row(dict(row)) for row in cur.fetchall()]
+
+
+def count_advisor_screening_pending_applications(
+    *,
+    advisor_username: str | None = None,
+    advisor_name: str | None = None,
+    advisor_user_id: int | None = None,
+) -> int:
+    """Count pending advisor-screening applications for both rounds."""
+    return len(
+        list_advisor_screening_pending_applications(
+            advisor_username=advisor_username,
+            advisor_name=advisor_name,
+            advisor_user_id=advisor_user_id,
+        )
+    )

@@ -125,6 +125,7 @@ const options = ref<StudentOptions>({
   status_options: [],
   degree_options: [],
   advisor_options: [],
+  center_advisor_options: [],
   registered_portal_advisor_filter_options: [],
   registered_portal_first_choice_advisor_filter_options: [],
   registered_portal_second_choice_advisor_filter_options: [],
@@ -155,6 +156,10 @@ const registeredPortalFilters = reactive({
   show_all_background_assessed: false,
   first_choice_advisor_names: [] as string[],
   second_choice_advisor_names: [] as string[],
+  first_choice_center_names: [] as string[],
+  second_choice_center_names: [] as string[],
+  sort_by: '',
+  sort_order: 'desc',
 })
 const portalEmailForm = reactive<RegisteredPortalStudentEmailRequest>({
   subject: '',
@@ -295,6 +300,7 @@ const statCards = computed(() => {
     { label: '论文阶段', count: stats.value.thesis_students, tone: 'warning' },
   ]
 })
+const centerAdvisorOptions = computed(() => options.value.center_advisor_options)
 const centerAdvisorMap = computed(() => {
   const mapping = new Map<string, SelectOption[]>()
   options.value.center_advisor_map.forEach((item) => mapping.set(item.center_name, item.advisors))
@@ -396,6 +402,10 @@ async function loadRegisteredPortalStudents() {
     show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
     first_choice_advisor_names: registeredPortalFilters.first_choice_advisor_names.length ? registeredPortalFilters.first_choice_advisor_names.join(',') : undefined,
     second_choice_advisor_names: registeredPortalFilters.second_choice_advisor_names.length ? registeredPortalFilters.second_choice_advisor_names.join(',') : undefined,
+    first_choice_center_names: registeredPortalFilters.first_choice_center_names.length ? registeredPortalFilters.first_choice_center_names.join(',') : undefined,
+    second_choice_center_names: registeredPortalFilters.second_choice_center_names.length ? registeredPortalFilters.second_choice_center_names.join(',') : undefined,
+    sort_by: registeredPortalFilters.sort_by || undefined,
+    sort_order: registeredPortalFilters.sort_by ? registeredPortalFilters.sort_order || 'desc' : undefined,
     page: registeredStudentPager.pagination.currentPage,
     page_size: registeredStudentPager.pagination.pageSize,
   })
@@ -646,7 +656,18 @@ async function handleSearch() {
 async function handleReset() {
   Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
   Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
-  Object.assign(registeredPortalFilters, { keyword: '', application_form_status: '', recruitment_application_status: '', show_all_background_assessed: false, first_choice_advisor_names: [], second_choice_advisor_names: [] })
+  Object.assign(registeredPortalFilters, {
+    keyword: '',
+    application_form_status: '',
+    recruitment_application_status: '',
+    show_all_background_assessed: false,
+    first_choice_advisor_names: [],
+    second_choice_advisor_names: [],
+    first_choice_center_names: [],
+    second_choice_center_names: [],
+    sort_by: '',
+    sort_order: 'desc',
+  })
   selectedCenterIds.value = []
   selectedRegisteredPortalStudentIds.value = []
   studentPager.reset()
@@ -685,6 +706,20 @@ async function handleRegisteredStudentPageSizeChange(size: number) {
   await loadSectionData()
 }
 
+async function handleRegisteredPortalSortChange(payload: { prop?: string; order?: 'ascending' | 'descending' | null }) {
+  const sortableFields = new Set(['first_choice_screening_score', 'second_choice_screening_score'])
+  if (!payload.prop || !sortableFields.has(payload.prop)) {
+    registeredPortalFilters.sort_by = ''
+    registeredPortalFilters.sort_order = 'desc'
+    await loadSectionData()
+    return
+  }
+  registeredPortalFilters.sort_by = payload.prop
+  registeredPortalFilters.sort_order = payload.order === 'ascending' ? 'asc' : 'desc'
+  registeredStudentPager.reset()
+  await loadSectionData()
+}
+
 function buildRegisteredPortalExportFilters() {
   return {
     keyword: registeredPortalFilters.keyword || undefined,
@@ -693,6 +728,8 @@ function buildRegisteredPortalExportFilters() {
     show_all_background_assessed: registeredPortalFilters.show_all_background_assessed,
     first_choice_advisor_names: registeredPortalFilters.first_choice_advisor_names.length ? [...registeredPortalFilters.first_choice_advisor_names] : undefined,
     second_choice_advisor_names: registeredPortalFilters.second_choice_advisor_names.length ? [...registeredPortalFilters.second_choice_advisor_names] : undefined,
+    first_choice_center_names: registeredPortalFilters.first_choice_center_names.length ? [...registeredPortalFilters.first_choice_center_names] : undefined,
+    second_choice_center_names: registeredPortalFilters.second_choice_center_names.length ? [...registeredPortalFilters.second_choice_center_names] : undefined,
   }
 }
 
@@ -715,6 +752,16 @@ function buildRegisteredPortalExportFilterSummary() {
   }
   if (registeredPortalFilters.second_choice_advisor_names.length) {
     items.push(`第二志愿导师：${registeredPortalFilters.second_choice_advisor_names.join('、')}`)
+  }
+  if (registeredPortalFilters.first_choice_center_names.length) {
+    items.push(`第一志愿中心：${registeredPortalFilters.first_choice_center_names.join('、')}`)
+  }
+  if (registeredPortalFilters.second_choice_center_names.length) {
+    items.push(`第二志愿中心：${registeredPortalFilters.second_choice_center_names.join('、')}`)
+  }
+  if (registeredPortalFilters.sort_by) {
+    const sortLabel = registeredPortalFilters.sort_by === 'first_choice_screening_score' ? '第一志愿导师评分' : '第二志愿导师评分'
+    items.push(`排序：${sortLabel} ${registeredPortalFilters.sort_order === 'asc' ? '升序' : '降序'}`)
   }
   return items.join('；') || '当前未设置筛选条件'
 }
@@ -1435,7 +1482,7 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="负责人">
           <el-select v-model="centerFilters.director_id" placeholder="全部负责人" clearable filterable style="width: 180px">
-            <el-option v-for="item in options.advisor_options" :key="item.value" :label="item.label" :value="item.value" />
+            <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -1444,17 +1491,18 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-form v-else class="filter-form" :inline="true">
+      <el-form v-else class="registered-portal-filter-form">
+        <div class="registered-portal-filter-form__row registered-portal-filter-form__row--top" style="display: flex !important; flex-wrap: wrap !important; gap: 12px 16px !important; align-items: flex-start !important;">
         <el-form-item label="关键字">
-          <el-input v-model="registeredPortalFilters.keyword" placeholder="报名号 / 姓名 / 手机号 / 邮箱 / 招生计划 / 导师" clearable />
+          <el-input v-model="registeredPortalFilters.keyword" class="registered-portal-filter-form__keyword" placeholder="报名号 / 姓名 / 手机号 / 邮箱 / 招生计划 / 导师" clearable />
         </el-form-item>
         <el-form-item label="报名状态">
-          <el-select v-model="registeredPortalFilters.application_form_status" placeholder="全部状态" clearable style="width: 180px">
+          <el-select v-model="registeredPortalFilters.application_form_status" placeholder="全部状态" clearable class="registered-portal-filter-form__status">
             <el-option v-for="item in portalApplicationFormStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="申请流转状态">
-          <el-select v-model="registeredPortalFilters.recruitment_application_status" placeholder="全部流转状态" clearable filterable style="width: 200px">
+          <el-select v-model="registeredPortalFilters.recruitment_application_status" placeholder="全部流转状态" clearable filterable class="registered-portal-filter-form__application-status">
             <el-option v-for="item in options.registered_portal_application_status_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
@@ -1467,6 +1515,8 @@ onMounted(() => {
             @change="handleSearch"
           />
         </el-form-item>
+        </div>
+        <div class="registered-portal-filter-form__row registered-portal-filter-form__row--middle" style="display: flex !important; flex-wrap: wrap !important; gap: 12px 16px !important; align-items: center !important;">
         <el-form-item label="第一志愿导师">
           <el-select
             v-model="registeredPortalFilters.first_choice_advisor_names"
@@ -1476,7 +1526,7 @@ onMounted(() => {
             filterable
             clearable
             placeholder="全部第一志愿导师"
-            style="width: 260px"
+            class="registered-portal-filter-form__advisor"
           >
             <el-option
               v-for="item in options.registered_portal_first_choice_advisor_filter_options"
@@ -1484,6 +1534,20 @@ onMounted(() => {
               :label="item.label"
               :value="item.value"
             />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="第一志愿中心">
+          <el-select
+            v-model="registeredPortalFilters.first_choice_center_names"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            clearable
+            placeholder="全部第一志愿中心"
+            class="registered-portal-filter-form__center"
+          >
+            <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="第二志愿导师">
@@ -1495,7 +1559,7 @@ onMounted(() => {
             filterable
             clearable
             placeholder="全部第二志愿导师"
-            style="width: 260px"
+            class="registered-portal-filter-form__advisor"
           >
             <el-option
               v-for="item in options.registered_portal_second_choice_advisor_filter_options"
@@ -1505,10 +1569,27 @@ onMounted(() => {
             />
           </el-select>
         </el-form-item>
-        <el-form-item>
+        <el-form-item label="第二志愿中心">
+          <el-select
+            v-model="registeredPortalFilters.second_choice_center_names"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            clearable
+            placeholder="全部第二志愿中心"
+            style="width: 260px"
+          >
+            <el-option v-for="item in options.center_options" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        </div>
+        <div class="registered-portal-filter-form__row registered-portal-filter-form__row--bottom" style="display: flex !important; flex-wrap: wrap !important; gap: 12px 16px !important; align-items: center !important;">
+        <el-form-item style="margin: 0 !important;">
           <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
+        </div>
       </el-form>
 
       <div class="table-host">
@@ -1563,7 +1644,7 @@ onMounted(() => {
           </el-table-column>
         </el-table>
 
-        <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleRegisteredPortalStudentSelectionChange">
+        <el-table v-else :data="registeredPortalStudents" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleRegisteredPortalStudentSelectionChange" @sort-change="handleRegisteredPortalSortChange">
           <el-table-column type="selection" width="44" />
           <el-table-column prop="recruitment_application_candidate_no" label="报名号" width="126" show-overflow-tooltip />
           <el-table-column prop="full_name" label="姓名" width="96" show-overflow-tooltip />
@@ -1580,13 +1661,25 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column prop="selected_plan_name" label="招生计划" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="first_choice_screening_score" label="第一志愿导师评分" width="146" sortable="custom" align="center">
+            <template #default="scope">
+              {{ scope.row.first_choice_screening_score ?? '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="second_choice_screening_score" label="第二志愿导师评分" width="146" sortable="custom" align="center">
+            <template #default="scope">
+              {{ scope.row.second_choice_screening_score ?? '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="first_choice_center_name" label="第一志愿中心" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="second_choice_center_name" label="第二志愿中心" min-width="140" show-overflow-tooltip />
           <el-table-column label="申请流转状态" width="130" align="center">
             <template #default="scope">
               <el-tag :type="portalRecruitmentStatusTagType(scope.row.recruitment_application_status)">{{ scope.row.recruitment_application_status || '未提交' }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="registered_at" label="注册时间" width="160" show-overflow-tooltip />
-          <el-table-column label="操作" width="230" align="left">
+          <el-table-column label="操作" width="230" align="left" fixed="right" class-name="operation-column">
             <template #default="scope">
               <TableRowActions
                 :row="scope.row"
@@ -1816,12 +1909,12 @@ onMounted(() => {
           </el-form-item>
           <el-form-item label="负责人" prop="director_id">
             <el-select v-model="centerForm.director_id" placeholder="请选择负责人" filterable>
-              <el-option v-for="item in allAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
+              <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="导师团队" prop="advisor_ids" class="dialog-grid--full">
             <el-select v-model="centerForm.advisor_ids" multiple filterable placeholder="请选择导师团队">
-              <el-option v-for="item in allAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
+              <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="是否启用">
@@ -2057,9 +2150,15 @@ onMounted(() => {
 .section-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 20px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.section-card__header > div:first-child {
+  flex: 0 0 auto;
 }
 
 .section-tag {
@@ -2079,6 +2178,8 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  max-width: 100%;
+  overflow: visible;
 }
 
 .summary-text {
@@ -2098,21 +2199,124 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
+/* ========== 注册学生管理页面 - 独立样式 ========== */
+.registered-portal-filter-form {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  padding: 12px !important;
+  margin-bottom: 12px !important;
+  border-radius: 8px !important;
+  background: #f5f7fa !important;
+  flex: 0 0 auto !important;
+}
+
+.registered-portal-filter-form :deep(.el-form-item) {
+  margin-right: 0 !important;
+  margin-bottom: 0 !important;
+  width: auto !important;
+  display: inline-flex !important;
+  vertical-align: middle !important;
+  flex-shrink: 0 !important;
+}
+
+.registered-portal-filter-form :deep(.el-form-item__label) {
+  padding-right: 8px !important;
+  color: #303133 !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+}
+
+.registered-portal-filter-form :deep(.el-input__wrapper),
+.registered-portal-filter-form :deep(.el-select),
+.registered-portal-filter-form :deep(.el-select__wrapper) {
+  width: 100% !important;
+}
+
+.registered-portal-filter-form__row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 12px 16px !important;
+  width: 100% !important;
+  align-items: center !important;
+}
+
+.registered-portal-filter-form__row--top {
+  align-items: flex-start !important;
+}
+
+.registered-portal-filter-form__row--middle,
+.registered-portal-filter-form__row--bottom {
+  align-items: center !important;
+}
+
+.registered-portal-filter-form__keyword {
+  width: min(280px, 100%) !important;
+}
+
+.registered-portal-filter-form__status {
+  width: 140px !important;
+}
+
+.registered-portal-filter-form__application-status {
+  width: 172px !important;
+}
+
+.registered-portal-filter-form__advisor,
+.registered-portal-filter-form__center {
+  width: 210px !important;
+}
+
 .table-host {
   flex: 1;
   min-height: 0;
-  overflow-x: hidden;
+  overflow-x: scroll !important;
   overflow-y: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  width: 100%;
 }
 
 .table-host :deep(.el-table) {
-  width: 100%;
+  width: auto;
+  min-width: 3200px;
+}
+
+.table-host :deep(.el-table__header-wrapper) {
+  overflow: hidden;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: white;
+}
+
+.table-host :deep(.el-table__body-wrapper) {
+  overflow: visible !important;
 }
 
 .table-host :deep(.el-table th.el-table__cell),
 .table-host :deep(.el-table td.el-table__cell) {
   padding-top: 8px;
   padding-bottom: 8px;
+}
+
+/* 操作列浮动效果 */
+.table-host :deep(.operation-column.el-table__cell) {
+  position: sticky;
+  right: 0;
+  z-index: 9;
+  background-color: white;
+}
+
+.table-host :deep(.el-table__header th.operation-column.el-table__cell) {
+  position: sticky;
+  right: 0;
+  z-index: 11;
+  background-color: #f5f7fa;
+}
+
+.table-host :deep(tbody tr:hover .operation-column.el-table__cell) {
+  background-color: #f5f7fa;
 }
 
 .cell-stack {
@@ -2304,6 +2508,24 @@ onMounted(() => {
   .state-grid,
   .section-card__header {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .registered-portal-filter-form {
+    gap: 4px 8px;
+  }
+
+  .registered-portal-filter-form__row {
+    gap: 4px 8px;
+  }
+
+  .registered-portal-filter-form__keyword,
+  .registered-portal-filter-form__status,
+  .registered-portal-filter-form__application-status,
+  .registered-portal-filter-form__advisor,
+  .registered-portal-filter-form__center,
+  .registered-portal-filter-form__sort-by,
+  .registered-portal-filter-form__sort-order {
+    width: min(100%, 320px);
   }
 
   .content-stack,

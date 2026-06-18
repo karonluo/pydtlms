@@ -7,8 +7,15 @@ from types import SimpleNamespace
 from uuid import uuid4
 from typing import Any, TYPE_CHECKING
 
+from psycopg.rows import dict_row
+
 from app.core.config import settings
 from app.services.recruitment_excel_service import build_registered_portal_students_template
+from app.services.advisor_screening_pending_service import list_advisor_screening_pending_applications
+from app.services.advisor_screening_submitted_service import (
+    count_advisor_screening_submitted_applications,
+    list_advisor_screening_submitted_applications,
+)
 
 from .management_service_shared import *
 
@@ -47,7 +54,9 @@ class RuntimeManagementStoreStudentsMixin:
         return value
 
     @staticmethod
-    def _registered_portal_export_job_file_name() -> str:
+    def _registered_portal_export_job_file_name(export_scope: str | None = None) -> str:
+        if str(export_scope or "").strip() in {"advisor_screening", "advisor_screening_pending", "advisor_screening_submitted"}:
+            return f"导师初筛导出_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
         return f"注册学生导出_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
 
     @staticmethod
@@ -136,6 +145,70 @@ class RuntimeManagementStoreStudentsMixin:
         username = str(cls._principal_field_value(principal, "username") or "").strip()
         return username or None
 
+    def _advisor_user_id_by_username(self, username: str | None) -> int | None:
+        postgres_store = getattr(self, "_postgres_store", None)
+        resolver = getattr(postgres_store, "_advisor_user_id_by_username", None)
+        if callable(resolver):
+            advisor_user_id = resolver(username)
+            advisor_user_id_text = str(advisor_user_id or "").strip()
+            return int(advisor_user_id_text) if advisor_user_id_text else None
+        return None
+
+    def _registered_portal_advisor_center_name(self, advisor_name: str | None) -> str | None:
+        normalized_name = str(advisor_name or "").strip()
+        if not normalized_name:
+            return None
+
+        postgres_store = getattr(self, "_postgres_store", None)
+        connect = getattr(postgres_store, "_connect", None)
+        if callable(connect):
+            try:
+                with connect(settings.postgres_db) as conn:
+                    conn.row_factory = dict_row
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT t.team_name
+                            FROM dtlms_users u
+                            JOIN dtlms_user_roles ur ON ur.user_id = u.id
+                            JOIN dtlms_roles r ON r.id = ur.role_id AND r.is_deleted = FALSE
+                            JOIN dtlms_team_advisors ta ON ta.advisor_user_id = u.id AND ta.is_deleted = FALSE
+                            JOIN dtlms_teams t ON t.id = ta.team_id AND t.is_deleted = FALSE
+                            WHERE u.full_name = %s
+                              AND u.is_deleted = FALSE
+                              AND r.role_code = 'advisor'
+                            ORDER BY t.id DESC
+                            LIMIT 1
+                            """,
+                            (normalized_name,),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            return self._registered_portal_student_export_text(row.get("team_name"))
+            except Exception:
+                pass
+
+        list_centers_page = getattr(postgres_store, "list_centers_page", None)
+        if callable(list_centers_page):
+            try:
+                items, _ = list_centers_page(
+                    keyword=None,
+                    is_enabled=None,
+                    director_id=None,
+                    page=1,
+                    page_size=1000,
+                )
+            except Exception:
+                items = []
+            for item in items:
+                row = dict(item)
+                center_name = self._registered_portal_student_export_text(row.get("center_name") or row.get("team_name"))
+                director_name = self._registered_portal_student_export_text(row.get("director_name") or row.get("lead_user_name"))
+                advisor_names = [self._registered_portal_student_export_text(value) for value in (row.get("advisor_names") or [])]
+                if normalized_name == director_name or normalized_name in {value for value in advisor_names if value}:
+                    return center_name
+        return None
+
     @staticmethod
     def _build_registered_portal_export_job_record(job: dict[str, Any]) -> RegisteredPortalStudentExportJobRecord:
         return RegisteredPortalStudentExportJobRecord(
@@ -210,7 +283,7 @@ class RuntimeManagementStoreStudentsMixin:
             "job_id": job_id,
             "owner": principal.username,
             "status": "pending",
-            "file_name": self._registered_portal_export_job_file_name(),
+                "file_name": self._registered_portal_export_job_file_name(payload.export_scope),
             "created_at": self._registered_portal_export_timestamp(),
             "started_at": None,
             "completed_at": None,
@@ -566,6 +639,124 @@ class RuntimeManagementStoreStudentsMixin:
         return "是" if bool(value) else "否"
 
     @staticmethod
+    def _registered_portal_summary_text(value: Any, *, field_name: str | None = None) -> str | None:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        elif hasattr(value, "__dict__"):
+            value = vars(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            if text[:1] in {"{", "["}:
+                try:
+                    value = json.loads(text)
+                except json.JSONDecodeError:
+                    return text
+            else:
+                return text
+        rendered = RuntimeManagementStoreStudentsMixin._registered_portal_render_summary_value(value, field_name=field_name)
+        if rendered is None:
+            return None
+        text = rendered.strip()
+        return text or None
+
+    @staticmethod
+    def _registered_portal_render_summary_value(value: Any, *, field_name: str | None = None) -> str | None:
+        if isinstance(value, list):
+            rendered_items = [
+                item_text
+                for item_text in (
+                    RuntimeManagementStoreStudentsMixin._registered_portal_render_summary_item(item, field_name=field_name)
+                    for item in value
+                )
+                if item_text
+            ]
+            if not rendered_items:
+                return None
+            return "\n".join(f"{index}. {item_text}" for index, item_text in enumerate(rendered_items, start=1))
+        if isinstance(value, dict):
+            return RuntimeManagementStoreStudentsMixin._registered_portal_render_summary_item(value, field_name=field_name)
+        return RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(value)
+
+    @staticmethod
+    def _registered_portal_render_summary_item(value: Any, *, field_name: str | None = None) -> str | None:
+        if not isinstance(value, dict):
+            return RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(value)
+
+        def render_text(item_key: str) -> str | None:
+            item_value = value.get(item_key)
+            if item_value in (None, "", [], {}):
+                return None
+            if isinstance(item_value, (dict, list)):
+                rendered_value = RuntimeManagementStoreStudentsMixin._registered_portal_render_summary_value(item_value, field_name=field_name)
+                return rendered_value.strip() if rendered_value else None
+            return RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(item_value)
+
+        if field_name == "education_experience":
+            parts = [
+                render_text("education_stage"),
+                render_text("school_name"),
+                render_text("major_name"),
+                RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(
+                    " - ".join(part for part in [render_text("start_month"), render_text("end_month")] if part)
+                ),
+                render_text("average_score"),
+                render_text("gpa"),
+                render_text("ranking"),
+                RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(
+                    " / ".join(part for part in [render_text("verifier_name"), render_text("verifier_phone")] if part)
+                ),
+            ]
+        elif field_name == "practice_experience":
+            parts = [
+                RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(
+                    " - ".join(part for part in [render_text("start_month"), render_text("end_month")] if part)
+                ),
+                render_text("organization_name"),
+                render_text("position_name"),
+                render_text("responsibility") or render_text("responsibility_text"),
+                RuntimeManagementStoreStudentsMixin._registered_portal_student_export_text(
+                    " / ".join(part for part in [render_text("verifier_name"), render_text("verifier_phone")] if part)
+                ),
+            ]
+        elif field_name == "family_info":
+            parts = [
+                render_text("relation_type"),
+                render_text("member_name"),
+                render_text("employer_name"),
+                render_text("job_title"),
+                render_text("contact_phone"),
+            ]
+        elif field_name == "recommendation_notes":
+            parts = [
+                render_text("achievement_type"),
+                render_text("achievement_month"),
+                render_text("paper_title"),
+                render_text("journal_or_conference"),
+                render_text("publish_or_index_month"),
+                render_text("author_order"),
+                render_text("award_name"),
+                render_text("awarding_org"),
+                render_text("award_level"),
+                render_text("award_year"),
+                render_text("award_rank"),
+                render_text("description_text"),
+                render_text("responsibility_text"),
+            ]
+        elif field_name == "personal_statement_text":
+            parts = [render_text(key) for key in value.keys()]
+        else:
+            parts = [f"{key}：{render_text(key)}" for key in value.keys() if render_text(key)]
+
+        cleaned_parts = [part for part in parts if part]
+        if not cleaned_parts:
+            return None
+        return "，".join(cleaned_parts)
+
+    @staticmethod
     def _registered_portal_json_text(value: Any) -> str | None:
         if value is None:
             return None
@@ -655,6 +846,8 @@ class RuntimeManagementStoreStudentsMixin:
         advisor_names: list[str] | None,
         first_choice_advisor_names: list[str] | None,
         second_choice_advisor_names: list[str] | None,
+        first_choice_center_names: list[str] | None,
+        second_choice_center_names: list[str] | None,
         export_scope: str | None = None,
         principal: Principal | dict[str, Any] | None = None,
     ) -> list[int]:
@@ -688,6 +881,8 @@ class RuntimeManagementStoreStudentsMixin:
                 advisor_names=advisor_names,
                 first_choice_advisor_names=first_choice_advisor_names,
                 second_choice_advisor_names=second_choice_advisor_names,
+                first_choice_center_names=first_choice_center_names,
+                second_choice_center_names=second_choice_center_names,
                 page=1,
                 page_size=total_hint,
                 principal=principal,
@@ -702,6 +897,8 @@ class RuntimeManagementStoreStudentsMixin:
                 advisor_names=advisor_names,
                 first_choice_advisor_names=first_choice_advisor_names,
                 second_choice_advisor_names=second_choice_advisor_names,
+                first_choice_center_names=first_choice_center_names,
+                second_choice_center_names=second_choice_center_names,
                 principal=principal,
             )
 
@@ -715,6 +912,8 @@ class RuntimeManagementStoreStudentsMixin:
         advisor_names: list[str] | None,
         first_choice_advisor_names: list[str] | None,
         second_choice_advisor_names: list[str] | None,
+        first_choice_center_names: list[str] | None,
+        second_choice_center_names: list[str] | None,
         principal: Principal | dict[str, Any] | None,
     ) -> list[int]:
         effective_advisor_names, force_empty = self._resolve_registered_portal_advisor_filter(advisor_names, principal)
@@ -722,6 +921,8 @@ class RuntimeManagementStoreStudentsMixin:
             return []
         normalized_first_choice_advisor_names = [str(item).strip() for item in (first_choice_advisor_names or []) if str(item).strip()]
         normalized_second_choice_advisor_names = [str(item).strip() for item in (second_choice_advisor_names or []) if str(item).strip()]
+        normalized_first_choice_center_names = [str(item).strip() for item in (first_choice_center_names or []) if str(item).strip()]
+        normalized_second_choice_center_names = [str(item).strip() for item in (second_choice_center_names or []) if str(item).strip()]
 
         keyword_text = str(keyword or "").strip().lower()
         plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
@@ -742,9 +943,15 @@ class RuntimeManagementStoreStudentsMixin:
             )
             latest_first_choice_name = str((latest_application.get("first_choice") if latest_application else student.get("first_choice")) or "").strip()
             latest_second_choice_name = str((latest_application.get("second_choice") if latest_application else student.get("second_choice")) or "").strip()
+            latest_first_choice_center_name = self._registered_portal_advisor_center_name(latest_first_choice_name)
+            latest_second_choice_center_name = self._registered_portal_advisor_center_name(latest_second_choice_name)
             if normalized_first_choice_advisor_names and latest_first_choice_name not in normalized_first_choice_advisor_names:
                 continue
             if normalized_second_choice_advisor_names and latest_second_choice_name not in normalized_second_choice_advisor_names:
+                continue
+            if normalized_first_choice_center_names and str(latest_first_choice_center_name or "").strip() not in normalized_first_choice_center_names:
+                continue
+            if normalized_second_choice_center_names and str(latest_second_choice_center_name or "").strip() not in normalized_second_choice_center_names:
                 continue
             application_status, _ = self._registered_portal_application_form_status(
                 student.get("submitted_at"),
@@ -831,7 +1038,11 @@ class RuntimeManagementStoreStudentsMixin:
         registered_at: str | None,
         plan_name: str | None,
         first_choice_advisor_name: str | None = None,
+        first_choice_screening_score: Any = None,
+        first_choice_center_name: str | None = None,
         second_choice_advisor_name: str | None = None,
+        second_choice_screening_score: Any = None,
+        second_choice_center_name: str | None = None,
         preference_overrides: list[Any] | None = None,
     ) -> dict[str, Any]:
         profile = student.profile
@@ -865,7 +1076,11 @@ class RuntimeManagementStoreStudentsMixin:
             "selected_plan_id": student.selected_plan_id,
             "selected_plan_name": plan_name,
             "first_choice_advisor_name": self._registered_portal_student_export_text(first_choice_advisor_name),
+            "first_choice_screening_score": self._registered_portal_student_export_text(first_choice_screening_score),
+            "first_choice_center_name": self._registered_portal_student_export_text(first_choice_center_name),
             "second_choice_advisor_name": self._registered_portal_student_export_text(second_choice_advisor_name),
+            "second_choice_screening_score": self._registered_portal_student_export_text(second_choice_screening_score),
+            "second_choice_center_name": self._registered_portal_student_export_text(second_choice_center_name),
             "recruitment_application_business_key": self._registered_portal_student_export_text(application_business_key),
             "recruitment_application_id": application_id,
             "recruitment_application_status": self._registered_portal_student_export_text(application_status) or "未提交",
@@ -891,12 +1106,12 @@ class RuntimeManagementStoreStudentsMixin:
             "source_channel": self._registered_portal_student_export_text(getattr(draft, "source_channel", None)),
             "source_channel_other": self._registered_portal_student_export_text(getattr(draft, "source_channel_other", None)),
             "english_level": self._registered_portal_student_export_text(student.english_level),
-            "family_info": self._registered_portal_student_export_text(student.family_info),
-            "education_experience": self._registered_portal_student_export_text(student.education_experience),
-            "practice_experience": self._registered_portal_student_export_text(student.practice_experience),
+            "family_info": self._registered_portal_summary_text(student.family_info, field_name="family_info"),
+            "education_experience": self._registered_portal_summary_text(student.education_experience, field_name="education_experience"),
+            "practice_experience": self._registered_portal_summary_text(student.practice_experience, field_name="practice_experience"),
             "personal_profile": self._registered_portal_student_export_text(student.personal_profile),
-            "recommendation_notes": self._registered_portal_student_export_text(student.recommendation_notes),
-            "personal_statement_text": self._registered_portal_student_export_text(student.personal_statement_text),
+            "recommendation_notes": self._registered_portal_summary_text(student.recommendation_notes, field_name="recommendation_notes"),
+            "personal_statement_text": self._registered_portal_summary_text(student.personal_statement_text, field_name="personal_statement_text"),
             "self_evaluation": self._registered_portal_student_export_text(student.self_evaluation),
             "signed_agreement": self._registered_portal_bool_text(student.signed_agreement),
             "application_profile_json": self._registered_portal_json_text(profile),
@@ -1052,6 +1267,30 @@ class RuntimeManagementStoreStudentsMixin:
             )
 
         return record
+
+    def _build_registered_portal_student_export_row_from_detail(
+        self,
+        student_detail: dict[str, Any],
+        *,
+        application_status: str | None,
+        application_id: int | None,
+        application_business_key: str | None,
+        registered_at: str | None,
+        plan_name: str | None,
+        first_choice_advisor_name: str | None = None,
+        second_choice_advisor_name: str | None = None,
+    ) -> dict[str, Any]:
+        portal_student = PortalStudentRecord.model_validate(student_detail)
+        return self._build_registered_portal_student_export_row(
+            portal_student,
+            application_status,
+            application_id,
+            application_business_key,
+            registered_at,
+            plan_name,
+            first_choice_advisor_name=first_choice_advisor_name,
+            second_choice_advisor_name=second_choice_advisor_name,
+        )
 
     def deactivate_registered_portal_student(self, student_id: int) -> RegisteredPortalStudentActionResponse:
         with self._lock:
@@ -1221,6 +1460,10 @@ class RuntimeManagementStoreStudentsMixin:
         advisor_names: list[str] | None = None,
         first_choice_advisor_names: list[str] | None = None,
         second_choice_advisor_names: list[str] | None = None,
+        first_choice_center_names: list[str] | None = None,
+        second_choice_center_names: list[str] | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
         page: int = 1,
         page_size: int = 10,
         principal: Principal | dict[str, Any] | None = None,
@@ -1241,6 +1484,10 @@ class RuntimeManagementStoreStudentsMixin:
                 advisor_names=effective_advisor_names,
                 first_choice_advisor_names=first_choice_advisor_names,
                 second_choice_advisor_names=second_choice_advisor_names,
+                first_choice_center_names=first_choice_center_names,
+                second_choice_center_names=second_choice_center_names,
+                sort_by=sort_by,
+                sort_order=sort_order,
                 page=page,
                 page_size=page_size,
             )
@@ -1262,9 +1509,108 @@ class RuntimeManagementStoreStudentsMixin:
         advisor_names: list[str] | None = None,
         first_choice_advisor_names: list[str] | None = None,
         second_choice_advisor_names: list[str] | None = None,
+        first_choice_center_names: list[str] | None = None,
+        second_choice_center_names: list[str] | None = None,
         export_scope: str | None = None,
         principal: Principal | dict[str, Any] | None = None,
     ) -> bytes:
+        export_scope = str(export_scope or "").strip()
+        if export_scope in {"advisor_screening", "advisor_screening_pending", "advisor_screening_submitted"}:
+            advisor_name = self._registered_portal_scope_advisor_name(principal)
+            role_codes = self._principal_role_codes(principal)
+            if "advisor" in role_codes and role_codes.intersection({"platform_admin", "AILABMGT", "academy_admin"}):
+                advisor_name = None
+            advisor_user_id = self._advisor_user_id_by_username(advisor_name) if advisor_name else None
+            plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
+            export_rows: list[dict[str, Any]] = []
+            if export_scope == "advisor_screening_submitted":
+                submitted_total = count_advisor_screening_submitted_applications(
+                    keyword=keyword,
+                    advisor_name=advisor_name,
+                    advisor_user_id=advisor_user_id,
+                )
+                if submitted_total <= 0:
+                    return build_registered_portal_students_template(export_rows)
+                submitted_rows = list_advisor_screening_submitted_applications(
+                    keyword=keyword,
+                    advisor_name=advisor_name,
+                    advisor_user_id=advisor_user_id,
+                    page=1,
+                    page_size=submitted_total,
+                ).items
+                for row in submitted_rows:
+                    student_detail = self._postgres_store.get_portal_student_detail(int(row.student_id))
+                    if student_detail is None:
+                        continue
+                    application_detail = self._postgres_store.get_recruitment_application_detail(int(row.application_id)) if row.application_id else None
+                    selected_plan_id = int(student_detail.get("selected_plan_id") or row.plan_id or 0) or None
+                    plan_name = plan_name_map.get(int(selected_plan_id or 0)) if selected_plan_id is not None else None
+                    first_choice_center_name = self._registered_portal_advisor_center_name(row.first_choice)
+                    second_choice_center_name = self._registered_portal_advisor_center_name(row.second_choice)
+                    export_rows.append(
+                        self._build_registered_portal_student_export_row_from_detail(
+                            student_detail,
+                            application_status=row.application_status,
+                            application_id=row.application_id,
+                            application_business_key=row.business_key,
+                            registered_at=self._registered_portal_student_export_text(
+                                student_detail.get("created_at")
+                                or student_detail.get("registered_at")
+                                or row.first_choice_screening_submitted_at
+                            ),
+                            plan_name=plan_name,
+                            first_choice_advisor_name=row.first_choice,
+                            first_choice_screening_score=(application_detail or {}).get("first_choice_screening_score") if application_detail else None,
+                            first_choice_center_name=first_choice_center_name,
+                            second_choice_advisor_name=row.second_choice,
+                            second_choice_screening_score=(application_detail or {}).get("second_choice_screening_score") if application_detail else None,
+                            second_choice_center_name=second_choice_center_name,
+                        )
+                    )
+            else:
+                pending_rows = list_advisor_screening_pending_applications(
+                    keyword=keyword,
+                    advisor_username=str(self._principal_field_value(principal, "username") or "") if principal else None,
+                    advisor_name=advisor_name,
+                    advisor_user_id=advisor_user_id,
+                )
+                if not pending_rows:
+                    return build_registered_portal_students_template(export_rows)
+                for row in pending_rows:
+                    portal_student_id = int(row.get("student_id") or row.get("portal_student_id") or 0)
+                    if portal_student_id <= 0:
+                        continue
+                    student_detail = self._postgres_store.get_portal_student_detail(portal_student_id)
+                    if student_detail is None:
+                        continue
+                    application_id = int(row.get("application_id") or row.get("id") or 0) or None
+                    application_detail = self._postgres_store.get_recruitment_application_detail(application_id) if application_id else None
+                    selected_plan_id = int(student_detail.get("selected_plan_id") or (application_detail or {}).get("plan_id") or 0) or None
+                    plan_name = plan_name_map.get(int(selected_plan_id or 0)) if selected_plan_id is not None else None
+                    first_choice_center_name = self._registered_portal_advisor_center_name(row.get("first_choice"))
+                    second_choice_center_name = self._registered_portal_advisor_center_name(row.get("second_choice"))
+                    export_rows.append(
+                        self._build_registered_portal_student_export_row_from_detail(
+                            student_detail,
+                            application_status=(application_detail or {}).get("application_status"),
+                            application_id=application_id,
+                            application_business_key=row.get("business_key"),
+                            registered_at=self._registered_portal_student_export_text(
+                                student_detail.get("created_at")
+                                or student_detail.get("registered_at")
+                                or row.get("first_choice_screening_submitted_at")
+                                or row.get("second_choice_screening_submitted_at")
+                            ),
+                            plan_name=plan_name,
+                            first_choice_advisor_name=row.get("first_choice"),
+                            first_choice_screening_score=(application_detail or {}).get("first_choice_screening_score") if application_detail else None,
+                            first_choice_center_name=first_choice_center_name,
+                            second_choice_advisor_name=row.get("second_choice"),
+                            second_choice_screening_score=(application_detail or {}).get("second_choice_screening_score") if application_detail else None,
+                            second_choice_center_name=second_choice_center_name,
+                        )
+                    )
+            return build_registered_portal_students_template(export_rows)
         normalized_ids = self._resolve_registered_portal_student_export_ids(
             student_ids,
             keyword=keyword,
@@ -1275,11 +1621,21 @@ class RuntimeManagementStoreStudentsMixin:
             advisor_names=advisor_names,
             first_choice_advisor_names=first_choice_advisor_names,
             second_choice_advisor_names=second_choice_advisor_names,
+            first_choice_center_names=first_choice_center_names,
+            second_choice_center_names=second_choice_center_names,
             export_scope=export_scope,
             principal=principal,
         )
         if not normalized_ids:
             raise ValueError("当前筛选条件下无可导出的注册学生")
+
+        def _preference_advisor_name(items: list[Any], index: int) -> str | None:
+            if index < 0 or index >= len(items):
+                return None
+            item = items[index]
+            if isinstance(item, dict):
+                return item.get("advisor_name")
+            return getattr(item, "advisor_name", None)
 
         plan_name_map = {int(item.get("id") or 0): str(item.get("plan_name") or "") for item in self._list("recruitment_plans")}
         records: list[dict[str, Any]] = []
@@ -1299,15 +1655,39 @@ class RuntimeManagementStoreStudentsMixin:
             application_business_key = self._registered_portal_student_export_text(
                 latest_application_item.get("business_key") if latest_application_item else getattr(portal_student, "business_key", None)
             )
-            preference_items = list(((self._postgres_store.get_recruitment_application_detail(application_id) or {}).get("preferences") or [])) if application_id else []
+            application_detail = self._postgres_store.get_recruitment_application_detail(application_id) if application_id else None
+            preference_items = list((application_detail or {}).get("preferences") or []) if application_id else []
+            if not preference_items:
+                portal_draft = getattr(portal_student, "application_draft", None)
+                preference_items = list(getattr(portal_draft, "preferences", []) or [])
             first_choice_advisor_name = self._registered_portal_student_export_text(
-                (latest_application_item.get("first_choice") if latest_application_item else None)
-                or (preference_items[0].get("advisor_name") if len(preference_items) > 0 else None)
+                (application_detail or {}).get("first_choice")
+                or (latest_application_item.get("first_choice") if latest_application_item else None)
+                or getattr(portal_student, "first_choice", None)
+                or _preference_advisor_name(preference_items, 0)
             )
             second_choice_advisor_name = self._registered_portal_student_export_text(
-                (latest_application_item.get("second_choice") if latest_application_item else None)
-                or (preference_items[1].get("advisor_name") if len(preference_items) > 1 else None)
+                (application_detail or {}).get("second_choice")
+                or (latest_application_item.get("second_choice") if latest_application_item else None)
+                or getattr(portal_student, "second_choice", None)
+                or _preference_advisor_name(preference_items, 1)
             )
+            portal_application_draft = getattr(portal_student, "application_draft", None)
+            first_choice_screening_score = (application_detail or {}).get("first_choice_screening_score")
+            if first_choice_screening_score is None and latest_application_item is not None:
+                first_choice_screening_score = latest_application_item.get("first_choice_screening_score")
+            if first_choice_screening_score is None and isinstance(portal_application_draft, dict):
+                first_choice_screening_score = portal_application_draft.get("first_choice_screening_score")
+            if first_choice_screening_score is None:
+                first_choice_screening_score = getattr(portal_student, "first_choice_screening_score", None)
+
+            second_choice_screening_score = (application_detail or {}).get("second_choice_screening_score")
+            if second_choice_screening_score is None and latest_application_item is not None:
+                second_choice_screening_score = latest_application_item.get("second_choice_screening_score")
+            if second_choice_screening_score is None and isinstance(portal_application_draft, dict):
+                second_choice_screening_score = portal_application_draft.get("second_choice_screening_score")
+            if second_choice_screening_score is None:
+                second_choice_screening_score = getattr(portal_student, "second_choice_screening_score", None)
             plan_id = getattr(portal_student, "selected_plan_id", None)
             plan_name = plan_name_map.get(int(plan_id or 0)) if plan_id is not None else None
             records.append(
@@ -1319,7 +1699,11 @@ class RuntimeManagementStoreStudentsMixin:
                     self._registered_portal_student_export_text(getattr(portal_student, "created_at", None)),
                     plan_name,
                     first_choice_advisor_name=first_choice_advisor_name,
+                    first_choice_screening_score=first_choice_screening_score,
+                    first_choice_center_name=self._registered_portal_advisor_center_name(first_choice_advisor_name),
                     second_choice_advisor_name=second_choice_advisor_name,
+                    second_choice_screening_score=second_choice_screening_score,
+                    second_choice_center_name=self._registered_portal_advisor_center_name(second_choice_advisor_name),
                     preference_overrides=(
                         [self._registered_portal_export_namespace(item) for item in preference_items] if preference_items else None
                     ),

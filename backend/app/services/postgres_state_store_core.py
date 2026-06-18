@@ -1144,6 +1144,10 @@ class PostgresStateStoreCoreMixin:
             "selected_plan_name": row.get("selected_plan_name"),
             "selected_center_name": row.get("selected_team_name"),
             "selected_advisor_name": row.get("selected_advisor_name"),
+            "first_choice_center_name": row.get("first_choice_center_name"),
+            "second_choice_center_name": row.get("second_choice_center_name"),
+            "first_choice_screening_score": float(row["first_choice_screening_score"]) if row.get("first_choice_screening_score") is not None else None,
+            "second_choice_screening_score": float(row["second_choice_screening_score"]) if row.get("second_choice_screening_score") is not None else None,
             "recruitment_application_id": int(row.get("recruitment_application_id") or 0) or None,
             "candidate_no": (str(row.get("candidate_no") or row.get("recruitment_application_candidate_no") or "") or None),
             "recruitment_application_candidate_no": (str(row.get("recruitment_application_candidate_no") or "") or None),
@@ -1434,6 +1438,25 @@ class PostgresStateStoreCoreMixin:
         except ValueError:
             return text
         return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _to_optional_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
 
     @staticmethod
     def _split_delimited_values(value: Any) -> list[str]:

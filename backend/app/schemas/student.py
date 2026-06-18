@@ -71,6 +71,10 @@ class RegisteredPortalStudentRecord(BaseModel):
     selected_plan_name: str | None = None
     selected_center_name: str | None = None
     selected_advisor_name: str | None = None
+    first_choice_center_name: str | None = None
+    second_choice_center_name: str | None = None
+    first_choice_screening_score: float | None = None
+    second_choice_screening_score: float | None = None
     recruitment_application_id: int | None = None
     recruitment_application_candidate_no: str | None = None
     recruitment_application_business_key: str | None = None
@@ -93,6 +97,8 @@ class RegisteredPortalStudentExportRequest(BaseModel):
     advisor_names: list[str] = Field(default_factory=list)
     first_choice_advisor_names: list[str] = Field(default_factory=list)
     second_choice_advisor_names: list[str] = Field(default_factory=list)
+    first_choice_center_names: list[str] = Field(default_factory=list)
+    second_choice_center_names: list[str] = Field(default_factory=list)
     export_scope: str | None = None
 
 
@@ -152,6 +158,7 @@ class StudentOptionsResponse(BaseModel):
     status_options: list[SelectOption]
     degree_options: list[SelectOption]
     advisor_options: list[SelectOption]
+    center_advisor_options: list[SelectOption] = Field(default_factory=list)
     registered_portal_advisor_filter_options: list[SelectOption] = Field(default_factory=list)
     registered_portal_first_choice_advisor_filter_options: list[SelectOption] = Field(default_factory=list)
     registered_portal_second_choice_advisor_filter_options: list[SelectOption] = Field(default_factory=list)

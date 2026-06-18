@@ -4,7 +4,12 @@ from app.schemas.auth import UserProfile, UserProfileUpdate
 from app.schemas.common import SelectOption
 from app.schemas.dashboard import (
     DashboardOverview,
+    DashboardRecruitmentFirstChoicePendingGradingResponse,
+    DashboardRecruitmentFirstChoicePendingStudentListResponse,
     DashboardRecruitmentAdvisorChoiceDistributionResponse,
+    DashboardRecruitmentApplicationStatusResponse,
+    DashboardRecruitmentSecondChoicePendingGradingResponse,
+    DashboardRecruitmentSecondChoicePendingStudentListResponse,
     DashboardUndergraduateSchoolGroupDistributionResponse,
     DashboardUndergraduateSchoolRankingResponse,
     DashboardUndergraduateSchoolStudentListResponse,
@@ -27,7 +32,14 @@ from app.schemas.portal import (
     PortalTeamListResponse,
 )
 from app.schemas.recruitment import RecruitApplicationListResponse, RecruitPlanListResponse, RecruitmentOptionsResponse, RecruitStats, RecruitWorkbench
-from app.schemas.recruitment import RecruitApplicationImportResult
+from app.schemas.recruitment import (
+    AdvisorScreeningScoreUpdateRequest,
+    CampOfferImportResult,
+    CampOfferListResponse,
+    CampOfferRecord,
+    CampOfferUpsert,
+    RecruitApplicationImportResult,
+)
 from app.schemas.student import (
     CenterListResponse,
     CenterUpsert,
@@ -84,7 +96,9 @@ from app.schemas.training import (
 )
 from app.schemas.auth import Principal
 from app.schemas.workflow import WorkflowOptionsResponse, WorkflowStats, WorkflowTaskActionRequest, WorkflowTaskDetailResponse, WorkflowTaskListResponse, WorkflowTaskUpsert
+from app.services.dashboard_recruitment_status_stats_service import get_recruitment_application_status_stats
 from app.services.management_service import store
+from app.services.advisor_screening_score_service import update_advisor_screening_score as update_advisor_screening_score_service
 
 
 def get_dashboard_overview() -> DashboardOverview:
@@ -129,6 +143,64 @@ def get_dashboard_recruitment_advisor_choice_students(
     )
 
 
+def get_dashboard_recruitment_application_status_stats() -> DashboardRecruitmentApplicationStatusResponse:
+    return DashboardRecruitmentApplicationStatusResponse(items=get_recruitment_application_status_stats())
+
+
+def get_dashboard_first_choice_pending_grading_statistics(*, page: int = 1, page_size: int = 10, advisor_name: str | None = None) -> DashboardRecruitmentFirstChoicePendingGradingResponse:
+    from app.services.dashboard_recruitment_status_stats_service import get_first_choice_pending_grading_statistics
+
+    return DashboardRecruitmentFirstChoicePendingGradingResponse(**get_first_choice_pending_grading_statistics(page=page, page_size=page_size, advisor_name=advisor_name))
+
+
+def get_dashboard_second_choice_pending_grading_statistics(*, page: int = 1, page_size: int = 10, advisor_name: str | None = None) -> DashboardRecruitmentSecondChoicePendingGradingResponse:
+    from app.services.dashboard_recruitment_status_stats_service import get_second_choice_pending_grading_statistics
+
+    return DashboardRecruitmentSecondChoicePendingGradingResponse(**get_second_choice_pending_grading_statistics(page=page, page_size=page_size, advisor_name=advisor_name))
+
+
+def get_dashboard_second_choice_pending_student_list(
+    *,
+    page: int = 1,
+    page_size: int = 10,
+    advisor_name: str | None = None,
+    advisor_id: str | None = None,
+    keyword: str | None = None,
+) -> DashboardRecruitmentSecondChoicePendingStudentListResponse:
+    from app.services.dashboard_recruitment_status_stats_service import get_second_choice_pending_student_list
+
+    return DashboardRecruitmentSecondChoicePendingStudentListResponse(
+        **get_second_choice_pending_student_list(
+            page=page,
+            page_size=page_size,
+            advisor_name=advisor_name,
+            advisor_id=advisor_id,
+            keyword=keyword,
+        )
+    )
+
+
+def get_dashboard_first_choice_pending_student_list(
+    *,
+    page: int = 1,
+    page_size: int = 10,
+    advisor_name: str | None = None,
+    advisor_id: str | None = None,
+    keyword: str | None = None,
+) -> DashboardRecruitmentFirstChoicePendingStudentListResponse:
+    from app.services.dashboard_recruitment_status_stats_service import get_first_choice_pending_student_list
+
+    return DashboardRecruitmentFirstChoicePendingStudentListResponse(
+        **get_first_choice_pending_student_list(
+            page=page,
+            page_size=page_size,
+            advisor_name=advisor_name,
+            advisor_id=advisor_id,
+            keyword=keyword,
+        )
+    )
+
+
 def get_recruitment_workbench() -> RecruitWorkbench:
     return store.get_recruitment_workbench()
 
@@ -168,6 +240,10 @@ def get_registered_portal_student_list(
     advisor_names: list[str] | None = None,
     first_choice_advisor_names: list[str] | None = None,
     second_choice_advisor_names: list[str] | None = None,
+    first_choice_center_names: list[str] | None = None,
+    second_choice_center_names: list[str] | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
     page: int = 1,
     page_size: int = 10,
     principal=None,
@@ -180,6 +256,10 @@ def get_registered_portal_student_list(
         advisor_names=advisor_names,
         first_choice_advisor_names=first_choice_advisor_names,
         second_choice_advisor_names=second_choice_advisor_names,
+        first_choice_center_names=first_choice_center_names,
+        second_choice_center_names=second_choice_center_names,
+        sort_by=sort_by,
+        sort_order=sort_order,
         page=page,
         page_size=page_size,
         principal=principal,
@@ -200,6 +280,10 @@ def export_registered_portal_students(
     recruitment_application_status: str | None = None,
     show_all_background_assessed: bool = False,
     advisor_names: list[str] | None = None,
+    first_choice_advisor_names: list[str] | None = None,
+    second_choice_advisor_names: list[str] | None = None,
+    first_choice_center_names: list[str] | None = None,
+    second_choice_center_names: list[str] | None = None,
     export_scope: str | None = None,
     principal=None,
 ) -> bytes:
@@ -211,6 +295,10 @@ def export_registered_portal_students(
         recruitment_application_status=recruitment_application_status,
         show_all_background_assessed=show_all_background_assessed,
         advisor_names=advisor_names,
+        first_choice_advisor_names=first_choice_advisor_names,
+        second_choice_advisor_names=second_choice_advisor_names,
+        first_choice_center_names=first_choice_center_names,
+        second_choice_center_names=second_choice_center_names,
         export_scope=export_scope,
         principal=principal,
     )
@@ -380,6 +468,10 @@ def submit_advisor_screening_batch(payload, principal: Principal):
     return store.submit_advisor_screening_batch(payload, principal=principal)
 
 
+def update_advisor_screening_score(payload: AdvisorScreeningScoreUpdateRequest, principal: Principal):
+    return update_advisor_screening_score_service(payload, principal=principal)
+
+
 def confirm_initial_screening(application_id: int, payload, principal: Principal):
     return store.confirm_initial_screening(application_id, payload, principal=principal)
 
@@ -394,6 +486,97 @@ def delete_recruitment_application(application_id: int) -> None:
 
 def import_recruitment_applications(plan_id: int, rows: list[dict[str, Any]], principal: Principal | None = None) -> RecruitApplicationImportResult:
     return store.import_recruitment_applications(plan_id=plan_id, rows=rows, principal=principal)
+
+
+def get_camp_offer_list(
+    *,
+    keyword: str | None = None,
+    plan_id: int | None = None,
+    is_sent_mail: bool | None = None,
+    is_agree: bool | None = None,
+    first_choice_advisor: str | None = None,
+    first_choice_team: str | None = None,
+    first_choice_score_op: str | None = None,
+    first_choice_score: float | None = None,
+    second_choice_advisor: str | None = None,
+    second_choice_team: str | None = None,
+    second_choice_score_op: str | None = None,
+    second_choice_score: float | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> CampOfferListResponse:
+    return store.get_camp_offers(
+        keyword=keyword,
+        plan_id=plan_id,
+        is_sent_mail=is_sent_mail,
+        is_agree=is_agree,
+        first_choice_advisor=first_choice_advisor,
+        first_choice_team=first_choice_team,
+        first_choice_score_op=first_choice_score_op,
+        first_choice_score=first_choice_score,
+        second_choice_advisor=second_choice_advisor,
+        second_choice_team=second_choice_team,
+        second_choice_score_op=second_choice_score_op,
+        second_choice_score=second_choice_score,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def get_camp_offer_detail(offer_id: int) -> CampOfferRecord:
+    return store.get_camp_offer_detail(offer_id)
+
+
+def create_camp_offer(payload: CampOfferUpsert, principal: Principal | None = None) -> CampOfferRecord:
+    return store.create_camp_offer(payload, principal=principal)
+
+
+def update_camp_offer(offer_id: int, payload: CampOfferUpsert, principal: Principal | None = None) -> CampOfferRecord:
+    return store.update_camp_offer(offer_id, payload, principal=principal)
+
+
+def delete_camp_offer(offer_id: int, principal: Principal | None = None) -> None:
+    store.delete_camp_offer(offer_id, principal=principal)
+
+
+def import_camp_offers(rows: list[dict[str, Any]], plan_id: int | None = None, principal: Principal | None = None) -> CampOfferImportResult:
+    return store.import_camp_offers(rows=rows, plan_id=plan_id, principal=principal)
+
+
+def export_camp_offers(
+    *,
+    keyword: str | None = None,
+    plan_id: int | None = None,
+    is_sent_mail: bool | None = None,
+    is_agree: bool | None = None,
+    first_choice_advisor: str | None = None,
+    first_choice_team: str | None = None,
+    first_choice_score_op: str | None = None,
+    first_choice_score: float | None = None,
+    second_choice_advisor: str | None = None,
+    second_choice_team: str | None = None,
+    second_choice_score_op: str | None = None,
+    second_choice_score: float | None = None,
+    principal: Principal | None = None,
+) -> list[dict[str, Any]]:
+    return store.export_camp_offers(
+        keyword=keyword,
+        plan_id=plan_id,
+        is_sent_mail=is_sent_mail,
+        is_agree=is_agree,
+        first_choice_advisor=first_choice_advisor,
+        first_choice_team=first_choice_team,
+        first_choice_score_op=first_choice_score_op,
+        first_choice_score=first_choice_score,
+        second_choice_advisor=second_choice_advisor,
+        second_choice_team=second_choice_team,
+        second_choice_score_op=second_choice_score_op,
+        second_choice_score=second_choice_score,
+    )
 
 
 def export_recruitment_applications(

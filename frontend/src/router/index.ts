@@ -9,7 +9,9 @@ import AppLayout from '../layouts/AppLayout.vue'
 const DashboardView = () => import('../views/dashboard/DashboardView.vue')
 const RecruitmentWorkbenchView = () => import('../views/recruitment/RecruitmentWorkbenchView.vue')
 const NewsManagementView = () => import('../views/recruitment/NewsManagementView.vue')
+const CampOfferListView = () => import('../views/recruitment/CampOfferListView.vue')
 const StudentsView = () => import('../views/students/StudentsView.vue')
+const RegisteredStudentsView = () => import('../views/students/RegisteredStudentsView.vue')
 const TrainingView = () => import('../views/training/TrainingView.vue')
 const DegreeView = () => import('../views/degree/DegreeView.vue')
 const SystemView = () => import('../views/system/SystemView.vue')
@@ -20,6 +22,7 @@ const ProfileView = () => import('../views/profile/ProfileView.vue')
 const PortalHomeView = () => import('../views/home/PortalHomeView.vue')
 const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
 const StudentPortalApplicationV2View = () => import('../views/portal/StudentPortalApplicationV2View.vue')
+const OfferConfirmView = () => import('../../offer_page/OfferConfirmView.vue')
 
 const APP_TITLE = '上海人工智能实验室联培博士生申请系统'
 
@@ -30,6 +33,7 @@ const router = createRouter({
     { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
     { path: '/portal/home', component: PortalHomeView, meta: { public: true, portalProtected: true, title: '门户首页' } },
     { path: '/portal/application', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
+    { path: '/offer/confirm', component: OfferConfirmView, meta: { public: true, title: '入营名单确认' } },
     { path: '/portal/applicationv2', redirect: '/portal/application', meta: { public: true, portalProtected: true } },
     {
       path: '/',
@@ -38,10 +42,11 @@ const router = createRouter({
         { path: '', redirect: '/portal' },
         { path: 'dashboard', component: DashboardView, meta: { title: '经营总览', requiredPermission: 'dashboard:read' } },
         { path: 'recruitment', component: RecruitmentWorkbenchView, meta: { title: '招生计划', section: 'plans', requiredPermission: 'recruitment_plan:read' } },
-        { path: 'recruitment/registered-students', component: StudentsView, meta: { title: '注册学生管理', section: 'portal-registrations', requiredPermission: 'recruitment_registered_students:read' } },
+        { path: 'recruitment/registered-students', component: RegisteredStudentsView, meta: { title: '注册学生管理', section: 'portal-registrations', requiredPermission: 'recruitment_registered_students:read' } },
         { path: 'recruitment/news', component: NewsManagementView, meta: { title: '新闻管理', requiredPermission: 'news_management:read' } },
         { path: 'recruitment/advisor-screening', component: RecruitmentWorkbenchView, meta: { title: '导师初筛', section: 'advisor-screening', requiredPermission: 'recruitment_advisor_screening:read' } },
         { path: 'recruitment/initial-screening-confirmation', component: RecruitmentWorkbenchView, meta: { title: '初筛确认', section: 'initial-screening-confirmation', requiredPermission: 'recruitment_initial_screening_confirmation:read' } },
+        { path: 'recruitment/camp-offers', component: CampOfferListView, meta: { title: '入营名单', requiredPermission: 'recruitment_camp_offer:read' } },
         { path: 'students', redirect: '/students/records' },
         { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records', requiredPermission: 'students:read' } },
         { path: 'students/portal-registrations', redirect: '/recruitment/registered-students' },

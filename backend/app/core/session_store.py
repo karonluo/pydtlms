@@ -74,6 +74,24 @@ def validate_session(session_id: str, token_type: str) -> dict | None:
     return payload
 
 
+def renew_session(session_id: str, access_token_expires_in_minutes: int | None = None) -> dict | None:
+    payload = get_session_payload(session_id)
+    if not payload:
+        return None
+
+    now = datetime.now(UTC)
+    access_minutes = int(access_token_expires_in_minutes or settings.access_token_expire_minutes)
+    payload["last_seen_at"] = now.isoformat()
+    payload["access_expires_at"] = (now + timedelta(minutes=access_minutes)).isoformat()
+    payload["refresh_expires_at"] = (now + timedelta(minutes=settings.refresh_token_expire_minutes)).isoformat()
+
+    client = _client()
+    client.set(_session_key(session_id), json.dumps(payload, ensure_ascii=False), ex=settings.refresh_token_expire_minutes * 60)
+    client.set(_access_key(session_id), str(payload.get("username") or ""), ex=access_minutes * 60)
+    client.set(_refresh_key(session_id), str(payload.get("username") or ""), ex=settings.refresh_token_expire_minutes * 60)
+    return payload
+
+
 def revoke_session(session_id: str) -> None:
     client = _client()
     client.delete(_session_key(session_id), _access_key(session_id), _refresh_key(session_id))

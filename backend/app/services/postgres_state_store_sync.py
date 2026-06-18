@@ -1354,6 +1354,81 @@ class PostgresStateStoreSyncMixin:
         del plan_id
         self.sync_recruitment_plan(payload, None)
 
+    def create_camp_offer(self, payload: dict[str, Any], operation_log: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                self._sync_operation_log_in_tx(cur, operation_log)
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_plan_offer (
+                        candidate_no,
+                        plan_id,
+                        is_sent_mail,
+                        is_agree,
+                        reson,
+                        submitted_at,
+                        created_at,
+                        updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    RETURNING id
+                    """,
+                    (
+                        str(payload.get("candidate_no") or "").strip(),
+                        int(payload.get("plan_id") or 0),
+                        bool(payload.get("is_sent_mail") or False),
+                        payload.get("is_agree"),
+                        (str(payload.get("reason") or "").strip() or None),
+                        payload.get("student_offer_submitted_at"),
+                    ),
+                )
+                inserted = cur.fetchone() or {}
+            conn.commit()
+        return {"id": int(inserted.get("id") or 0)}
+
+    def update_camp_offer(self, offer_id: int, payload: dict[str, Any], operation_log: dict[str, Any] | None = None) -> bool:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_operation_log_in_tx(cur, operation_log)
+                cur.execute(
+                    """
+                    UPDATE dtlms_plan_offer
+                    SET
+                        candidate_no = %s,
+                        plan_id = %s,
+                        is_sent_mail = %s,
+                        is_agree = %s,
+                        reson = %s,
+                        submitted_at = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (
+                        str(payload.get("candidate_no") or "").strip(),
+                        int(payload.get("plan_id") or 0),
+                        bool(payload.get("is_sent_mail") or False),
+                        payload.get("is_agree"),
+                        (str(payload.get("reason") or "").strip() or None),
+                        payload.get("student_offer_submitted_at"),
+                        int(offer_id),
+                    ),
+                )
+                updated = cur.rowcount > 0
+            conn.commit()
+        return updated
+
+    def delete_camp_offer(self, offer_id: int, operation_log: dict[str, Any] | None = None) -> bool:
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_operation_log_in_tx(cur, operation_log)
+                cur.execute("DELETE FROM dtlms_plan_offer WHERE id = %s", (int(offer_id),))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        return deleted
+
     def sync_recruitment_plan(
         self,
         plan_payload: dict[str, Any],
@@ -1648,6 +1723,7 @@ class PostgresStateStoreSyncMixin:
         *,
         workflow_task: dict[str, Any] | None = None,
         counters: dict[str, int] | None = None,
+        persist_portal_student: bool = True,
     ) -> None:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
@@ -1802,23 +1878,110 @@ class PostgresStateStoreSyncMixin:
                         ),
                     )
 
+                if persist_portal_student:
+                    cur.execute(
+                        """
+                        INSERT INTO dtlms_portal_students (
+                            id, full_name, phone_number, email, id_number, password_hash, gender, birth_date,
+                            ethnic_group, native_place, marital_status, religious_belief, id_type, mailing_address,
+                            graduation_school, highest_degree, intended_field, political_status, english_level,
+                            family_info, education_experience, practice_experience, personal_profile,
+                            recommendation_notes, personal_statement_text, signed_agreement, selected_plan_id,
+                            selected_team_id, selected_team_name, selected_advisor_user_id, selected_advisor_name,
+                            application_draft,
+                            self_evaluation, submitted_at, account_status, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE
+                        SET full_name = EXCLUDED.full_name,
+                            phone_number = EXCLUDED.phone_number,
+                            email = EXCLUDED.email,
+                            id_number = EXCLUDED.id_number,
+                            password_hash = EXCLUDED.password_hash,
+                            gender = EXCLUDED.gender,
+                            birth_date = EXCLUDED.birth_date,
+                            ethnic_group = EXCLUDED.ethnic_group,
+                            native_place = EXCLUDED.native_place,
+                            marital_status = EXCLUDED.marital_status,
+                            religious_belief = EXCLUDED.religious_belief,
+                            id_type = EXCLUDED.id_type,
+                            mailing_address = EXCLUDED.mailing_address,
+                            graduation_school = EXCLUDED.graduation_school,
+                            highest_degree = EXCLUDED.highest_degree,
+                            intended_field = EXCLUDED.intended_field,
+                            political_status = EXCLUDED.political_status,
+                            english_level = EXCLUDED.english_level,
+                            family_info = EXCLUDED.family_info,
+                            education_experience = EXCLUDED.education_experience,
+                            practice_experience = EXCLUDED.practice_experience,
+                            personal_profile = EXCLUDED.personal_profile,
+                            recommendation_notes = EXCLUDED.recommendation_notes,
+                            personal_statement_text = EXCLUDED.personal_statement_text,
+                            signed_agreement = EXCLUDED.signed_agreement,
+                            selected_plan_id = EXCLUDED.selected_plan_id,
+                            selected_team_id = EXCLUDED.selected_team_id,
+                            selected_team_name = EXCLUDED.selected_team_name,
+                            selected_advisor_user_id = EXCLUDED.selected_advisor_user_id,
+                            selected_advisor_name = EXCLUDED.selected_advisor_name,
+                            application_draft = EXCLUDED.application_draft,
+                            self_evaluation = EXCLUDED.self_evaluation,
+                            submitted_at = EXCLUDED.submitted_at,
+                            account_status = EXCLUDED.account_status,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            int(portal_student_payload["id"]),
+                            portal_student_payload.get("full_name"),
+                            portal_student_payload.get("phone_number"),
+                            portal_student_payload.get("email"),
+                            portal_student_payload.get("id_number"),
+                            portal_student_payload.get("password_hash"),
+                            portal_student_payload.get("gender"),
+                            portal_student_payload.get("birth_date"),
+                            portal_student_payload.get("ethnic_group"),
+                            portal_student_payload.get("native_place"),
+                            portal_student_payload.get("marital_status"),
+                            portal_student_payload.get("religious_belief"),
+                            portal_student_payload.get("id_type"),
+                            portal_student_payload.get("mailing_address"),
+                            portal_student_payload.get("graduation_school"),
+                            portal_student_payload.get("highest_degree"),
+                            portal_student_payload.get("intended_field"),
+                            portal_student_payload.get("political_status"),
+                            portal_student_payload.get("english_level"),
+                            portal_student_payload.get("family_info"),
+                            portal_student_payload.get("education_experience"),
+                            portal_student_payload.get("practice_experience"),
+                            portal_student_payload.get("personal_profile"),
+                            portal_student_payload.get("recommendation_notes"),
+                            portal_student_payload.get("personal_statement_text"),
+                            portal_student_payload.get("signed_agreement"),
+                            portal_student_payload.get("selected_plan_id"),
+                            portal_student_payload.get("selected_team_id"),
+                            portal_student_payload.get("selected_team_name"),
+                            portal_student_payload.get("selected_advisor_user_id"),
+                            portal_student_payload.get("selected_advisor_name"),
+                            self._json_payload(portal_student_payload.get("application_draft")) if portal_student_payload.get("application_draft") is not None else None,
+                            portal_student_payload.get("self_evaluation"),
+                            portal_student_payload.get("submitted_at"),
+                            portal_student_payload.get("account_status"),
+                            portal_student_payload.get("created_at"),
+                            portal_student_payload.get("updated_at"),
+                        ),
+                    )
+
                 application_columns = [
                     "id",
                     "plan_id",
                     "portal_student_id",
-                    "business_key",
                     "student_name",
+                    "business_key",
                     "candidate_no",
-                    "gender",
-                    "graduation_school",
-                    "highest_degree",
-                    "intended_field_id",
-                    "application_status",
                     "review_round",
                     "first_choice",
                     "second_choice",
                     "first_choice_id",
                     "second_choice_id",
+                    "gender",
                     "political_status",
                     "marital_status",
                     "religious_belief",
@@ -1828,6 +1991,7 @@ class PostgresStateStoreSyncMixin:
                     "mailing_address",
                     "id_type",
                     "id_number",
+                    "graduation_school",
                     "undergraduate_school",
                     "accept_adjustment",
                     "undergraduate_average_score",
@@ -1838,6 +2002,8 @@ class PostgresStateStoreSyncMixin:
                     "graduate_gpa",
                     "graduate_rank",
                     "graduate_major",
+                    "highest_degree",
+                    "intended_field_id",
                     "intended_advisor_user_id",
                     "intended_advisor_name",
                     "discovery_channel",
@@ -1861,35 +2027,33 @@ class PostgresStateStoreSyncMixin:
                     "personal_statement_attachment",
                     "material_list_attachment",
                     "supplementary_profile",
+                    "application_status",
                     "created_at",
                     "updated_at",
                 ]
                 application_values = (
                     int(application_payload["id"]),
-                    int(application_payload.get("plan_id") or 0),
-                    int(application_payload.get("portal_student_id") or portal_student_payload["id"]),
+                    application_payload.get("plan_id"),
+                    int(portal_student_payload["id"]),
+                    portal_student_payload.get("full_name"),
                     application_payload.get("business_key"),
-                    application_payload.get("student_name"),
-                    application_payload.get("candidate_no") or application_payload.get("business_key"),
-                    application_payload.get("gender") or "未知",
-                    application_payload.get("graduation_school"),
-                    application_payload.get("highest_degree"),
-                    intended_field_id,
-                    self._map_application_status(str(application_payload.get("application_status") or "报名已提交")),
+                    application_payload.get("candidate_no"),
                     application_payload.get("review_round"),
                     application_payload.get("first_choice"),
                     application_payload.get("second_choice"),
                     application_payload.get("first_choice_id"),
                     application_payload.get("second_choice_id"),
-                    application_payload.get("political_status"),
-                    application_payload.get("marital_status"),
-                    application_payload.get("religious_belief"),
-                    application_payload.get("native_place"),
-                    application_payload.get("phone_number"),
-                    application_payload.get("email"),
-                    application_payload.get("mailing_address"),
-                    application_payload.get("id_type"),
-                    application_payload.get("id_number"),
+                    application_payload.get("gender") or portal_student_payload.get("gender"),
+                    application_payload.get("political_status") or portal_student_payload.get("political_status"),
+                    application_payload.get("marital_status") or portal_student_payload.get("marital_status"),
+                    application_payload.get("religious_belief") or portal_student_payload.get("religious_belief"),
+                    application_payload.get("native_place") or portal_student_payload.get("native_place"),
+                    application_payload.get("phone_number") or portal_student_payload.get("phone_number"),
+                    application_payload.get("email") or portal_student_payload.get("email"),
+                    application_payload.get("mailing_address") or portal_student_payload.get("mailing_address"),
+                    application_payload.get("id_type") or portal_student_payload.get("id_type"),
+                    application_payload.get("id_number") or portal_student_payload.get("id_number"),
+                    application_payload.get("graduation_school"),
                     application_payload.get("undergraduate_school"),
                     application_payload.get("accept_adjustment"),
                     application_payload.get("undergraduate_average_score"),
@@ -1900,6 +2064,8 @@ class PostgresStateStoreSyncMixin:
                     application_payload.get("graduate_gpa"),
                     application_payload.get("graduate_rank"),
                     application_payload.get("graduate_major"),
+                    application_payload.get("highest_degree"),
+                    intended_field_id,
                     application_payload.get("intended_advisor_user_id"),
                     application_payload.get("intended_advisor_name"),
                     application_payload.get("discovery_channel"),
@@ -1923,6 +2089,7 @@ class PostgresStateStoreSyncMixin:
                     application_payload.get("personal_statement_attachment"),
                     application_payload.get("material_list_attachment"),
                     application_payload.get("supplementary_profile"),
+                    application_payload.get("application_status") or "报名已提交",
                     application_payload.get("created_at") or application_payload.get("applied_at") or portal_student_payload.get("created_at"),
                     application_payload.get("updated_at") or application_payload.get("applied_at") or portal_student_payload.get("updated_at"),
                 )
@@ -2088,7 +2255,17 @@ class PostgresStateStoreSyncMixin:
                         english.get("certificate_attachment_name"),
                     )
 
+                family_member_rows = []
+                seen_relation_types: set[str] = set()
                 for member in draft.get("family_members", []):
+                    relation_type = str(member.get("relation_type") or "").strip()
+                    if relation_type and relation_type in seen_relation_types:
+                        continue
+                    if relation_type:
+                        seen_relation_types.add(relation_type)
+                    family_member_rows.append(member)
+
+                for member in family_member_rows:
                     cur.execute(
                         """
                         INSERT INTO dtlms_portal_application_family_members (
@@ -2113,7 +2290,7 @@ class PostgresStateStoreSyncMixin:
                             publish_or_index_month, achievement_month, award_name, award_rank,
                             award_certificate_attachment_url, awarding_organization, award_level,
                             award_year, description_text, responsibility_text
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (

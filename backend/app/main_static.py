@@ -13,6 +13,7 @@ FRONTEND_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public
 PORTAL_ATTACHMENTS_DIR = FRONTEND_PUBLIC_DIR / "portal-attachments"
 PORTAL_BROCHURES_DIR = FRONTEND_PUBLIC_DIR / "portal-brochures"
 NEWS_UPLOADS_DIR = FRONTEND_PUBLIC_DIR / "recruitment" / "news" / "uploads"
+OFFER_TEMPLATE_DIR = FRONTEND_PUBLIC_DIR / "recruitment" / "offer-templates"
 
 
 class SPAStaticFiles(StaticFiles):
@@ -58,6 +59,13 @@ def configure_static_frontend(target_app: FastAPI) -> None:
             "/portal-brochures",
             StaticFiles(directory=PORTAL_BROCHURES_DIR),
             name="portal-brochures",
+        )
+
+    if OFFER_TEMPLATE_DIR.exists():
+        target_app.mount(
+            "/recruitment/offer-templates",
+            StaticFiles(directory=OFFER_TEMPLATE_DIR),
+            name="offer-templates",
         )
 
     target_app.mount(

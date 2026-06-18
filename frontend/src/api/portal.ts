@@ -177,6 +177,7 @@ export type PortalStudentRecord = {
   english_level?: string | null
   family_info?: string | null
   education_experience?: string | null
+  education_experiences?: PortalEducationExperienceItem[]
   practice_experience?: string | null
   personal_profile?: string | null
   recommendation_notes?: string | null

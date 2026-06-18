@@ -1249,11 +1249,19 @@ const primaryPreference = computed(() => (form.preferences && form.preferences[0
 
 function applyProfile(profile: PortalStudentRecord) {
   const draft = profile.application_draft
+  const formalEducation = ensureEducationExperienceShape(profile.education_experiences?.length ? profile.education_experiences.map((item) => ({ ...item })) : null)
   const fallbackEducation = parseLegacyList<PortalEducationExperienceItem>(profile.education_experience)
   const fallbackPractice = parseLegacyList<PortalPracticeExperienceItem>(profile.practice_experience)
   const fallbackFamily = parseLegacyList<PortalFamilyMemberItem>(profile.family_info)
   const fallbackAchievements = parseLegacyList<PortalAchievementRecordItem>(profile.recommendation_notes)
   selectedPlanId.value = draft?.selected_plan_id || profile.selected_plan_id || null
+
+  const draftEducation = draft?.education_experiences?.length
+    ? ensureEducationExperienceShape(draft.education_experiences.map((item) => ({ ...item })))
+    : []
+  const educationByStatus = isSubmitted.value
+    ? [...formalEducation, ...draftEducation.filter((item) => !formalEducation.some((formalItem) => formalItem.sort_order === item.sort_order))]
+    : [...draftEducation, ...formalEducation.filter((item) => !draftEducation.some((draftItem) => draftItem.sort_order === item.sort_order))]
 
   Object.assign(form, createEmptyForm(), {
     plan_id: selectedPlanId.value || 0,
@@ -1283,8 +1291,8 @@ function applyProfile(profile: PortalStudentRecord) {
         : [createPreference(1, false)],
     ),
     education_experiences: ensureEducationExperienceShape(
-      draft?.education_experiences?.length
-        ? draft.education_experiences.map((item) => ({ ...item }))
+      educationByStatus.length
+        ? educationByStatus.map((item) => ({ ...item }))
         : fallbackEducation.length
           ? fallbackEducation.map((item) => ({ ...item }))
           : createDefaultEducationExperiences(),

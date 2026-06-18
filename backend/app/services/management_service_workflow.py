@@ -815,6 +815,7 @@ class RuntimeManagementStoreWorkflowMixin:
         workflow_task: dict[str, Any] | None = None,
         created_application: bool = False,
         created_workflow_task: bool = False,
+        persist_portal_student: bool = True,
     ) -> None:
         counters = {"operation_logs": int(self._counters.get("operation_logs", 0))}
         if created_application:
@@ -827,6 +828,7 @@ class RuntimeManagementStoreWorkflowMixin:
             operation_log,
             workflow_task=workflow_task,
             counters=counters,
+            persist_portal_student=persist_portal_student,
         )
 
     def _persist_student_change(

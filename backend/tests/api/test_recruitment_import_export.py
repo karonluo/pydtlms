@@ -81,6 +81,52 @@ def test_export_recruitment_applications_endpoint_returns_excel_stream(monkeypat
     assert "attachment; filename*=UTF-8''" in response.headers["content-disposition"]
 
 
+def test_create_advisor_screening_export_job_preserves_requested_scope(monkeypatch, client: TestClient) -> None:
+    access_token = _install_principal_resolution(monkeypatch, "advisor.liu", ["recruitment_advisor_screening:read"])
+
+    captured: dict[str, object] = {}
+
+    def fake_create_registered_portal_student_export_job(payload, principal):
+        captured["payload"] = payload.model_dump(mode="python")
+        captured["principal_username"] = principal.username
+        return {
+            "message": "开始导出，请等待完成",
+            "job": {
+                "job_id": "job-1",
+                "status": "pending",
+                "file_name": "导师初筛导出.xlsx",
+                "created_at": "2026-06-16T00:00:00",
+                "started_at": None,
+                "completed_at": None,
+                "failed_at": None,
+                "error_message": None,
+                "download_url": None,
+                "is_read": True,
+            },
+        }
+
+    monkeypatch.setattr("app.api.v1.recruitment.create_registered_portal_student_export_job", fake_create_registered_portal_student_export_job)
+
+    response = client.post(
+        "/api/v1/recruitment/advisor-screening/export-jobs",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "ids": [1, 2],
+            "keyword": "张",
+            "advisor_names": [],
+            "first_choice_advisor_names": [],
+            "second_choice_advisor_names": [],
+            "export_scope": "advisor_screening_submitted",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["principal_username"] == "advisor.liu"
+    assert captured["payload"]["ids"] == []
+    assert captured["payload"]["keyword"] == "张"
+    assert captured["payload"]["export_scope"] == "advisor_screening_submitted"
+
+
 def test_download_recruitment_application_template_returns_blank_excel(monkeypatch, client: TestClient) -> None:
     access_token = _install_principal_resolution(monkeypatch, "recruiter", ["recruitment:read"])
     monkeypatch.setattr("app.api.v1.recruitment.export_recruitment_application_blank_template", lambda: b"blank-template")

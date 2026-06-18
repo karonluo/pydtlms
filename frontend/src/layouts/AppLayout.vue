@@ -75,6 +75,7 @@ const menuGroups: MenuGroup[] = [
         items: [
           { path: '/recruitment/advisor-screening', label: '导师初筛', icon: Files, requiredPermission: 'recruitment_advisor_screening:read' },
           { path: '/recruitment/initial-screening-confirmation', label: '初筛确认', icon: Files, requiredPermission: 'recruitment_initial_screening_confirmation:read' },
+          { path: '/recruitment/camp-offers', label: '入营名单', icon: Files, requiredPermission: 'recruitment_camp_offer:read' },
         ],
       },
     ],
