@@ -1022,11 +1022,26 @@ class PortalAdvisorRecord(BaseModel):
     introduction: str | None = None
 
 
+
+class PortalTeamDirector(BaseModel):
+    """门户端研究中心负责人（来源表 dtlms_team_leaders）。
+
+    多值设计：dtlms_teams.lead_user_id 字段为历史单值设计，数据库层保留不动；
+    实际负责人数据统一从 dtlms_team_leaders 表读取。
+    """
+    user_id: int
+    full_name: str
+
+
 class PortalTeamRecord(BaseModel):
     id: int
     team_name: str
-    lead_user_id: int | None = None
-    lead_advisor_name: str
+    # 旧字段保留以兼容老调用方，新代码请使用 directors / lead_advisor_names
+    lead_user_id: int | None = None  # 已废弃：保留仅用于兼容，等同于 directors[0].user_id
+    lead_advisor_name: str  # 已废弃：保留仅用于兼容，等同于 ",".join(lead_advisor_names)
+    # 新字段（多值设计）
+    lead_advisor_names: list[str] = Field(default_factory=list)
+    directors: list[PortalTeamDirector] = Field(default_factory=list)
     advisor_names: list[str] = Field(default_factory=list)
     advisor_ids: list[int] = Field(default_factory=list)
     advisor_relation_ids: list[int] = Field(default_factory=list)
@@ -1034,7 +1049,6 @@ class PortalTeamRecord(BaseModel):
     discipline_name: str
     research_directions: list[str] = Field(default_factory=list)
     description: str | None = None
-
 
 class PortalTeamListResponse(BaseModel):
     items: list[PortalTeamRecord] = Field(default_factory=list)

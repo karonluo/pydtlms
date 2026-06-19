@@ -69,6 +69,7 @@ from app.schemas.recruitment import (
 )
 from app.schemas.student import (
     CenterAdvisorMapItem,
+    CenterDirector,
     CenterListResponse,
     CenterRecord,
     CenterUpsert,

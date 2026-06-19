@@ -246,12 +246,20 @@ export type PortalProfileOptionsResponse = {
 export type PortalPublicConfigResponse = {
   portal_admissions_info_url: string
 }
+export type PortalTeamDirector = {
+  user_id: number
+  full_name: string
+}
 
 export type PortalTeamRecord = {
   id: number
   team_name: string
-  lead_user_id?: number | null
-  lead_advisor_name: string
+  // 旧字段保留以兼容老调用方，新代码请使用 lead_advisor_names / directors
+  lead_user_id?: number | null  // 已废弃：保留仅用于兼容，等同于 directors[0].user_id
+  lead_advisor_name: string  // 已废弃：保留仅用于兼容，等同于 ",".join(lead_advisor_names)
+  // 新字段（多值设计）
+  lead_advisor_names: string[]
+  directors: PortalTeamDirector[]
   advisor_names: string[]
   advisor_ids: number[]
   advisor_relation_ids: number[]

@@ -868,11 +868,19 @@ class RuntimeManagementStoreCoreMixin:
         members = [student for student in self._list("students") if student.get("team_name") == item["team_name"]]
         active_statuses = {"在校", "实习中", "外出研修", "请假中", "学位论文阶段"}
         advisor_names = self._normalize_name_list(item.get("advisor_names", []), item.get("lead_advisor_name"))
+        # 兼容：item 里有 director_ids（多值）则用它，否则从 director_id（单值）构造
+        _director_ids: list[int] = [int(v) for v in (item.get("director_ids") or []) if v is not None and int(v or 0) > 0]
+        _single_director_id = int(item.get("director_id") or 0) or None
+        if not _director_ids and _single_director_id:
+            _director_ids = [_single_director_id]
+        _directors: list[dict[str, Any]] = list(item.get("directors") or [])
         return CenterRecord(
             id=item["id"],
             center_name=item["team_name"],
             director_name=self._resolve_center_director_name(item, advisor_names),
-            director_id=int(item.get("director_id") or 0) or None,
+            director_id=_single_director_id,
+            director_ids=_director_ids,
+            directors=_directors,
             advisor_names=advisor_names,
             advisor_ids=[int(value) for value in (item.get("advisor_ids") or self._best_effort_advisor_ids(advisor_names)) if value is not None],
             advisor_relation_ids=[int(value) for value in (item.get("advisor_relation_ids") or []) if value is not None],
@@ -881,7 +889,6 @@ class RuntimeManagementStoreCoreMixin:
             member_student_count=len(members),
             active_student_count=len([student for student in members if student.get("status") in active_statuses]),
         )
-
     def _ensure_team_exists(self, team_name: str | None = None, team_id: int | None = None) -> dict[str, Any]:
         team = None
         if team_id is not None:
@@ -1039,14 +1046,23 @@ class RuntimeManagementStoreCoreMixin:
         for item in self._list("teams"):
             if item["team_name"] == payload.center_name and item["id"] != current_center_id:
                 raise ValueError("Center name already exists")
-        director_name = self._resolve_advisor_name(payload.director_id, payload.director_name)
+        # 兼容 payload.director_ids（多值，新设计）优先；payload.director_id（单值）兼容
+        _resolved_director_ids: list[int] = [int(v) for v in (payload.director_ids or []) if v is not None and int(v or 0) > 0]
+        if not _resolved_director_ids and payload.director_id:
+            _resolved_director_ids = [int(payload.director_id)]
+        if not _resolved_director_ids:
+            raise ValueError("请选择至少一个研究中心负责人（director_ids 不能为空）")
+        # 取第一个作为 lead_advisor_name 展示用
+        _primary_director_id: int = _resolved_director_ids[0]
+        director_name = self._resolve_advisor_name(_primary_director_id, payload.director_name)
         advisor_names = self._normalize_name_list(self._resolve_advisor_names(payload.advisor_ids, payload.advisor_names), director_name)
         if not advisor_names:
             raise ValueError("Center must contain at least one advisor")
         return {
             "team_name": payload.center_name,
             "lead_advisor_name": director_name,
-            "director_id": payload.director_id,
+            "director_id": _primary_director_id,
+            "director_ids": _resolved_director_ids,
             "advisor_names": advisor_names,
             "advisor_ids": [int(item) for item in (payload.advisor_ids or self._best_effort_advisor_ids(advisor_names)) if item is not None],
             "advisor_relation_ids": [int(item) for item in payload.advisor_relation_ids if item is not None],

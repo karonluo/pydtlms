@@ -194,12 +194,13 @@ class RuntimeManagementStoreStudentsMixin:
                 items, _ = list_centers_page(
                     keyword=None,
                     is_enabled=None,
-                    director_id=None,
+                    director_ids=None,
                     page=1,
                     page_size=1000,
                 )
-            except Exception:
                 items = []
+            except Exception:
+                pass
             for item in items:
                 row = dict(item)
                 center_name = self._registered_portal_student_export_text(row.get("center_name") or row.get("team_name"))
@@ -1422,16 +1423,23 @@ class RuntimeManagementStoreStudentsMixin:
         self,
         keyword: str | None = None,
         is_enabled: bool | None = None,
+        # 旧入参 director_id（单值）保留以兼容老调用方，新代码请使用 director_ids（多值）
         director_id: int | None = None,
+        director_ids: list[int] | None = None,
         principal: Principal | dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> CenterListResponse:
+        # 兼容处理：director_id（单值）合并进 director_ids（多值）；director_ids 优先
+        _merged_director_ids: list[int] = list(director_ids or [])
+        if director_id and int(director_id) not in _merged_director_ids:
+            _merged_director_ids.append(int(director_id))
+        _effective_director_ids: list[int] | None = _merged_director_ids or None
         try:
             items, total = self._postgres_store.list_centers_page(
                 keyword=keyword,
                 is_enabled=is_enabled,
-                director_id=director_id,
+                director_ids=_effective_director_ids,
                 principal=principal,
                 page=page,
                 page_size=page_size,

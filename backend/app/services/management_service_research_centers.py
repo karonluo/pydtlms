@@ -53,17 +53,50 @@ class RuntimeManagementStoreResearchCenterMixin:
 
     def _build_center_record(self, row: dict[str, Any], *, member_student_count: int = 0, active_student_count: int = 0, student_count: int = 0) -> CenterRecord:
         lead_user_id = int(row.get("lead_user_id") or 0) or None
+        # Read multi-director from row.directors / row.director_ids; fall back to lead_user_id.
+        _directors_raw = row.get("directors") or []
+        directors: list[CenterDirector] = []
+        for _item in _directors_raw:
+            if not _item:
+                continue
+            if isinstance(_item, dict):
+                _uid = int(_item.get("user_id") or _item.get("id") or 0) or 0
+                _fname = self._normalize_text(_item.get("full_name"))
+                if _uid > 0 and _fname:
+                    directors.append(CenterDirector(user_id=_uid, full_name=_fname))
+            elif isinstance(_item, (list, tuple)) and len(_item) >= 2:
+                _uid = int(_item[0] or 0) or 0
+                _fname = self._normalize_text(_item[1])
+                if _uid > 0 and _fname:
+                    directors.append(CenterDirector(user_id=_uid, full_name=_fname))
+        director_ids: list[int] = [int(v) for v in (row.get("director_ids") or []) if int(v or 0) > 0]
         lead_user_name = self._normalize_text(row.get("lead_user_name"))
-        if not lead_user_name and lead_user_id is not None:
-            lead_user_name = self._center_user_name_by_id(lead_user_id) or ""
+        if not directors and lead_user_id is not None:
+            # Fallback: synthesize one director from lead_user_id if no dtlms_team_leaders data.
+            if not lead_user_name:
+                lead_user_name = self._center_user_name_by_id(lead_user_id) or ""
+            if lead_user_name:
+                directors.append(CenterDirector(user_id=lead_user_id, full_name=lead_user_name))
+                if lead_user_id not in director_ids:
+                    director_ids.insert(0, lead_user_id)
+        if directors:
+            director_name = "、".join(d.full_name for d in directors)
+            if lead_user_id is None:
+                lead_user_id = directors[0].user_id
+        elif lead_user_name:
+            director_name = lead_user_name
+        else:
+            director_name = ""
         advisor_names = [self._normalize_text(item) for item in (row.get("advisor_names") or []) if self._normalize_text(item)]
         advisor_ids = [int(item) for item in (row.get("advisor_ids") or []) if int(item or 0) > 0]
         advisor_relation_ids = [int(item) for item in (row.get("advisor_relation_ids") or []) if int(item or 0) > 0]
         return CenterRecord(
             id=int(row.get("id") or 0),
             center_name=self._normalize_text(row.get("team_name")),
-            director_name=lead_user_name,
+            director_name=director_name,
             director_id=lead_user_id,
+            director_ids=director_ids,
+            directors=directors,
             advisor_names=advisor_names,
             advisor_ids=advisor_ids,
             advisor_relation_ids=advisor_relation_ids,
@@ -135,11 +168,19 @@ class RuntimeManagementStoreResearchCenterMixin:
         self,
         keyword: str | None = None,
         is_enabled: bool | None = None,
+        # 旧入参 director_id（单值）保留以兼容老调用方，新代码请使用 director_ids（多值）
         director_id: int | None = None,
+        director_ids: list[int] | None = None,
         principal: Principal | dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> CenterListResponse:
+        # 兼容合并 director_id + director_ids
+        _merged_director_ids: list[int] = list(director_ids or [])
+        if director_id and int(director_id) not in _merged_director_ids:
+            _merged_director_ids.append(int(director_id))
+        _effective_director_ids: list[int] | None = _merged_director_ids or None
+
         self._ensure_center_schema()
         if not self._center_store_uses_database():
             list_centers_page = getattr(self._postgres_store, "list_centers_page", None)
@@ -147,7 +188,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                 items, total = list_centers_page(
                     keyword=keyword,
                     is_enabled=is_enabled,
-                    director_id=director_id,
+                    director_ids=_effective_director_ids,
                     page=page,
                     page_size=page_size,
                     principal=principal,
@@ -191,11 +232,14 @@ class RuntimeManagementStoreResearchCenterMixin:
         if is_enabled is not None:
             where_clauses.append("t.team_status = %s" if is_enabled else "t.team_status <> %s")
             params.append("active")
-        if director_id:
-            where_clauses.append("COALESCE(t.lead_user_id, 0) = %s")
-            params.append(int(director_id))
+        if _effective_director_ids:
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM dtlms_team_leaders tl_scope WHERE tl_scope.team_id = t.id AND tl_scope.user_id = ANY(%s))"
+            )
+            params.append(list(_effective_director_ids))
         # Mirror the postgres path's advisor scope filter so an advisor only
-        # sees centers they lead or belong to.
+        # sees centers they lead or belong to. "Lead" now means appearing in
+        # dtlms_team_leaders (multi-value), not the legacy dtlms_teams.lead_user_id.
         _role_codes = set()
         if principal is not None:
             _raw_roles = getattr(principal, "roles", None)
@@ -212,9 +256,13 @@ class RuntimeManagementStoreResearchCenterMixin:
             where_clauses.append(
                 """
                 (
-                    COALESCE(t.lead_user_id, 0) = (
-                        SELECT u.id FROM dtlms_users u
-                        WHERE u.username = %s AND u.is_deleted = FALSE LIMIT 1
+                    EXISTS (
+                        SELECT 1 FROM dtlms_team_leaders tl_scope
+                        JOIN dtlms_users lead_user_scope
+                          ON lead_user_scope.id = tl_scope.user_id
+                         AND lead_user_scope.is_deleted = FALSE
+                        WHERE tl_scope.team_id = t.id
+                          AND lead_user_scope.username = %s
                     )
                     OR EXISTS (
                         SELECT 1 FROM dtlms_team_advisors ta_scope
@@ -224,7 +272,6 @@ class RuntimeManagementStoreResearchCenterMixin:
                         WHERE ta_scope.team_id = t.id
                           AND ta_scope.is_deleted = FALSE
                           AND advisor_scope.username = %s
-                          AND advisor_scope.is_deleted = FALSE
                     )
                 )
                 """
@@ -253,6 +300,8 @@ class RuntimeManagementStoreResearchCenterMixin:
                         t.team_name,
                         t.lead_user_id,
                         lead_user.full_name AS lead_user_name,
+                        COALESCE(team_leaders.director_ids, ARRAY[]::bigint[]) AS director_ids,
+                        COALESCE(team_leaders.directors_json, '[]'::jsonb) AS directors,
                         COALESCE(advisor_rows.advisor_names, ARRAY[]::text[]) AS advisor_names,
                         COALESCE(advisor_rows.advisor_names_arr, ARRAY[]::text[]) AS advisor_names_arr,
                         COALESCE(advisor_rows.advisor_ids, ARRAY[]::bigint[]) AS advisor_ids,
@@ -285,6 +334,14 @@ class RuntimeManagementStoreResearchCenterMixin:
                                                     AND ta.is_deleted = FALSE
                                                     AND r.role_code = 'advisor'
                                         ) advisor_rows ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            array_agg(tl.user_id ORDER BY u.full_name, tl.user_id) AS director_ids,
+                            COALESCE(jsonb_agg(jsonb_build_object('user_id', tl.user_id, 'full_name', u.full_name) ORDER BY u.full_name, tl.user_id), '[]'::jsonb) AS directors_json
+                        FROM dtlms_team_leaders tl
+                        JOIN dtlms_users u ON u.id = tl.user_id AND u.is_deleted = FALSE
+                        WHERE tl.team_id = t.id
+                    ) team_leaders ON TRUE
                     LEFT JOIN LATERAL (
                         SELECT
                             COUNT(*) AS member_student_count,
@@ -363,7 +420,21 @@ class RuntimeManagementStoreResearchCenterMixin:
                 if not team_name:
                     raise ValueError("中心名称不能为空")
                 established_on = self._normalize_center_date(payload.created_date)
-                lead_user_id = int(payload.director_id or 0) or None
+                # 优先从 director_ids（多值）取负责人；向后兼容 director_id / director_name
+                director_user_ids: list[int] = []
+                for item in (payload.director_ids or []):
+                    try:
+                        integer = int(item)
+                    except (TypeError, ValueError):
+                        continue
+                    if integer > 0 and integer not in director_user_ids:
+                        director_user_ids.append(integer)
+                if not director_user_ids and payload.director_id:
+                    try:
+                        director_user_ids.append(int(payload.director_id))
+                    except (TypeError, ValueError):
+                        pass
+                lead_user_id: int | None = director_user_ids[0] if director_user_ids else None
                 lead_user_name = self._normalize_text(payload.director_name)
                 if lead_user_id is None and lead_user_name:
                     lead_user_id = self._resolve_advisor_user_id_by_name(lead_user_name)
@@ -373,6 +444,10 @@ class RuntimeManagementStoreResearchCenterMixin:
                 if lead_user_id not in advisor_user_ids:
                     advisor_user_ids.insert(0, lead_user_id)
                 team_code = f"CENTER-{uuid4().hex[:12].upper()}"
+                # Sync dtlms_teams_id_seq with MAX(id) to avoid UniqueViolation on physically-deleted IDs.
+                cur.execute(
+                    "SELECT setval('dtlms_teams_id_seq', COALESCE((SELECT MAX(id) FROM dtlms_teams), 1), true)",
+                )
                 cur.execute(
                     """
                     INSERT INTO dtlms_teams (
@@ -402,6 +477,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                 team_row = dict(cur.fetchone() or {})
                 team_id = int(team_row.get("id") or 0)
                 self._sync_center_advisor_relations(cur, team_id, advisor_user_ids)
+                self._sync_center_leaders(cur, team_id, director_user_ids)
                 row = self._load_center_row(cur, team_id)
             conn.commit()
         return self._build_center_record(row)
@@ -451,7 +527,21 @@ class RuntimeManagementStoreResearchCenterMixin:
                 if not team_name:
                     raise ValueError("中心名称不能为空")
                 established_on = self._normalize_center_date(payload.created_date)
-                lead_user_id = int(payload.director_id or 0) or None
+                # 优先从 director_ids（多值）取负责人；向后兼容 director_id / director_name
+                director_user_ids: list[int] = []
+                for item in (payload.director_ids or []):
+                    try:
+                        integer = int(item)
+                    except (TypeError, ValueError):
+                        continue
+                    if integer > 0 and integer not in director_user_ids:
+                        director_user_ids.append(integer)
+                if not director_user_ids and payload.director_id:
+                    try:
+                        director_user_ids.append(int(payload.director_id))
+                    except (TypeError, ValueError):
+                        pass
+                lead_user_id: int | None = director_user_ids[0] if director_user_ids else None
                 lead_user_name = self._normalize_text(payload.director_name)
                 if lead_user_id is None and lead_user_name:
                     lead_user_id = self._resolve_advisor_user_id_by_name(lead_user_name)
@@ -486,6 +576,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                     ),
                 )
                 self._sync_center_advisor_relations(cur, int(center_id), advisor_user_ids)
+                self._sync_center_leaders(cur, int(center_id), director_user_ids)
                 row = self._load_center_row(cur, int(center_id)) or dict(cur.fetchone() or {})
             conn.commit()
         return self._build_center_record(row)
@@ -500,21 +591,29 @@ class RuntimeManagementStoreResearchCenterMixin:
 
         with self._postgres_store._connect(settings.postgres_db) as conn:
             with conn.cursor() as cur:
+                # Physical delete: drop related rows first, then the team row.
                 cur.execute(
                     """
-                    DELETE FROM dtlms_team_advisors
+                    DELETE FROM dtlms_team_leaders
                     WHERE team_id = %s
-                    """,
+                    """
+                    ,
                     (int(center_id),),
                 )
                 cur.execute(
                     """
-                    UPDATE dtlms_teams
-                    SET is_deleted = TRUE,
-                        team_status = 'archived',
-                        updated_at = CURRENT_TIMESTAMP
+                    DELETE FROM dtlms_team_advisors
+                    WHERE team_id = %s
+                    """
+                    ,
+                    (int(center_id),),
+                )
+                cur.execute(
+                    """
+                    DELETE FROM dtlms_teams
                     WHERE id = %s
-                    """,
+                    """
+                    ,
                     (int(center_id),),
                 )
                 if cur.rowcount <= 0:
@@ -541,11 +640,21 @@ class RuntimeManagementStoreResearchCenterMixin:
                 t.team_status,
                 t.established_on,
                 t.description,
-                t.created_at
+                t.created_at,
+                COALESCE(team_leaders.director_ids, ARRAY[]::bigint[]) AS director_ids,
+                COALESCE(team_leaders.directors_json, '[]'::jsonb) AS directors
             FROM dtlms_teams t
             LEFT JOIN dtlms_users lead_user
               ON lead_user.id = t.lead_user_id
              AND lead_user.is_deleted = FALSE
+            LEFT JOIN LATERAL (
+                SELECT
+                    array_agg(tl.user_id ORDER BY u.full_name, tl.user_id) AS director_ids,
+                    COALESCE(jsonb_agg(jsonb_build_object('user_id', tl.user_id, 'full_name', u.full_name) ORDER BY u.full_name, tl.user_id), '[]'::jsonb) AS directors_json
+                FROM dtlms_team_leaders tl
+                JOIN dtlms_users u ON u.id = tl.user_id AND u.is_deleted = FALSE
+                WHERE tl.team_id = t.id
+            ) team_leaders ON TRUE
             WHERE t.id = %s
               AND t.is_deleted = FALSE
             """,
@@ -579,6 +688,42 @@ class RuntimeManagementStoreResearchCenterMixin:
                 row = cur.fetchone()
                 return int(row[0]) if row else None
 
+    def _sync_center_leaders(self, cur: Any, center_id: int, director_user_ids: list[int]) -> None:
+        # Sync director_ids into dtlms_team_leaders (delete then insert, ON CONFLICT DO NOTHING).
+        try:
+            cur.execute(
+                """
+                DELETE FROM dtlms_team_leaders WHERE team_id = %s
+                """,
+                (int(center_id),),
+            )
+        except Exception as exc:
+            logger.warning("dtlms_team_leaders DELETE skipped: %s", exc)
+            return
+        unique: list[int] = []
+        seen: set[int] = set()
+        for item in director_user_ids or []:
+            try:
+                integer = int(item)
+            except (TypeError, ValueError):
+                continue
+            if integer <= 0 or integer in seen:
+                continue
+            seen.add(integer)
+            unique.append(integer)
+        for user_id in unique:
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO dtlms_team_leaders (team_id, user_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (team_id, user_id) DO NOTHING
+                    """,
+                    (int(center_id), int(user_id)),
+                )
+            except Exception as exc:
+                logger.warning("dtlms_team_leaders INSERT failed (team_id=%s, user_id=%s): %s", center_id, user_id, exc)
+
     def _sync_center_advisor_relations(self, cur: Any, center_id: int, advisor_user_ids: list[int]) -> None:
         cur.execute(
             """
@@ -605,17 +750,24 @@ class RuntimeManagementStoreResearchCenterMixin:
 def get_center_list(
     keyword: str | None = None,
     is_enabled: bool | None = None,
+    # 旧入参 director_id（单值）保留以兼容老调用方，新代码请使用 director_ids（多值）
     director_id: int | None = None,
+    director_ids: list[int] | None = None,
     principal: Principal | dict[str, Any] | None = None,
     page: int = 1,
     page_size: int = 10,
 ) -> CenterListResponse:
     from .management_service import store
 
+    # 兼容处理：director_id（单值）合并进 director_ids（多值）；director_ids 优先
+    merged: list[int] = list(director_ids or [])
+    if director_id and int(director_id) not in merged:
+        merged.append(int(director_id))
+
     return store.get_centers(
         keyword=keyword,
         is_enabled=is_enabled,
-        director_id=director_id,
+        director_ids=merged or None,
         principal=principal,
         page=page,
         page_size=page_size,

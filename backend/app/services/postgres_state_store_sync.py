@@ -2666,6 +2666,21 @@ class PostgresStateStoreSyncMixin:
                 self._sync_runtime_counters_in_tx(cur, counters)
                 self._sync_operation_log_in_tx(cur, operation_log)
 
+                # 多值负责人（dtlms_team_leaders）解析：director_ids 优先，director_id（单值）兼容
+                _director_ids_raw = team_payload.get("director_ids") or []
+                director_ids: list[int] = []
+                _seen_d: set[int] = set()
+                for _d in _director_ids_raw:
+                    try:
+                        _d_int = int(_d)
+                    except (TypeError, ValueError):
+                        continue
+                    if _d_int > 0 and _d_int not in _seen_d:
+                        _seen_d.add(_d_int)
+                        director_ids.append(_d_int)
+                # 兼容 payload.director_id（单值）
+                if not director_ids and lead_user_id:
+                    director_ids = [lead_user_id]
                 lead_user_id = int(team_payload.get("director_id") or team_payload.get("lead_user_id") or 0) or None
                 advisor_user_ids = [int(item) for item in (team_payload.get("advisor_ids") or []) if int(item or 0) > 0]
                 if lead_user_id and lead_user_id not in advisor_user_ids:
@@ -2764,6 +2779,13 @@ class PostgresStateStoreSyncMixin:
                         ) VALUES (%s, %s, %s, %s, %s, NULL, FALSE)
                         """,
                         (int(team_payload["id"]), advisor_id, advisor_user_id, advisor_role, established_on),
+                    )
+                # 同步 dtlms_team_leaders（多值负责人）：先清空该中心所有负责人，再重新插入
+                cur.execute("DELETE FROM dtlms_team_leaders WHERE team_id = %s", (int(team_payload["id"]),))
+                for _director_user_id in director_ids:
+                    cur.execute(
+                        """INSERT INTO dtlms_team_leaders (team_id, user_id) VALUES (%s, %s) ON CONFLICT (team_id, user_id) DO NOTHING""",
+                        (int(team_payload["id"]), int(_director_user_id)),
                     )
             conn.commit()
 
@@ -2868,7 +2890,7 @@ class PostgresStateStoreSyncMixin:
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
             with conn.cursor() as cur:
-                self._sync_runtime_counters_in_tx(cur, counters)
+                cur.execute("DELETE FROM dtlms_team_leaders WHERE team_id = %s", (int(center_id),))
                 cur.execute("DELETE FROM dtlms_team_advisors WHERE team_id = %s", (int(center_id),))
                 cur.execute("DELETE FROM dtlms_teams WHERE id = %s", (int(center_id),))
                 self._sync_operation_log_in_tx(cur, operation_log)

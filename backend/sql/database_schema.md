@@ -4,11 +4,11 @@
 
 - 数据源: `host=47.117.107.23 port=15431 dbname=test061502`
 - Schema: `public`
-- 表格数量: 73
+- 表格数量: 74
 - 视图数量: 4
 - 函数/存储过程数量: 0
 - 序列数量: 55
-- 索引数量: 163
+- 索引数量: 167
 
 ## 目录
 
@@ -1726,6 +1726,34 @@
 - `dtlms_team_advisors_pkey`: `CREATE UNIQUE INDEX dtlms_team_advisors_pkey ON public.dtlms_team_advisors USING btree (id)`
 - `idx_dtlms_team_advisors_team_user`: `CREATE INDEX idx_dtlms_team_advisors_team_user ON public.dtlms_team_advisors USING btree (team_id, advisor_user_id) WHERE (advisor_user_id IS NOT NULL)`
 
+### `dtlms_team_leaders`
+
+| 列名 | 数据类型 | 可空 | 默认值 |
+|------|----------|------|--------|
+| `id` | bigint(64,0) | NO |  |
+| `user_id` | bigint(64,0) | NO |  |
+| `team_id` | bigint(64,0) | NO |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+
+**主键**: (`id`)
+
+**约束**
+
+| 名称 | 类型 | 定义 |
+|------|------|------|
+| `fk_dtlms_team_leaders_team_id` | FOREIGN KEY | `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id) NOT VALID` |
+| `fk_dtlms_team_leaders_user_id` | FOREIGN KEY | `FOREIGN KEY (user_id) REFERENCES dtlms_users(id) NOT VALID` |
+| `dtlms_team_leaders_pkey` | PRIMARY KEY | `PRIMARY KEY (id)` |
+| `dtlms_team_leaders_team_id_user_id_key` | UNIQUE | `UNIQUE (team_id, user_id)` |
+
+**索引**
+
+- `dtlms_team_leaders_pkey`: `CREATE UNIQUE INDEX dtlms_team_leaders_pkey ON public.dtlms_team_leaders USING btree (id)`
+- `dtlms_team_leaders_team_id_user_id_key`: `CREATE UNIQUE INDEX dtlms_team_leaders_team_id_user_id_key ON public.dtlms_team_leaders USING btree (team_id, user_id)`
+- `idx_dtlms_team_leaders_team_id`: `CREATE INDEX idx_dtlms_team_leaders_team_id ON public.dtlms_team_leaders USING btree (team_id)`
+- `idx_dtlms_team_leaders_user_id`: `CREATE INDEX idx_dtlms_team_leaders_user_id ON public.dtlms_team_leaders USING btree (user_id)`
+
 ### `dtlms_teams`
 
 | 列名 | 数据类型 | 可空 | 默认值 |
@@ -1754,13 +1782,12 @@
 | `fk_dtlms_teams_lead_user_id` | FOREIGN KEY | `FOREIGN KEY (lead_user_id) REFERENCES dtlms_users(id) NOT VALID` |
 | `dtlms_teams_pkey` | PRIMARY KEY | `PRIMARY KEY (id)` |
 | `dtlms_teams_team_code_key` | UNIQUE | `UNIQUE (team_code)` |
-| `dtlms_teams_team_name_key` | UNIQUE | `UNIQUE (team_name)` |
 
 **索引**
 
 - `dtlms_teams_pkey`: `CREATE UNIQUE INDEX dtlms_teams_pkey ON public.dtlms_teams USING btree (id)`
 - `dtlms_teams_team_code_key`: `CREATE UNIQUE INDEX dtlms_teams_team_code_key ON public.dtlms_teams USING btree (team_code)`
-- `dtlms_teams_team_name_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_key ON public.dtlms_teams USING btree (team_name)`
+- `dtlms_teams_team_name_active_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_active_key ON public.dtlms_teams USING btree (team_name) WHERE (is_deleted = false)`
 - `idx_dtlms_teams_lead_user_id`: `CREATE INDEX idx_dtlms_teams_lead_user_id ON public.dtlms_teams USING btree (lead_user_id) WHERE (lead_user_id IS NOT NULL)`
 
 ### `dtlms_theses`
@@ -2526,6 +2553,7 @@
 - `dtlms_students` (composite)
 - `dtlms_system_configs` (composite)
 - `dtlms_team_advisors` (composite)
+- `dtlms_team_leaders` (composite)
 - `dtlms_teams` (composite)
 - `dtlms_theses` (composite)
 - `dtlms_thesis_reviews` (composite)
@@ -2739,9 +2767,13 @@
 - `dtlms_system_configs.dtlms_system_configs_pkey`: `CREATE UNIQUE INDEX dtlms_system_configs_pkey ON public.dtlms_system_configs USING btree (id)`
 - `dtlms_team_advisors.dtlms_team_advisors_pkey`: `CREATE UNIQUE INDEX dtlms_team_advisors_pkey ON public.dtlms_team_advisors USING btree (id)`
 - `dtlms_team_advisors.idx_dtlms_team_advisors_team_user`: `CREATE INDEX idx_dtlms_team_advisors_team_user ON public.dtlms_team_advisors USING btree (team_id, advisor_user_id) WHERE (advisor_user_id IS NOT NULL)`
+- `dtlms_team_leaders.dtlms_team_leaders_pkey`: `CREATE UNIQUE INDEX dtlms_team_leaders_pkey ON public.dtlms_team_leaders USING btree (id)`
+- `dtlms_team_leaders.dtlms_team_leaders_team_id_user_id_key`: `CREATE UNIQUE INDEX dtlms_team_leaders_team_id_user_id_key ON public.dtlms_team_leaders USING btree (team_id, user_id)`
+- `dtlms_team_leaders.idx_dtlms_team_leaders_team_id`: `CREATE INDEX idx_dtlms_team_leaders_team_id ON public.dtlms_team_leaders USING btree (team_id)`
+- `dtlms_team_leaders.idx_dtlms_team_leaders_user_id`: `CREATE INDEX idx_dtlms_team_leaders_user_id ON public.dtlms_team_leaders USING btree (user_id)`
 - `dtlms_teams.dtlms_teams_pkey`: `CREATE UNIQUE INDEX dtlms_teams_pkey ON public.dtlms_teams USING btree (id)`
 - `dtlms_teams.dtlms_teams_team_code_key`: `CREATE UNIQUE INDEX dtlms_teams_team_code_key ON public.dtlms_teams USING btree (team_code)`
-- `dtlms_teams.dtlms_teams_team_name_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_key ON public.dtlms_teams USING btree (team_name)`
+- `dtlms_teams.dtlms_teams_team_name_active_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_active_key ON public.dtlms_teams USING btree (team_name) WHERE (is_deleted = false)`
 - `dtlms_teams.idx_dtlms_teams_lead_user_id`: `CREATE INDEX idx_dtlms_teams_lead_user_id ON public.dtlms_teams USING btree (lead_user_id) WHERE (lead_user_id IS NOT NULL)`
 - `dtlms_theses.dtlms_theses_pkey`: `CREATE UNIQUE INDEX dtlms_theses_pkey ON public.dtlms_theses USING btree (id)`
 - `dtlms_theses.idx_thesis_status`: `CREATE INDEX idx_thesis_status ON public.dtlms_theses USING btree (thesis_status)`
@@ -2935,11 +2967,14 @@
 - `dtlms_team_advisors.dtlms_team_advisors_team_id_fkey` (FOREIGN KEY): `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id)`
 - `dtlms_team_advisors.fk_dtlms_team_advisors_advisor_user_id` (FOREIGN KEY): `FOREIGN KEY (advisor_user_id) REFERENCES dtlms_users(id) NOT VALID`
 - `dtlms_team_advisors.dtlms_team_advisors_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
+- `dtlms_team_leaders.fk_dtlms_team_leaders_team_id` (FOREIGN KEY): `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id) NOT VALID`
+- `dtlms_team_leaders.fk_dtlms_team_leaders_user_id` (FOREIGN KEY): `FOREIGN KEY (user_id) REFERENCES dtlms_users(id) NOT VALID`
+- `dtlms_team_leaders.dtlms_team_leaders_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
+- `dtlms_team_leaders.dtlms_team_leaders_team_id_user_id_key` (UNIQUE): `UNIQUE (team_id, user_id)`
 - `dtlms_teams.dtlms_teams_team_status_check` (CHECK): `CHECK (((team_status)::text = ANY (ARRAY[('active'::character varying)::text, ('inactive'::character varying)::text, ('planning'::character varying)::text, ('archived'::character varying)::text])))`
 - `dtlms_teams.fk_dtlms_teams_lead_user_id` (FOREIGN KEY): `FOREIGN KEY (lead_user_id) REFERENCES dtlms_users(id) NOT VALID`
 - `dtlms_teams.dtlms_teams_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
 - `dtlms_teams.dtlms_teams_team_code_key` (UNIQUE): `UNIQUE (team_code)`
-- `dtlms_teams.dtlms_teams_team_name_key` (UNIQUE): `UNIQUE (team_name)`
 - `dtlms_theses.dtlms_theses_plagiarism_rate_check` (CHECK): `CHECK (((plagiarism_rate IS NULL) OR (plagiarism_rate <= (100)::numeric)))`
 - `dtlms_theses.dtlms_theses_advisor_id_fkey` (FOREIGN KEY): `FOREIGN KEY (advisor_id) REFERENCES dtlms_advisors(id)`
 - `dtlms_theses.dtlms_theses_student_id_fkey` (FOREIGN KEY): `FOREIGN KEY (student_id) REFERENCES dtlms_students(id)`

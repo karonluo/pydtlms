@@ -39,6 +39,8 @@ class PostgresStateStoreQueryStudentsMixin:
                         t.lead_user_id,
                         COALESCE(lead.full_name, '') AS lead_user_name,
                         COALESCE(advisor_names.advisor_names, ARRAY[]::text[]) AS advisor_names,
+                        COALESCE(team_leaders.director_ids, ARRAY[]::bigint[]) AS director_ids,
+                        COALESCE(team_leaders.directors_json, '[]'::jsonb) AS directors,
                         COALESCE(advisor_names.advisor_user_ids, ARRAY[]::bigint[]) AS advisor_ids,
                         COALESCE(advisor_names.advisor_relation_ids, ARRAY[]::bigint[]) AS advisor_relation_ids,
                         t.research_directions,
@@ -47,6 +49,14 @@ class PostgresStateStoreQueryStudentsMixin:
                         t.description
                     FROM dtlms_teams t
                     LEFT JOIN dtlms_users lead ON lead.id = t.lead_user_id AND lead.is_deleted = FALSE
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            array_agg(tl.user_id ORDER BY u.full_name, tl.user_id) AS director_ids,
+                            COALESCE(jsonb_agg(jsonb_build_object('user_id', tl.user_id, 'full_name', u.full_name) ORDER BY u.full_name, tl.user_id), '[]'::jsonb) AS directors_json
+                        FROM dtlms_team_leaders tl
+                        JOIN dtlms_users u ON u.id = tl.user_id AND u.is_deleted = FALSE
+                        WHERE tl.team_id = t.id
+                    ) team_leaders ON TRUE
                     LEFT JOIN LATERAL (
                         SELECT
                             array_agg(advisor_rows.advisor_name ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_names,
@@ -72,6 +82,8 @@ class PostgresStateStoreQueryStudentsMixin:
         return [
             {
                 "id": int(row["id"]),
+                "director_ids": [int(item) for item in (row.get("director_ids") or []) if item is not None],
+                "directors": [dict(item) for item in (row.get("directors") or []) if item is not None],
                 "team_code": row["team_code"],
                 "team_name": row["team_name"],
                 "discipline_name": row["discipline_name"],
@@ -908,7 +920,9 @@ class PostgresStateStoreQueryStudentsMixin:
         self,
         keyword: str | None = None,
         is_enabled: bool | None = None,
+        # 旧入参 director_id（单值）保留以兼容老调用方，新代码请使用 director_ids（多值）
         director_id: int | None = None,
+        director_ids: list[int] | None = None,
         principal: Any | None = None,
         page: int = 1,
         page_size: int = 10,
@@ -918,6 +932,11 @@ class PostgresStateStoreQueryStudentsMixin:
         offset = max(page - 1, 0) * page_size
         where_clauses = ["t.is_deleted = FALSE"]
         params: list[Any] = []
+
+        # 兼容处理：director_id（单值）合并进 director_ids（多值）；director_ids 优先
+        _filter_director_ids: list[int] = list(director_ids or [])
+        if director_id and int(director_id) not in _filter_director_ids:
+            _filter_director_ids.append(int(director_id))
 
         if keyword and str(keyword).strip():
             keyword_like = f"%{str(keyword).strip()}%"
@@ -941,36 +960,34 @@ class PostgresStateStoreQueryStudentsMixin:
         if is_enabled is not None:
             where_clauses.append("t.team_status = %s" if is_enabled else "t.team_status <> %s")
             params.append("active")
-        if director_id:
-            where_clauses.append("COALESCE(t.lead_user_id, lead.id, 0) = %s")
-            params.append(int(director_id))
-        if self._needs_center_scope_filter(principal):
-            username = str(self._principal_field_value(principal, "username") or "").strip()
+        # 旧：COALESCE(t.lead_user_id, lead.id, 0) = %s  (单值)
+        # 新：EXISTS 查 dtlms_team_leaders 拿多值
+        if _filter_director_ids:
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM dtlms_team_leaders tl WHERE tl.team_id = t.id AND tl.user_id = ANY(%s::bigint[]))"
+            )
+            params.append([int(v) for v in _filter_director_ids if int(v or 0) > 0])
             if not username:
                 return [], 0
             where_clauses.append(
                 """
                 (
-                    COALESCE(t.lead_user_id, lead.id, 0) = (
-                        SELECT u.id
-                        FROM dtlms_users u
-                        WHERE u.username = %s
-                          AND u.is_deleted = FALSE
-                        LIMIT 1
+                    EXISTS (
+                        SELECT 1
+                        FROM dtlms_team_leaders tl_scope
+                        JOIN dtlms_users u_scope ON u_scope.id = tl_scope.user_id
+                        WHERE tl_scope.team_id = t.id
+                          AND u_scope.username = %s
+                          AND u_scope.is_deleted = FALSE
                     )
                     OR EXISTS (
                         SELECT 1
                         FROM dtlms_team_advisors ta_scope
-                                                JOIN dtlms_users advisor_scope ON advisor_scope.id = ta_scope.advisor_user_id AND advisor_scope.is_deleted = FALSE
+                        JOIN dtlms_users advisor_scope ON advisor_scope.id = ta_scope.advisor_user_id AND advisor_scope.is_deleted = FALSE
                         WHERE ta_scope.team_id = t.id
                           AND ta_scope.is_deleted = FALSE
-                                                    AND advisor_scope.id = (
-                              SELECT u.id
-                              FROM dtlms_users u
-                              WHERE u.username = %s
-                                AND u.is_deleted = FALSE
-                              LIMIT 1
-                          )
+                          AND advisor_scope.username = %s
+                          AND advisor_scope.is_deleted = FALSE
                     )
                 )
                 """
@@ -989,7 +1006,6 @@ class PostgresStateStoreQueryStudentsMixin:
                     WHERE {where_sql}
                 """
                 self._execute_dynamic(cur, count_sql, params)
-                total_row = cur.fetchone()
                 total = int(total_row["total"] if total_row else 0)
 
                 page_sql = f"""
@@ -998,6 +1014,8 @@ class PostgresStateStoreQueryStudentsMixin:
                         t.team_name,
                         t.lead_user_id AS director_id,
                         COALESCE(lead.full_name, '') AS director_name,
+                        COALESCE(team_leaders.director_ids, ARRAY[]::bigint[]) AS director_ids,
+                        COALESCE(team_leaders.directors_json, '[]'::jsonb) AS directors,
                         COALESCE(advisor_names.advisor_names, '') AS advisor_names,
                         COALESCE(advisor_names.advisor_ids, ARRAY[]::bigint[]) AS advisor_ids,
                         COALESCE(advisor_names.advisor_relation_ids, ARRAY[]::bigint[]) AS advisor_relation_ids,
@@ -1008,6 +1026,14 @@ class PostgresStateStoreQueryStudentsMixin:
                         COALESCE(student_stats.student_count, 0) AS student_count
                     FROM dtlms_teams t
                     LEFT JOIN dtlms_users lead ON lead.id = t.lead_user_id AND lead.is_deleted = FALSE
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            array_agg(tl.user_id ORDER BY u.full_name, tl.user_id) AS director_ids,
+                            COALESCE(jsonb_agg(jsonb_build_object('user_id', tl.user_id, 'full_name', u.full_name) ORDER BY u.full_name, tl.user_id), '[]'::jsonb) AS directors_json
+                        FROM dtlms_team_leaders tl
+                        JOIN dtlms_users u ON u.id = tl.user_id AND u.is_deleted = FALSE
+                        WHERE tl.team_id = t.id
+                    ) team_leaders ON TRUE
                     LEFT JOIN LATERAL (
                         SELECT
                             string_agg(advisor_rows.advisor_name, '、' ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_names,

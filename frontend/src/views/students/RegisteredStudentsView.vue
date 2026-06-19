@@ -146,7 +146,7 @@ const studentFilters = reactive({
 const centerFilters = reactive({
   keyword: '',
   is_enabled: '',
-  director_id: '',
+  director_ids: [] as Array<string | number>,
 })
 const registeredPortalFilters = reactive({
   keyword: '',
@@ -202,10 +202,9 @@ const studentForm = reactive<StudentUpsert>({
 })
 const centerForm = reactive<CenterUpsert>({
   center_name: '',
-  director_name: '',
-  director_id: '',
+  director_ids: [] as Array<string | number>,
   advisor_names: [],
-  advisor_ids: [],
+  advisor_ids: [] as Array<string | number>,
   is_enabled: true,
   created_date: new Date().toISOString().slice(0, 10),
 })
@@ -231,7 +230,7 @@ const studentRules: FormRules<StudentUpsert> = {
 }
 const centerRules: FormRules<CenterUpsert> = {
   center_name: [{ required: true, message: '请输入中心名称', trigger: 'blur' }],
-  director_id: [{ required: true, message: '请选择负责人', trigger: 'change' }],
+  director_ids: [{ required: true, message: '请选择至少一个负责人', trigger: 'change', type: 'array', min: 1 }],
   advisor_ids: [{ required: true, message: '请选择导师团队', trigger: 'change', type: 'array' }],
 }
 
@@ -318,7 +317,7 @@ function normalizeCenterPayload(payload: CenterUpsert): CenterUpsert {
   return {
     ...payload,
     center_name: payload.center_name.trim(),
-    director_id: payload.director_id ? String(payload.director_id) : '',
+    director_ids: Array.from(new Set((payload.director_ids || []).filter(Boolean).map((item) => String(item)))),
     advisor_ids: Array.from(new Set(payload.advisor_ids.filter(Boolean).map((item) => String(item)))),
     created_date: payload.created_date || new Date().toISOString().slice(0, 10),
   }
@@ -361,7 +360,7 @@ async function loadCenters() {
   const response = await listCenters({
     keyword: centerFilters.keyword || undefined,
     is_enabled: centerFilters.is_enabled ? centerFilters.is_enabled === 'true' : undefined,
-    director_id: centerFilters.director_id || undefined,
+    director_ids: (centerFilters.director_ids && centerFilters.director_ids.length) ? centerFilters.director_ids : undefined,
     page: centerPager.pagination.currentPage,
     page_size: centerPager.pagination.pageSize,
   })
@@ -440,10 +439,9 @@ function resetCenterForm() {
   currentId.value = null
   Object.assign(centerForm, {
     center_name: '',
-    director_name: '',
-    director_id: '',
+    director_ids: [] as Array<string | number>,
     advisor_names: [],
-    advisor_ids: [],
+    advisor_ids: [] as Array<string | number>,
     is_enabled: true,
     created_date: new Date().toISOString().slice(0, 10),
   })
@@ -486,8 +484,9 @@ function openCenterEditDialog(row: CenterRecord) {
   currentId.value = row.id
   Object.assign(centerForm, {
     center_name: row.center_name,
-    director_name: row.director_name,
-    director_id: row.director_id ? String(row.director_id) : '',
+    director_ids: Array.isArray(row.director_ids)
+      ? row.director_ids.map((item) => String(item))
+      : (row.director_id ? [String(row.director_id)] : []),
     advisor_names: [...row.advisor_names],
     advisor_ids: row.advisor_ids.map((item) => String(item)),
     is_enabled: row.is_enabled,
@@ -630,7 +629,7 @@ async function handleSearch() {
 
 async function handleReset() {
   Object.assign(studentFilters, { keyword: '', status: '', advisor_name: '', center_name: '' })
-  Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '' })
+  Object.assign(centerFilters, { keyword: '', is_enabled: '', director_name: '', director_ids: [] as Array<string | number> })
   Object.assign(registeredPortalFilters, {
     keyword: '',
     application_form_status: '',
@@ -804,21 +803,30 @@ function handleStudentCenterChange(value: string) {
   }
 }
 
-function handleCenterDirectorChange(value: string) {
-  if (!value) {
-    return
+function handleCenterDirectorsChange(values: Array<string | number>) {
+  // Keep every director in the advisor team (mirrors ResearchCentersView behavior).
+  const normalized = (values || []).map((item) => String(item)).filter(Boolean)
+  centerForm.director_ids = Array.from(new Set(normalized))
+  if (normalized.length) {
+    const merged = new Set([
+      ...centerForm.advisor_ids.map((item) => String(item)),
+      ...normalized,
+    ])
+    centerForm.advisor_ids = Array.from(merged)
   }
-  if (!centerForm.advisor_ids.includes(value)) {
-    centerForm.advisor_ids = Array.from(new Set([...centerForm.advisor_ids, value]))
+  if (centerForm.director_ids.length === 0 && centerForm.advisor_ids.length) {
+    centerForm.director_ids = [String(centerForm.advisor_ids[0])]
   }
 }
 
 function syncCenterDirector() {
-  const directorId = String(centerForm.director_id || '')
-  if (directorId && centerForm.advisor_ids.includes(directorId)) {
-    return
+  const directors = (centerForm.director_ids || []).map((item) => String(item))
+  const valid = directors.filter((d) => centerForm.advisor_ids.map(String).includes(d))
+  if (valid.length === 0 && centerForm.advisor_ids.length) {
+    centerForm.director_ids = [String(centerForm.advisor_ids[0])]
+  } else {
+    centerForm.director_ids = valid
   }
-  centerForm.director_id = centerForm.advisor_ids[0] || ''
 }
 
 function statusTagType(status: string) {
@@ -1316,7 +1324,7 @@ async function handleImpersonateRegisteredPortalStudent(row: RegisteredPortalStu
 }
 
 watch(() => studentForm.center_name, handleStudentCenterChange)
-watch(() => String(centerForm.director_id || ''), handleCenterDirectorChange)
+watch(() => (centerForm.director_ids || []).slice(), handleCenterDirectorsChange)
 watch(() => centerForm.advisor_ids.slice(), syncCenterDirector)
 watch(() => portalEmailDialogVisible.value, (visible) => {
   if (!visible) {
@@ -1449,7 +1457,7 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="负责人">
-          <el-select v-model="centerFilters.director_id" placeholder="全部负责人" clearable filterable style="width: 180px">
+          <el-select v-model="centerFilters.director_ids" multiple collapse-tags collapse-tags-tooltip placeholder="全部负责人" clearable filterable style="width: 220px">
             <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
@@ -1889,8 +1897,16 @@ onMounted(() => {
           <el-form-item label="中心名称" prop="center_name">
             <el-input v-model="centerForm.center_name" placeholder="请输入中心名称" />
           </el-form-item>
-          <el-form-item label="负责人" prop="director_id">
-            <el-select v-model="centerForm.director_id" placeholder="请选择负责人" filterable>
+          <el-form-item label="负责人" prop="director_ids">
+            <el-select
+              v-model="centerForm.director_ids"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              placeholder="请选择至少一名负责人"
+              @change="handleCenterDirectorsChange"
+            >
               <el-option v-for="item in centerAdvisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>

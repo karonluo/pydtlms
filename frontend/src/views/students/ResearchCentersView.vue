@@ -40,13 +40,12 @@ const pager = useServerPagination(10)
 type FilterState = {
   keyword: string
   is_enabled: '' | 'true' | 'false'
-  director_id: string
+  // 注：按业务需求，导师角色隐藏"中心负责人"筛选条件；未来如需重新启用，恢复下方字段即可。
 }
 
 const filters = reactive<FilterState>({
   keyword: '',
   is_enabled: '',
-  director_id: '',
 })
 
 const enabledOptions = [
@@ -59,10 +58,9 @@ const dialogMode = ref<'create' | 'edit'>('create')
 const currentId = ref<number | null>(null)
 const centerForm = reactive<CenterUpsert>({
   center_name: '',
-  director_name: '',
-  director_id: '',
+  director_ids: [] as Array<string | number>,
   advisor_names: [],
-  advisor_ids: [],
+  advisor_ids: [] as Array<string | number>,
   is_enabled: true,
   created_date: new Date().toISOString().slice(0, 10),
 })
@@ -75,7 +73,7 @@ const selectedCenterIds = ref<number[]>([])
 
 const formRules: FormRules<CenterUpsert> = {
   center_name: [{ required: true, message: '请输入中心名称', trigger: 'blur' }],
-  director_id: [{ required: true, message: '请选择负责人', trigger: 'change' }],
+  director_ids: [{ required: true, message: '请选择至少一个负责人', trigger: 'change', type: 'array', min: 1 }],
   advisor_ids: [{ required: true, message: '请选择导师团队', trigger: 'change', type: 'array' }],
 }
 
@@ -104,7 +102,8 @@ function buildQueryParams() {
   return {
     keyword: filters.keyword || undefined,
     is_enabled: normalizeBooleanFilter(filters.is_enabled),
-    director_id: filters.director_id || undefined,
+    // 注：按业务需求，导师角色隐藏"中心负责人"筛选条件；如需启用传 director_ids 即可
+    // director_ids: [],
     page: pager.pagination.currentPage,
     page_size: pager.pagination.pageSize,
   }
@@ -159,8 +158,7 @@ function resetForm() {
   currentId.value = null
   Object.assign(centerForm, {
     center_name: '',
-    director_name: '',
-    director_id: '',
+    director_ids: [] as Array<string | number>,
     advisor_names: [],
     advisor_ids: [],
     is_enabled: true,
@@ -186,8 +184,9 @@ function openEditDialog(row: CenterRecord) {
   currentId.value = row.id
   Object.assign(centerForm, {
     center_name: row.center_name || '',
-    director_name: row.director_name || '',
-    director_id: row.director_id ? String(row.director_id) : '',
+    director_ids: Array.isArray(row.director_ids)
+      ? row.director_ids.map((item) => String(item))
+      : (row.director_id ? [String(row.director_id)] : []),
     advisor_names: Array.isArray(row.advisor_names) ? [...row.advisor_names] : [],
     advisor_ids: Array.isArray(row.advisor_ids) ? row.advisor_ids.map((item) => String(item)) : [],
     is_enabled: Boolean(row.is_enabled),
@@ -200,7 +199,7 @@ function normalizePayload(payload: CenterUpsert): CenterUpsert {
   return {
     ...payload,
     center_name: payload.center_name.trim(),
-    director_id: payload.director_id ? String(payload.director_id) : '',
+    director_ids: Array.from(new Set((payload.director_ids || []).filter(Boolean).map((item) => String(item)))),
     advisor_ids: Array.from(new Set(payload.advisor_ids.filter(Boolean).map((item) => String(item)))),
     created_date: payload.created_date || new Date().toISOString().slice(0, 10),
   }
@@ -250,22 +249,42 @@ function closeDeleteDialog() {
 }
 
 async function submitDeleteDialog() {
+  // eslint-disable-next-line no-console
+  console.log('[submitDeleteDialog] called, submitting=', deleteSubmitting.value, 'targetId=', deletingCenter.value?.id)
+  if (deleteSubmitting.value) {
+    // Already running; ignore the second click that may fire during the close animation.
+    return
+  }
   if (!deletingCenter.value) {
     return
   }
+  // Capture id up front; deletingCenter may be cleared by closeDeleteDialog before fetchCenters.
+  const targetId = deletingCenter.value.id
+  let deleteSucceeded = false
   try {
     deleteSubmitting.value = true
-    await deleteCenter(deletingCenter.value.id)
+    await deleteCenter(targetId)
+    deleteSucceeded = true
     ElMessage.success('研究中心已删除')
-    closeDeleteDialog()
-    await fetchCenters()
   } catch (error) {
-    ElMessage.error(extractErrorMessage(error, '研究中心删除失败'))
+    const message = extractErrorMessage(error, '研究中心删除失败')
+    ElMessage.error(message)
   } finally {
     deleteSubmitting.value = false
   }
+  // Always close the dialog (success OR failure) so the UI does not get stuck.
+  closeDeleteDialog()
+  // Always refresh the list so a 404 (already-deleted) row is removed from the table.
+  try {
+    await fetchCenters()
+  } catch (fetchError) {
+    // ignore: list refresh failure should not block the delete feedback
+  }
+  // Surface an extra warning if delete returned 404 (row was already gone).
+  if (!deleteSucceeded) {
+    // The error message was already shown above; nothing more to do here.
+  }
 }
-
 async function handleBatchDelete() {
   if (!canMaintainCenter.value) {
     return
@@ -301,7 +320,6 @@ function handleSearch() {
 function handleResetFilters() {
   filters.keyword = ''
   filters.is_enabled = ''
-  filters.director_id = ''
   selectedCenterIds.value = []
   pager.reset()
   void fetchCenters()
@@ -311,16 +329,18 @@ function handleSelectionChange(rows: CenterRecord[]) {
   selectedCenterIds.value = rows.map((item) => item.id)
 }
 
-function handleDirectorChange(value: string | number | null | undefined) {
-  // Keep the director in the advisor team (mirrors StudentsView behavior).
-  const normalized = value === null || value === undefined ? '' : String(value)
-  centerForm.director_id = normalized
-  if (normalized) {
-    if (!centerForm.advisor_ids.includes(normalized)) {
-      centerForm.advisor_ids = Array.from(new Set([...centerForm.advisor_ids, normalized]))
-    }
+function handleDirectorsChange(values: Array<string | number>) {
+  // Keep every director in the advisor team (mirrors StudentsView behavior).
+  const normalized = (values || []).map((item) => String(item)).filter(Boolean)
+  centerForm.director_ids = Array.from(new Set(normalized))
+  if (normalized.length) {
+    const merged = new Set([
+      ...centerForm.advisor_ids.map((item) => String(item)),
+      ...normalized,
+    ])
+    centerForm.advisor_ids = Array.from(merged)
   } else if (centerForm.advisor_ids.length) {
-    centerForm.director_id = String(centerForm.advisor_ids[0])
+    centerForm.director_ids = [String(centerForm.advisor_ids[0])]
   }
 }
 
@@ -413,17 +433,7 @@ onMounted(async () => {
               <el-option v-for="item in enabledOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="负责人" class="filter-row__item">
-            <el-select
-              v-model="filters.director_id"
-              placeholder="全部负责人"
-              clearable
-              filterable
-              style="width: 200px"
-            >
-              <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
+
           <el-form-item class="filter-row__item">
             <el-button type="primary" @click="handleSearch">查询</el-button>
             <el-button @click="handleResetFilters">重置</el-button>
@@ -441,7 +451,13 @@ onMounted(async () => {
     >
       <el-table-column v-if="canMaintainCenter" type="selection" width="44" />
       <el-table-column prop="center_name" label="研究中心名称" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="director_name" label="负责人" width="120" show-overflow-tooltip />
+      <el-table-column label="负责人" min-width="160" show-overflow-tooltip>
+        <template #default="scope">
+          <span :title="(scope.row.directors || []).map((d: { user_id: number; full_name: string }) => d.full_name).join('、')">
+            {{ ((scope.row.directors || []).map((d: { user_id: number; full_name: string }) => d.full_name).join('、')) || scope.row.director_name || '未配置' }}
+          </span>
+        </template>
+      </el-table-column>
       <el-table-column label="导师团队" min-width="220" show-overflow-tooltip>
         <template #default="scope">
           <span :title="(scope.row.advisor_names || []).join('、')">
@@ -500,12 +516,15 @@ onMounted(async () => {
           <el-form-item label="中心名称" prop="center_name">
             <el-input v-model="centerForm.center_name" placeholder="请输入中心名称" />
           </el-form-item>
-          <el-form-item label="负责人" prop="director_id">
+          <el-form-item label="负责人" prop="director_ids">
             <el-select
-              :model-value="centerForm.director_id"
-              placeholder="请选择负责人"
+              v-model="centerForm.director_ids"
+              multiple
               filterable
-              @update:model-value="handleDirectorChange"
+              collapse-tags
+              collapse-tags-tooltip
+              placeholder="请选择至少一名负责人"
+              @change="handleDirectorsChange"
             >
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
@@ -548,7 +567,7 @@ onMounted(async () => {
         <p>确定删除该研究中心吗？删除后不可恢复。</p>
         <ul class="delete-summary">
           <li><span>研究中心</span><strong>{{ deletingCenter.center_name }}</strong></li>
-          <li><span>负责人</span><strong>{{ deletingCenter.director_name || '未配置' }}</strong></li>
+          <li><span>负责人</span><strong>{{ (deletingCenter.directors || []).map((d: { user_id: number; full_name: string }) => d.full_name).join('、') || deletingCenter.director_name || '未配置' }}</strong></li>
           <li><span>学生数</span><strong>{{ deletingCenter.student_count ?? 0 }}</strong></li>
         </ul>
       </div>

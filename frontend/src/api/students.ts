@@ -150,11 +150,20 @@ export type RegisteredPortalStudentExportJobCreateResponse = {
 }
 
 
+export type CenterDirector = {
+  user_id: number
+  full_name: string
+}
+
 export type CenterRecord = {
   id: number
   center_name: string
-  director_name: string
-  director_id?: number | null
+  // 旧字段 director_name / director_id 保留以兼容老调用方，新代码请使用 director_ids / directors
+  director_name: string  // 所有负责人姓名拼接（"张三, 李四"），保留兼容
+  director_id?: number | null  // 已废弃：保留仅用于兼容，等同于 director_ids[0]
+  // 新字段（多值设计）
+  director_ids: number[]
+  directors: CenterDirector[]
   advisor_names: string[]
   advisor_ids: number[]
   is_enabled: boolean
@@ -164,11 +173,13 @@ export type CenterRecord = {
   student_count: number
 }
 
-
 export type CenterUpsert = {
   center_name: string
-  director_name?: string | null
-  director_id?: string | number | null
+  // 兼容字段：director_name / director_id 仍可作为入参，但最终统一写入 director_ids
+  director_name?: string | null  // 已废弃，保留仅用于兼容
+  director_id?: string | number | null  // 已废弃，保留仅用于兼容
+  // 必填，非空
+  director_ids: Array<string | number>
   advisor_names?: string[]
   advisor_ids: Array<string | number>
   is_enabled: boolean
@@ -319,7 +330,9 @@ export function deleteStudent(id: number) {
 export function listCenters(params?: PaginationParams & {
   keyword?: string
   is_enabled?: boolean
+  // 旧入参 director_id（单值）保留以兼容老调用方，新代码请使用 director_ids（多值）
   director_id?: string | number
+  director_ids?: Array<string | number>
 }) {
   return http.get<CenterListResponse>('/students/centers', { params })
 }

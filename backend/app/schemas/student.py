@@ -168,11 +168,27 @@ class StudentOptionsResponse(BaseModel):
     center_advisor_map: list[CenterAdvisorMapItem] = Field(default_factory=list)
 
 
+class CenterDirector(BaseModel):
+    """研究中心负责人（来源表 dtlms_team_leaders）。
+
+    设计说明：
+    - dtlms_teams.lead_user_id 字段为历史单值设计，数据库层保留不动。
+    - 实际负责人数据来源统一从 dtlms_team_leaders 表读取，支持一中心多负责人。
+    - 代码层不读取 dtlms_teams.lead_user_id 字段。
+    """
+    user_id: int
+    full_name: str
+
+
 class CenterRecord(BaseModel):
     id: int
     center_name: str
-    director_name: str
-    director_id: int | None = None
+    # 旧字段 director_name / director_id 保留以兼容老调用方，新代码请使用 director_ids / directors
+    director_name: str  # 所有负责人姓名拼接（"张三, 李四"），保留兼容
+    director_id: int | None = None  # 已废弃：保留仅用于兼容老调用方，逻辑上等同于 director_ids[0]
+    # 新字段（多值设计）
+    director_ids: list[int] = Field(default_factory=list)
+    directors: list[CenterDirector] = Field(default_factory=list)
     advisor_names: list[str] = Field(default_factory=list)
     advisor_ids: list[int] = Field(default_factory=list)
     advisor_relation_ids: list[int] = Field(default_factory=list)
@@ -186,8 +202,33 @@ class CenterRecord(BaseModel):
 
 class CenterUpsert(BaseModel):
     center_name: str
-    director_name: str | None = None
-    director_id: int | None = None
+    # 兼容字段：director_name / director_id 仍可作为入参，但最终统一写入 director_ids
+    # 优先级：director_ids 优先；director_id（单值）兼容；director_name 解析为 user_id 仅在 director_ids 为空时生效
+    director_name: str | None = None  # 已废弃，保留仅用于兼容
+    director_id: int | None = None  # 已废弃，保留仅用于兼容
+    director_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("director_ids")
+    @classmethod
+    def _validate_director_ids(cls, value: list[int]) -> list[int]:
+        # 必填、非空、去重、正整数
+        if not value:
+            raise ValueError("请选择至少一个研究中心负责人（director_ids 不能为空）")
+        unique: list[int] = []
+        seen: set[int] = set()
+        for item in value:
+            try:
+                integer = int(item)
+            except (TypeError, ValueError):
+                continue
+            if integer <= 0 or integer in seen:
+                continue
+            seen.add(integer)
+            unique.append(integer)
+        if not unique:
+            raise ValueError("请选择至少一个研究中心负责人（director_ids 不能为空）")
+        return unique
+
     advisor_names: list[str] = Field(default_factory=list)
     advisor_ids: list[int] = Field(default_factory=list)
     advisor_relation_ids: list[int] = Field(default_factory=list)

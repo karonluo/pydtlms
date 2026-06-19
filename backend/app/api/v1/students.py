@@ -355,20 +355,25 @@ def delete_student_record(student_id: int, principal: Principal = Depends(requir
 def center_list(
     keyword: str | None = Query(default=None),
     is_enabled: bool | None = Query(default=None),
+    # 旧入参 director_id（单值）保留以兼容老调用方，新代码请使用 director_ids（多值）
     director_id: int | None = Query(default=None),
+    director_ids: list[int] = Query(default=[]),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=1000),
     principal: Principal = Depends(require_permissions("research_center:read")),
 ) -> CenterListResponse:
+    # 兼容处理：director_id（单值）会被合并进 director_ids（多值）；director_ids 优先
+    _merged_director_ids: list[int] = list(director_ids or [])
+    if director_id and int(director_id) not in _merged_director_ids:
+        _merged_director_ids.append(int(director_id))
     return get_center_list(
         keyword=keyword,
         is_enabled=is_enabled,
-        director_id=director_id,
+        director_ids=_merged_director_ids or None,
         principal=principal,
         page=page,
         page_size=page_size,
     )
-
 
 @router.post("/centers", response_model=CenterRecord, status_code=status.HTTP_201_CREATED)
 @router.post("/teams", response_model=CenterRecord, status_code=status.HTTP_201_CREATED, include_in_schema=False)

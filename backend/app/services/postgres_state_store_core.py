@@ -1286,11 +1286,38 @@ class PostgresStateStoreCoreMixin:
 
     @classmethod
     def _normalize_center_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        # 兼容：director_ids 优先，director_id（单值）兜底
+        _director_ids: list[int] = [int(v) for v in (row.get("director_ids") or []) if v is not None and int(v or 0) > 0]
+        _single_director_id = int(row.get("director_id") or 0) or None
+        if not _director_ids and _single_director_id:
+            _director_ids = [_single_director_id]
+        _directors_raw = row.get("directors") or []
+        _directors: list[dict[str, Any]] = []
+        for _item in _directors_raw:
+            if not _item:
+                continue
+            if isinstance(_item, dict):
+                _directors.append({
+                    "user_id": int(_item.get("user_id") or _item.get("id") or 0) or 0,
+                    "full_name": str(_item.get("full_name") or ""),
+                })
+            elif isinstance(_item, (list, tuple)) and len(_item) >= 2:
+                _directors.append({"user_id": int(_item[0] or 0) or 0, "full_name": str(_item[1] or "")})
+        # director_name: prefer joining directors, else fall back to row.director_name
+        if _directors:
+            _director_name = "、".join(str(d.get("full_name") or "") for d in _directors)
+        else:
+            _director_name = str(row.get("director_name") or "")
+        # director_id fallback: use the first director_id when row.director_id is empty
+        if not _single_director_id and _director_ids:
+            _single_director_id = _director_ids[0]
         return {
             "id": int(row["id"]),
             "center_name": str(row.get("team_name") or ""),
-            "director_name": str(row.get("director_name") or ""),
-            "director_id": int(row.get("director_id") or 0) or None,
+            "director_name": _director_name,
+            "director_id": _single_director_id,
+            "director_ids": _director_ids,
+            "directors": _directors,
             "advisor_names": cls._split_delimited_values(row.get("advisor_names")),
             "advisor_ids": [int(item) for item in (row.get("advisor_ids") or []) if item is not None],
             "advisor_relation_ids": [int(item) for item in (row.get("advisor_relation_ids") or []) if item is not None],

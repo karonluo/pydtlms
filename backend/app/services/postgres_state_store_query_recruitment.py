@@ -122,8 +122,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
 
         # Step 2: collect every dtlms_users.full_name that the viewer may see.
         # - advisor role + lead of one or more research centers: union of
-        #   members (via dtlms_team_advisors) of those teams.
-        # - otherwise: just the viewer's own full_name (R1).
+        #   members (via dtlms_team_advisors) of those teams.  (lead is determined by
+        #    dtlms_team_leaders, not dtlms_teams.lead_user_id)
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
@@ -144,7 +144,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
                                 SELECT t.id
                                 FROM dtlms_teams t
                                 WHERE t.is_deleted = FALSE
-                                  AND t.lead_user_id = %s
+                                  AND EXISTS (SELECT 1 FROM dtlms_team_leaders tl WHERE tl.team_id = t.id AND tl.user_id = %s)
                               )
                         )
                       )
@@ -823,11 +823,28 @@ class PostgresStateStoreQueryRecruitmentMixin:
             params.append(float(second_choice_score))
 
         if visible_advisor_names:
-            # Restrict rows to those whose first/second choice advisor name
-            # is in the viewer's allowed set. Exact full_name match.
+            # 范围过滤规则（客户需求 2026-06-20）：
+            #   - 第一志愿：保持原样（first_choice = ANY(visible_advisor_names)）
+            #   - 第二志愿：必须满足"第二志愿已流转"才显示：
+            #       (a) 例外：学生第一/第二志愿选的是同一个导师（自己看到自己）
+            #       (b) 或者第二志愿已提交打分 且 第二志愿分数 >= 80
+            #     业务不变量：如果 second_choice_screening_submitted_at IS NOT NULL，
+            #     则必然 second_choice_screening_score >= 80（不及格不会流转给候选人）。
             where_clauses.append(
-                "(NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s) "
-                "OR NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s))"
+                "("
+                "  NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)"
+                "  OR ("
+                "    NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s)"
+                "    AND ("
+                "      NULLIF(BTRIM(COALESCE(app.first_choice, '')), '')"
+                "        = NULLIF(BTRIM(COALESCE(app.second_choice, '')), '')"
+                "      OR ("
+                "        app.second_choice_screening_submitted_at IS NOT NULL"
+                "        AND app.second_choice_screening_score >= 80"
+                "      )"
+                "    )"
+                "  )"
+                ")"
             )
             params.append(list(visible_advisor_names))
             params.append(list(visible_advisor_names))
@@ -937,7 +954,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
                             first_choice,
                             first_choice_screening_score,
                             second_choice,
-                            second_choice_screening_score
+                            second_choice_screening_score,
+                            second_choice_screening_submitted_at
                         FROM dtlms_recruitment_applications app2
                         WHERE app2.candidate_no = offer.candidate_no AND app2.is_deleted = FALSE
                         ORDER BY app2.id DESC
@@ -1086,7 +1104,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
                     first_choice,
                     first_choice_screening_score,
                     second_choice,
-                    second_choice_screening_score
+                    second_choice_screening_score,
+                    second_choice_screening_submitted_at
                 FROM dtlms_recruitment_applications app2
                 WHERE app2.candidate_no = offer.candidate_no AND app2.is_deleted = FALSE
                 ORDER BY app2.id DESC
