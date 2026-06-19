@@ -652,6 +652,8 @@ class CampOfferRecord(BaseModel):
     is_sent_mail: bool = False
     is_agree: bool | None = None
     reason: str | None = None
+    # 关联的报名记录 id（用于跳转到 /recruitment/registered-students 的同款填报详情弹窗）
+    recruitment_application_id: int | None = None
     student_name: str | None = None
     student_email: str | None = None
     student_phone: str | None = None

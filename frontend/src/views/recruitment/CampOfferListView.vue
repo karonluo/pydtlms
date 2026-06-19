@@ -6,6 +6,7 @@ import { Promotion, Check, CircleClose, EditPen, ArrowDown, ArrowUp } from '@ele
 import type { FormInstance, FormRules } from 'element-plus'
 
 import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
+import { getRecruitmentOptions, getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail, type RecruitmentOptions } from '../../api/recruitment'
 import { useServerPagination } from '../../composables/useServerPagination'
 import {
   createCampOffer,
@@ -28,9 +29,9 @@ import {
   type OfferTemplateRecord,
   type RecruitPlanRecord,
 } from '../../api/recruitment'
-import { getRecruitmentOptions, type RecruitmentOptions } from '../../api/recruitment'
 import { listCenters } from '../../api/students'
 import { useAuthStore } from '../../stores/auth'
+import RecruitmentPortalApplicationDrawer from '../../components/recruitment/RecruitmentPortalApplicationDrawer.vue'
 
 type OfferTemplateId = string | number
 
@@ -82,6 +83,11 @@ const authStore = useAuthStore()
 const roleSet = computed(() => new Set(authStore.roles || []))
 // advisor 角色仅查看入营名单（隐藏所有写操作 UI）
 const isAdvisorRole = computed(() => roleSet.value.has('advisor') && !roleSet.value.has('*'))
+
+// 学生填报详情弹窗（复用 /recruitment/registered-students 同款组件）
+const portalApplicationDetailVisible = ref(false)
+const portalViewingApplication = ref<RecruitPortalApplicationDetail | null>(null)
+const portalApplicationDetailLoading = ref(false)
 const notifyForm = reactive({
   template_id: 'first' as OfferTemplateId,
   simulate: false,
@@ -209,10 +215,32 @@ const kpiCards = computed(() =>
 )
 
 const tableActions = computed<TableRowAction<CampOfferRecord>[]>(() =>
-  isAdvisorRole.value ? [] : [
+  isAdvisorRole.value ? [{ key: 'view-detail', label: '查看学生详情', type: 'info', onClick: openCampOfferPortalApplicationDetail }] : [
+    { key: 'view-detail', label: '查看学生详情', type: 'info', onClick: openCampOfferPortalApplicationDetail },
     { key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog },
   ]
 )
+
+
+async function openCampOfferPortalApplicationDetail(row: CampOfferRecord) {
+  if (!row.recruitment_application_id) {
+    ElMessage.warning('该入营记录未关联报名详情')
+    return
+  }
+  portalApplicationDetailLoading.value = true
+  try {
+    const response = await getRecruitmentPortalApplicationDetail(row.recruitment_application_id)
+    portalViewingApplication.value = response.data
+    portalApplicationDetailVisible.value = true
+  } catch (error) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message)
+      : '加载填报详情失败'
+    ElMessage.error(message)
+  } finally {
+    portalApplicationDetailLoading.value = false
+  }
+}
 
 const tableMoreActions = computed<TableRowAction<CampOfferRecord>[]>(() =>
   isAdvisorRole.value ? [] : [
@@ -962,7 +990,7 @@ onMounted(async () => {
         <el-table-column label="学生提交日期" min-width="170">
           <template #default="{ row }">{{ formatDateTime(row.student_offer_submitted_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right" align="right">
+        <el-table-column label="操作" width="200" fixed="right" align="right">
           <template #default="scope">
             <TableRowActions :row="scope.row" :main-actions="tableActions" :more-actions="tableMoreActions" />
           </template>
@@ -1149,6 +1177,12 @@ onMounted(async () => {
         <el-button @click="previewDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 学生填报详情弹窗（复用 /recruitment/registered-students 同款组件） -->
+    <RecruitmentPortalApplicationDrawer
+      v-model="portalApplicationDetailVisible"
+      :detail="portalViewingApplication"
+    />
   </section>
 </template>
 

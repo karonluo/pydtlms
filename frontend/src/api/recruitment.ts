@@ -214,6 +214,8 @@ export type CampOfferRecord = {
   plan_name?: string | null
   is_sent_mail: boolean
   is_agree?: boolean | null
+  // 关联的报名记录 id（用于跳转到 /recruitment/registered-students 的同款填报详情弹窗）
+  recruitment_application_id?: number | null
   reason?: string | null
   student_name?: string | null
   student_email?: string | null

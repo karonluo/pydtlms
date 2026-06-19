@@ -726,6 +726,14 @@ class PostgresStateStoreQueryRecruitmentMixin:
         normalized["is_sent_mail"] = bool(normalized.get("is_sent_mail") or False)
         normalized["is_agree"] = normalized.get("is_agree")
         normalized["reason"] = str(normalized.get("reason") or "").strip() or None
+        recruitment_application_id = normalized.get("recruitment_application_id")
+        if recruitment_application_id is not None:
+            try:
+                normalized["recruitment_application_id"] = int(recruitment_application_id) or None
+            except (TypeError, ValueError):
+                normalized["recruitment_application_id"] = None
+        else:
+            normalized["recruitment_application_id"] = None
         normalized["student_name"] = str(normalized.get("student_name") or "").strip() or None
         normalized["student_email"] = str(normalized.get("student_email") or "").strip() or None
         normalized["student_phone"] = str(normalized.get("student_phone") or "").strip() or None
@@ -934,6 +942,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
                         COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
                         offer.is_agree,
                         COALESCE(offer.reson, '') AS reason,
+                        app.id AS recruitment_application_id,
                         app.student_name,
                         ps.email AS student_email,
                         ps.phone_number AS student_phone,
@@ -949,6 +958,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
                     LEFT JOIN dtlms_recruitment_plans plan ON plan.id = offer.plan_id
                     LEFT JOIN LATERAL (
                         SELECT
+                            id,
                             student_name,
                             portal_student_id,
                             first_choice,
@@ -1084,6 +1094,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
                 offer.is_agree,
                 COALESCE(offer.reson, '') AS reason,
+                app.id AS recruitment_application_id,
                 app.student_name,
                 ps.email AS student_email,
                 ps.phone_number AS student_phone,
@@ -1099,6 +1110,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
             LEFT JOIN dtlms_recruitment_plans plan ON plan.id = offer.plan_id
             LEFT JOIN LATERAL (
                 SELECT
+                    id,
                     student_name,
                     portal_student_id,
                     first_choice,
