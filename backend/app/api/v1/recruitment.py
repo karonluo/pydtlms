@@ -16,6 +16,7 @@ from app.schemas.recruitment import (
     AdvisorScreeningBatchSubmitResponse,
     CampOfferImportResult,
     CampOfferListResponse,
+    CampOfferStats,
     CampOfferNotificationSendRequest,
     CampOfferNotificationSendResponse,
     CampOfferRecord,
@@ -59,6 +60,7 @@ from app.services.dashboard_service import (
     get_recruitment_workbench,
     get_camp_offer_detail,
     get_camp_offer_list,
+    get_camp_offer_stats,
     import_recruitment_applications,
     rescore_advisor_screening_submitted_application,
     submit_advisor_screening_batch,
@@ -479,6 +481,7 @@ def list_camp_offer_records(
         sort_order=sort_order,
         page=page,
         page_size=page_size,
+        principal=principal,
     )
 
 
@@ -542,6 +545,38 @@ def _resolve_template_file(template_id: str) -> Path:
     if template_id in {"first", "second"}:
         return resolve_builtin_offer_template_path(template_id)
     return OFFER_TEMPLATE_UPLOAD_DIR / f"offer-{template_id}.md"
+
+
+@router.get("/camp-offers/stats", response_model=CampOfferStats)
+def get_camp_offer_stats_endpoint(
+    keyword: str | None = Query(default=None),
+    plan_id: int | None = Query(default=None),
+    is_sent_mail: bool | None = Query(default=None),
+    is_agree: bool | None = Query(default=None),
+    first_choice_advisor: str | None = Query(default=None),
+    first_choice_team: str | None = Query(default=None),
+    first_choice_score_op: str | None = Query(default=None, pattern="^(eq|ne|gt|ge|lt|le)$"),
+    first_choice_score: float | None = Query(default=None),
+    second_choice_advisor: str | None = Query(default=None),
+    second_choice_team: str | None = Query(default=None),
+    second_choice_score_op: str | None = Query(default=None, pattern="^(eq|ne|gt|ge|lt|le)$"),
+    second_choice_score: float | None = Query(default=None),
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:read")),
+) -> CampOfferStats:
+    return get_camp_offer_stats(
+        keyword=keyword,
+        plan_id=plan_id,
+        is_sent_mail=is_sent_mail,
+        is_agree=is_agree,
+        first_choice_advisor=first_choice_advisor,
+        first_choice_team=first_choice_team,
+        first_choice_score_op=first_choice_score_op,
+        first_choice_score=first_choice_score,
+        second_choice_advisor=second_choice_advisor,
+        second_choice_team=second_choice_team,
+        second_choice_score_op=second_choice_score_op,
+        second_choice_score=second_choice_score,
+    )
 
 
 @router.get("/camp-offers/templates", response_model=OfferTemplateListResponse)
@@ -744,7 +779,7 @@ def get_camp_offer_record_detail(
     principal: Principal = Depends(require_permissions("recruitment_camp_offer:read")),
 ) -> CampOfferRecord:
     try:
-        return get_camp_offer_detail(offer_id)
+        return get_camp_offer_detail(offer_id, principal=principal)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camp offer not found") from exc
 

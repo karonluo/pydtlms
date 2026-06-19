@@ -11,6 +11,7 @@ const RecruitmentWorkbenchView = () => import('../views/recruitment/RecruitmentW
 const NewsManagementView = () => import('../views/recruitment/NewsManagementView.vue')
 const CampOfferListView = () => import('../views/recruitment/CampOfferListView.vue')
 const StudentsView = () => import('../views/students/StudentsView.vue')
+const ResearchCentersView = () => import('../views/students/ResearchCentersView.vue')
 const RegisteredStudentsView = () => import('../views/students/RegisteredStudentsView.vue')
 const TrainingView = () => import('../views/training/TrainingView.vue')
 const DegreeView = () => import('../views/degree/DegreeView.vue')
@@ -50,7 +51,7 @@ const router = createRouter({
         { path: 'students', redirect: '/students/records' },
         { path: 'students/records', component: StudentsView, meta: { title: '学生主档', section: 'records', requiredPermission: 'students:read' } },
         { path: 'students/portal-registrations', redirect: '/recruitment/registered-students' },
-        { path: 'students/centers', component: StudentsView, meta: { title: '研究中心管理', section: 'centers', requiredPermission: 'research_center:read' } },
+        { path: 'students/centers', component: ResearchCentersView, meta: { title: '研究中心管理', requiredPermission: 'research_center:read' } },
         { path: 'training', redirect: '/training/plans' },
         { path: 'training/plans', component: TrainingView, meta: { title: '培养方案管理', section: 'plans', requiredPermission: 'training:read' } },
         { path: 'training/reports', component: TrainingView, meta: { title: '科研报告管理', section: 'reports', requiredPermission: 'training:read' } },

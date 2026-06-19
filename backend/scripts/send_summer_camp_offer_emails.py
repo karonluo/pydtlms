@@ -274,7 +274,10 @@ def mark_offer_sent_mail(candidate_nos: list[str]) -> int:
         return 0
 
     sql = (
-        "UPDATE dtlms_plan_offer SET is_sent_mail = TRUE, updated_at = CURRENT_TIMESTAMP "
+        "UPDATE dtlms_plan_offer "
+        "SET is_sent_mail = TRUE, "
+        "    sent_mail_at = CURRENT_TIMESTAMP, "
+        "    updated_at = CURRENT_TIMESTAMP "
         "WHERE candidate_no = ANY(%s)"
     )
     with psycopg.connect(_conninfo()) as conn:
@@ -911,7 +914,7 @@ def main(argv: list[str] | None = None) -> int:
     if success_nos:
         try:
             updated = mark_offer_sent_mail(success_nos)
-            logger.info("已将 %d 条 dtlms_plan_offer.is_sent_mail 置为 TRUE", updated)
+            logger.info("已将 %d 条 dtlms_plan_offer.is_sent_mail 置为 TRUE，并写入 sent_mail_at", updated)
         except Exception as exc:  # noqa: BLE001
             logger.error("更新 is_sent_mail 失败：%s", exc)
 

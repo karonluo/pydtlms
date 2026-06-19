@@ -14,3 +14,4 @@ frontend/public/recruitment/news/uploads/
 documents/UI设计/
 .DS_Store
 backend/app*.zip
+*.bak

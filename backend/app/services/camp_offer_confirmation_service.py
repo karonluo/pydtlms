@@ -9,6 +9,7 @@ from app.core.config import settings
 
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+OFFER_CONFIRM_DEADLINE_HOURS = 24
 
 
 def _conninfo() -> str:
@@ -103,7 +104,7 @@ def submit_camp_offer_confirmation(email: str, password: str, choice: str) -> di
 
             cur.execute(
                 """
-                SELECT id, candidate_no, plan_id, portal_student_id, submitted_at, is_agree
+                SELECT id, candidate_no, plan_id, portal_student_id, submitted_at, is_agree, sent_mail_at
                 FROM dtlms_plan_offer
                 WHERE candidate_no = %s
                   AND plan_id = %s
@@ -121,6 +122,7 @@ def submit_camp_offer_confirmation(email: str, password: str, choice: str) -> di
             existing_portal_student_id = _row_value(existing_offer, 3)
             submitted_at = _row_value(existing_offer, 4)
             offer_id = int(_row_value(existing_offer, 0) or 0)
+            offer_sent_mail_at = _row_value(existing_offer, 6)
 
             if existing_portal_student_id is not None and int(existing_portal_student_id) != int(_row_value(student, 0) or 0):
                 raise ValueError("邮箱与该报名号下的入营名单记录不一致")
@@ -130,6 +132,19 @@ def submit_camp_offer_confirmation(email: str, password: str, choice: str) -> di
 
             if submitted_at is not None:
                 raise ValueError("该学生已经提交过确认结果")
+
+            if offer_sent_mail_at is not None:
+                cur.execute(
+                    """
+                    SELECT (CURRENT_TIMESTAMP - %s) > make_interval(hours => %s) AS is_overdue
+                    """
+                , (offer_sent_mail_at, OFFER_CONFIRM_DEADLINE_HOURS))
+                deadline_row = cur.fetchone()
+                is_overdue = bool(_row_value(deadline_row, 0)) if deadline_row is not None else False
+                if is_overdue:
+                    raise ValueError("已经超时无法提交")
+            else:
+                raise ValueError("邀请邮件尚未发出，请等待邮件通知后再提交")
 
             cur.execute(
                 """

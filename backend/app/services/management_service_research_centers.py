@@ -51,7 +51,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                 normalized.append(integer_value)
         return normalized
 
-    def _build_center_record(self, row: dict[str, Any], *, member_student_count: int = 0, active_student_count: int = 0) -> CenterRecord:
+    def _build_center_record(self, row: dict[str, Any], *, member_student_count: int = 0, active_student_count: int = 0, student_count: int = 0) -> CenterRecord:
         lead_user_id = int(row.get("lead_user_id") or 0) or None
         lead_user_name = self._normalize_text(row.get("lead_user_name"))
         if not lead_user_name and lead_user_id is not None:
@@ -71,6 +71,7 @@ class RuntimeManagementStoreResearchCenterMixin:
             created_date=self._normalize_optional_text(row.get("created_date") or row.get("established_on") or row.get("created_at")),
             member_student_count=member_student_count,
             active_student_count=active_student_count,
+            student_count=student_count,
         )
 
     @staticmethod
@@ -139,7 +140,6 @@ class RuntimeManagementStoreResearchCenterMixin:
         page: int = 1,
         page_size: int = 10,
     ) -> CenterListResponse:
-        del principal
         self._ensure_center_schema()
         if not self._center_store_uses_database():
             list_centers_page = getattr(self._postgres_store, "list_centers_page", None)
@@ -150,6 +150,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                     director_id=director_id,
                     page=page,
                     page_size=page_size,
+                    principal=principal,
                 )
                 normalized_items = []
                 for item in items:
@@ -164,6 +165,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                             },
                             member_student_count=int(row.get("member_student_count") or 0),
                             active_student_count=int(row.get("active_student_count") or 0),
+                            student_count=int(row.get("student_count") or 0),
                         )
                     )
                 return CenterListResponse(items=normalized_items, total=int(total or 0), page=page, page_size=page_size)
@@ -192,6 +194,42 @@ class RuntimeManagementStoreResearchCenterMixin:
         if director_id:
             where_clauses.append("COALESCE(t.lead_user_id, 0) = %s")
             params.append(int(director_id))
+        # Mirror the postgres path's advisor scope filter so an advisor only
+        # sees centers they lead or belong to.
+        _role_codes = set()
+        if principal is not None:
+            _raw_roles = getattr(principal, "roles", None)
+            if _raw_roles is None and isinstance(principal, dict):
+                _raw_roles = principal.get("roles") or []
+            _role_codes = {str(item).strip() for item in (_raw_roles or []) if str(item).strip()}
+        _bypass_roles = {"platform_admin", "AILABMGT", "academy_admin"}
+        if _role_codes and not (_role_codes & _bypass_roles) and "advisor" in _role_codes:
+            _username = str(getattr(principal, "username", "") or "").strip()
+            if not _username and isinstance(principal, dict):
+                _username = str(principal.get("username") or "").strip()
+            if not _username:
+                return CenterListResponse(items=[], total=0, page=page, page_size=page_size)
+            where_clauses.append(
+                """
+                (
+                    COALESCE(t.lead_user_id, 0) = (
+                        SELECT u.id FROM dtlms_users u
+                        WHERE u.username = %s AND u.is_deleted = FALSE LIMIT 1
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM dtlms_team_advisors ta_scope
+                        JOIN dtlms_users advisor_scope
+                          ON advisor_scope.id = ta_scope.advisor_user_id
+                         AND advisor_scope.is_deleted = FALSE
+                        WHERE ta_scope.team_id = t.id
+                          AND ta_scope.is_deleted = FALSE
+                          AND advisor_scope.username = %s
+                          AND advisor_scope.is_deleted = FALSE
+                    )
+                )
+                """
+            )
+            params.extend([_username, _username])
 
         where_sql = " AND ".join(where_clauses)
         with self._postgres_store._connect(settings.postgres_db) as conn:
@@ -216,12 +254,14 @@ class RuntimeManagementStoreResearchCenterMixin:
                         t.lead_user_id,
                         lead_user.full_name AS lead_user_name,
                         COALESCE(advisor_rows.advisor_names, ARRAY[]::text[]) AS advisor_names,
+                        COALESCE(advisor_rows.advisor_names_arr, ARRAY[]::text[]) AS advisor_names_arr,
                         COALESCE(advisor_rows.advisor_ids, ARRAY[]::bigint[]) AS advisor_ids,
                         COALESCE(advisor_rows.advisor_relation_ids, ARRAY[]::bigint[]) AS advisor_relation_ids,
                         t.team_status,
                         COALESCE(TO_CHAR(t.established_on, 'YYYY-MM-DD'), TO_CHAR(t.created_at::date, 'YYYY-MM-DD')) AS created_date,
                         COALESCE(student_stats.member_student_count, 0) AS member_student_count,
-                        COALESCE(student_stats.active_student_count, 0) AS active_student_count
+                        COALESCE(student_stats.active_student_count, 0) AS active_student_count,
+                        COALESCE(student_stats.student_count, 0) AS student_count
                     FROM dtlms_teams t
                     LEFT JOIN dtlms_users lead_user
                       ON lead_user.id = t.lead_user_id
@@ -229,6 +269,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                                         LEFT JOIN LATERAL (
                                                 SELECT
                                                         array_agg(DISTINCT advisor_user.full_name ORDER BY advisor_user.full_name) AS advisor_names,
+                                                        array_agg(DISTINCT advisor_user.full_name ORDER BY advisor_user.full_name) AS advisor_names_arr,
                                                         array_agg(DISTINCT ta.advisor_user_id ORDER BY ta.advisor_user_id) AS advisor_ids,
                                                         array_agg(DISTINCT ta.id ORDER BY ta.id) AS advisor_relation_ids
                                                 FROM dtlms_team_advisors ta
@@ -247,7 +288,22 @@ class RuntimeManagementStoreResearchCenterMixin:
                     LEFT JOIN LATERAL (
                         SELECT
                             COUNT(*) AS member_student_count,
-                            COUNT(*) FILTER (WHERE s.current_status IN ('enrolled', 'internship', 'outbound', 'thesis')) AS active_student_count
+                            COUNT(*) FILTER (WHERE s.current_status IN ('enrolled', 'internship', 'outbound', 'thesis')) AS active_student_count,
+                            (
+                                SELECT COUNT(DISTINCT offer.candidate_no)
+                                FROM dtlms_plan_offer offer
+                                JOIN dtlms_recruitment_applications app
+                                    ON app.candidate_no = offer.candidate_no
+                                       AND app.is_deleted = FALSE
+                                WHERE offer.submitted_at IS NOT NULL
+                                  AND offer.is_agree = TRUE
+                                  AND (
+                                        (app.first_choice_screening_score >= 80
+                                            AND app.first_choice = ANY (advisor_rows.advisor_names_arr))
+                                     OR (app.second_choice_screening_score >= 80
+                                            AND app.second_choice = ANY (advisor_rows.advisor_names_arr))
+                                  )
+                            ) AS student_count
                         FROM dtlms_students s
                         WHERE s.team_id = t.id AND s.is_deleted = FALSE
                     ) student_stats ON TRUE
@@ -264,6 +320,7 @@ class RuntimeManagementStoreResearchCenterMixin:
                             dict(row),
                             member_student_count=int(row.get("member_student_count") or 0),
                             active_student_count=int(row.get("active_student_count") or 0),
+                            student_count=int(row.get("student_count") or 0),
                         )
                     )
                 return CenterListResponse(items=items, total=total, page=page, page_size=page_size)

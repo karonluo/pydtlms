@@ -341,3 +341,40 @@ def test_send_notification_accepts_hex_template_id(
     assert "--offer-md" in cmd
     offer_md_index = cmd.index("--offer-md")
     assert cmd[offer_md_index + 1] == str(target)
+
+
+def test_camp_offer_stats_returns_headline_counts(
+    client: TestClient, monkeypatch
+) -> None:
+    """The /camp-offers/stats endpoint should surface the four KPI counts
+    (sent_mail / agreed / declined / unsigned) plus the total after the
+    same filter set as the list endpoint."""
+    access_token = _install_principal(
+        monkeypatch, "recruiter", ["recruitment_camp_offer:read", "recruitment_camp_offer:write"]
+    )
+
+    monkeypatch.setattr(
+        "app.api.v1.recruitment.get_camp_offer_stats",
+        lambda **kwargs: {
+            "sent_mail": 12,
+            "agreed": 9,
+            "declined": 3,
+            "unsigned": 5,
+            "total": 24,
+        },
+    )
+
+    response = client.get(
+        "/api/v1/recruitment/camp-offers/stats",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body == {
+        "sent_mail": 12,
+        "agreed": 9,
+        "declined": 3,
+        "unsigned": 5,
+        "total": 24,
+    }

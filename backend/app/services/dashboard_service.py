@@ -37,6 +37,7 @@ from app.schemas.recruitment import (
     CampOfferImportResult,
     CampOfferListResponse,
     CampOfferRecord,
+    CampOfferStats,
     CampOfferUpsert,
     RecruitApplicationImportResult,
 )
@@ -506,6 +507,7 @@ def get_camp_offer_list(
     sort_order: str | None = None,
     page: int = 1,
     page_size: int = 10,
+    principal: Principal | None = None,
 ) -> CampOfferListResponse:
     return store.get_camp_offers(
         keyword=keyword,
@@ -524,11 +526,14 @@ def get_camp_offer_list(
         sort_order=sort_order,
         page=page,
         page_size=page_size,
+        principal=principal,
     )
 
 
-def get_camp_offer_detail(offer_id: int) -> CampOfferRecord:
-    return store.get_camp_offer_detail(offer_id)
+def get_camp_offer_detail(
+    offer_id: int, principal: Principal | None = None
+) -> CampOfferRecord:
+    return store.get_camp_offer_detail(offer_id, principal=principal)
 
 
 def create_camp_offer(payload: CampOfferUpsert, principal: Principal | None = None) -> CampOfferRecord:
@@ -545,6 +550,38 @@ def delete_camp_offer(offer_id: int, principal: Principal | None = None) -> None
 
 def import_camp_offers(rows: list[dict[str, Any]], plan_id: int | None = None, principal: Principal | None = None) -> CampOfferImportResult:
     return store.import_camp_offers(rows=rows, plan_id=plan_id, principal=principal)
+
+
+def get_camp_offer_stats(
+    *,
+    keyword: str | None = None,
+    plan_id: int | None = None,
+    is_sent_mail: bool | None = None,
+    is_agree: bool | None = None,
+    first_choice_advisor: str | None = None,
+    first_choice_team: str | None = None,
+    first_choice_score_op: str | None = None,
+    first_choice_score: float | None = None,
+    second_choice_advisor: str | None = None,
+    second_choice_team: str | None = None,
+    second_choice_score_op: str | None = None,
+    second_choice_score: float | None = None,
+) -> CampOfferStats:
+    counts = store.count_camp_offer_stats(
+        keyword=keyword,
+        plan_id=plan_id,
+        is_sent_mail=is_sent_mail,
+        is_agree=is_agree,
+        first_choice_advisor=first_choice_advisor,
+        first_choice_team=first_choice_team,
+        first_choice_score_op=first_choice_score_op,
+        first_choice_score=first_choice_score,
+        second_choice_advisor=second_choice_advisor,
+        second_choice_team=second_choice_team,
+        second_choice_score_op=second_choice_score_op,
+        second_choice_score=second_choice_score,
+    )
+    return CampOfferStats(**counts)
 
 
 def export_camp_offers(
@@ -576,6 +613,7 @@ def export_camp_offers(
         second_choice_team=second_choice_team,
         second_choice_score_op=second_choice_score_op,
         second_choice_score=second_choice_score,
+        principal=principal,
     )
 
 

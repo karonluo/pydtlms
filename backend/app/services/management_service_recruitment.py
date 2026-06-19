@@ -16,6 +16,7 @@ from app.schemas.recruitment import (
     CampOfferImportResult,
     CampOfferListResponse,
     CampOfferRecord,
+    CampOfferStats,
     CampOfferUpsert,
     RecruitApplicationRecord,
     RecruitPortalApplicationDetail,
@@ -433,7 +434,9 @@ class RuntimeManagementStoreRecruitmentMixin:
         sort_order: str | None = None,
         page: int = 1,
         page_size: int = 10,
+        principal: Any | None = None,
     ) -> CampOfferListResponse:
+        visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
         items, total = self._postgres_store.list_camp_offers_page(
             keyword=keyword,
             plan_id=plan_id,
@@ -451,15 +454,86 @@ class RuntimeManagementStoreRecruitmentMixin:
             sort_order=sort_order,
             page=page,
             page_size=page_size,
+            visible_advisor_names=visible_advisor_names,
         )
         records = [CampOfferRecord(**item) for item in items]
         return CampOfferListResponse(items=records, total=total, page=page, page_size=page_size)
 
-    def get_camp_offer_detail(self, offer_id: int) -> CampOfferRecord:
-        item = self._postgres_store.get_camp_offer_detail(int(offer_id))
+    def get_camp_offer_detail(
+        self,
+        offer_id: int,
+        principal: Any | None = None,
+    ) -> CampOfferRecord:
+        visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
+        item = self._postgres_store.get_camp_offer_detail(
+            int(offer_id), visible_advisor_names=visible_advisor_names
+        )
         if item is None:
             raise KeyError("Camp offer not found")
         return CampOfferRecord(**item)
+
+    def count_camp_offer_stats(
+        self,
+        *,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        is_sent_mail: bool | None = None,
+        is_agree: bool | None = None,
+        first_choice_advisor: str | None = None,
+        first_choice_team: str | None = None,
+        first_choice_score_op: str | None = None,
+        first_choice_score: float | None = None,
+        second_choice_advisor: str | None = None,
+        second_choice_team: str | None = None,
+        second_choice_score_op: str | None = None,
+        second_choice_score: float | None = None,
+    ) -> dict[str, int]:
+        return self._postgres_store.count_camp_offer_stats(
+            keyword=keyword,
+            plan_id=plan_id,
+            is_sent_mail=is_sent_mail,
+            is_agree=is_agree,
+            first_choice_advisor=first_choice_advisor,
+            first_choice_team=first_choice_team,
+            first_choice_score_op=first_choice_score_op,
+            first_choice_score=first_choice_score,
+            second_choice_advisor=second_choice_advisor,
+            second_choice_team=second_choice_team,
+            second_choice_score_op=second_choice_score_op,
+            second_choice_score=second_choice_score,
+        )
+
+    def get_camp_offer_stats(
+        self,
+        *,
+        keyword: str | None = None,
+        plan_id: int | None = None,
+        is_sent_mail: bool | None = None,
+        is_agree: bool | None = None,
+        first_choice_advisor: str | None = None,
+        first_choice_team: str | None = None,
+        first_choice_score_op: str | None = None,
+        first_choice_score: float | None = None,
+        second_choice_advisor: str | None = None,
+        second_choice_team: str | None = None,
+        second_choice_score_op: str | None = None,
+        second_choice_score: float | None = None,
+    ) -> CampOfferStats:
+        counts = self._postgres_store.count_camp_offer_stats(
+            keyword=keyword,
+            plan_id=plan_id,
+            is_sent_mail=is_sent_mail,
+            is_agree=is_agree,
+            first_choice_advisor=first_choice_advisor,
+            first_choice_team=first_choice_team,
+            first_choice_score_op=first_choice_score_op,
+            first_choice_score=first_choice_score,
+            second_choice_advisor=second_choice_advisor,
+            second_choice_team=second_choice_team,
+            second_choice_score_op=second_choice_score_op,
+            second_choice_score=second_choice_score,
+        )
+        return CampOfferStats(**counts)
 
     def export_camp_offers(
         self,
@@ -476,11 +550,13 @@ class RuntimeManagementStoreRecruitmentMixin:
         second_choice_team: str | None = None,
         second_choice_score_op: str | None = None,
         second_choice_score: float | None = None,
+        principal: Any | None = None,
     ) -> list[dict[str, Any]]:
         """Return all camp-offer rows matching the supplied filters (ignoring
         pagination). Used by the /camp-offers/export endpoint to build an
         Excel workbook for the operator."""
 
+        visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
         items, _ = self._postgres_store.list_camp_offers_page(
             keyword=keyword,
             plan_id=plan_id,
@@ -498,6 +574,7 @@ class RuntimeManagementStoreRecruitmentMixin:
             sort_order=None,
             page=1,
             page_size=50000,
+            visible_advisor_names=visible_advisor_names,
         )
         return [dict(item) for item in items]
 

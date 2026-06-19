@@ -604,6 +604,8 @@ PERMISSION_CATALOG: list[dict[str, str]] = [
     {"code": "research_center:read", "name": "查看研究中心菜单", "module_name": "学生管理", "description": "查看学生管理下的研究中心入口与中心数据。"},
     {"code": "research_center:write", "name": "维护研究中心数据", "module_name": "学生管理", "description": "维护研究中心资料、负责人和导师团队。"},
     {"code": "recruitment_advisor_screening:read", "name": "查看导师初筛菜单", "module_name": "招生管理", "description": "查看招生管理下的导师初筛入口。"},
+    {"code": "recruitment_camp_offer:read", "name": "查看入营名单菜单", "module_name": "招生管理", "description": "查看招生管理下的入营名单入口。"},
+    {"code": "recruitment_camp_offer:write", "name": "维护入营名单数据", "module_name": "招生管理", "description": "新建、编辑、删除和导入入营名单，发送通知邮件并维护邮件模板。"},
     {"code": "recruitment_initial_screening_confirmation:read", "name": "查看初筛确认菜单", "module_name": "招生管理", "description": "查看招生管理下的初筛确认入口。"},
     {"code": "students:read", "name": "查看学生主档", "module_name": "学生管理", "description": "查看学生档案、状态和导师信息。"},
     {"code": "students:write", "name": "维护学生主档", "module_name": "学生管理", "description": "维护学生信息、导师和团队关系。"},

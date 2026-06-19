@@ -230,6 +230,14 @@ export type CampOfferRecord = {
 
 export type CampOfferListResponse = PagedResponse<CampOfferRecord>
 
+export type CampOfferStats = {
+  sent_mail: number
+  agreed: number
+  declined: number
+  unsigned: number
+  total: number
+}
+
 export type CampOfferUpsert = {
   candidate_no: string
   plan_id?: number | null
@@ -624,6 +632,23 @@ export function listCampOffers(params: {
   page_size?: number
 }) {
   return http.get<CampOfferListResponse>('/recruitment/camp-offers', { params })
+}
+
+export function getCampOfferStats(params: {
+  keyword?: string
+  plan_id?: number
+  is_sent_mail?: boolean
+  is_agree?: boolean
+  first_choice_advisor?: string
+  first_choice_team?: string
+  first_choice_score_op?: 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le'
+  first_choice_score?: number
+  second_choice_advisor?: string
+  second_choice_team?: string
+  second_choice_score_op?: 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le'
+  second_choice_score?: number
+}) {
+  return http.get<CampOfferStats>('/recruitment/camp-offers/stats', { params })
 }
 
 export function getCampOfferDetail(offerId: number) {

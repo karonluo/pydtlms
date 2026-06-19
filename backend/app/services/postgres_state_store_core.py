@@ -1298,6 +1298,7 @@ class PostgresStateStoreCoreMixin:
             "created_date": cls._stringify_datetime(row.get("created_date")),
             "member_student_count": int(row.get("member_student_count") or 0),
             "active_student_count": int(row.get("active_student_count") or 0),
+            "student_count": int(row.get("student_count") or 0),
         }
 
     @classmethod

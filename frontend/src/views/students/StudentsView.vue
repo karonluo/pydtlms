@@ -1471,7 +1471,7 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-form v-else-if="isCenterSection" class="filter-form" :inline="true">
+      <el-form v-if="false" class="filter-form" :inline="true">
         <el-form-item label="关键字">
           <el-input v-model="centerFilters.keyword" placeholder="研究中心名称 / 负责人 / 导师团队" clearable />
         </el-form-item>
@@ -1614,7 +1614,7 @@ onMounted(() => {
           </el-table-column>
         </el-table>
 
-        <el-table v-else-if="isCenterSection" :data="centers" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleCenterSelectionChange">
+        <el-table v-if="false" :data="centers" stripe border v-loading="loading" table-layout="fixed" @selection-change="handleCenterSelectionChange">
           <el-table-column v-if="canMaintainCenterSection" type="selection" width="44" />
           <el-table-column prop="center_name" label="研究中心名称" min-width="180" show-overflow-tooltip />
           <el-table-column prop="director_name" label="负责人" width="120" show-overflow-tooltip />

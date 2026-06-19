@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Promotion, Check, CircleClose, EditPen, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
@@ -12,6 +13,7 @@ import {
   deleteOfferTemplate,
   exportCampOffers,
   fetchOfferTemplatePreview,
+  getCampOfferStats,
   importCampOffers,
   listCampOffers,
   listOfferTemplates,
@@ -21,12 +23,14 @@ import {
   uploadOfferTemplate,
   type CampOfferNotificationSendResponse,
   type CampOfferRecord,
+  type CampOfferStats,
   type CampOfferUpsert,
   type OfferTemplateRecord,
   type RecruitPlanRecord,
 } from '../../api/recruitment'
 import { getRecruitmentOptions, type RecruitmentOptions } from '../../api/recruitment'
 import { listCenters } from '../../api/students'
+import { useAuthStore } from '../../stores/auth'
 
 type OfferTemplateId = string | number
 
@@ -54,6 +58,13 @@ const loading = ref(false)
 const saving = ref(false)
 const importing = ref(false)
 const exporting = ref(false)
+const statsLoading = ref(false)
+const campOfferStats = ref<CampOfferStats | null>(null)
+const filterCollapsed = ref(false)
+
+function toggleFilterCollapsed() {
+  filterCollapsed.value = !filterCollapsed.value
+}
 const dialogVisible = ref(false)
 const dialogMode = ref<DialogMode>('create')
 const currentOfferId = ref<number | null>(null)
@@ -66,6 +77,11 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 const notifyDialogVisible = ref(false)
 const notifySubmitting = ref(false)
 const notifyResult = ref<CampOfferNotificationSendResponse | null>(null)
+
+const authStore = useAuthStore()
+const roleSet = computed(() => new Set(authStore.roles || []))
+// advisor 角色仅查看入营名单（隐藏所有写操作 UI）
+const isAdvisorRole = computed(() => roleSet.value.has('advisor') && !roleSet.value.has('*'))
 const notifyForm = reactive({
   template_id: 'first' as OfferTemplateId,
   simulate: false,
@@ -167,13 +183,42 @@ const mailOptions = [
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增入营名单' : '编辑入营名单'))
 
-const tableActions = computed<TableRowAction<CampOfferRecord>[]>(() => [
-  { key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog },
-])
+type CampOfferKpi = {
+  key: 'sent_mail' | 'agreed' | 'declined' | 'unsigned'
+  title: string
+  status: 'healthy' | 'attention' | 'warning'
+  icon: unknown
+}
 
-const tableMoreActions = computed<TableRowAction<CampOfferRecord>[]>(() => [
-  { key: 'delete', label: '删除', type: 'danger', onClick: handleDelete },
-])
+const KPI_DEFINITIONS: CampOfferKpi[] = [
+  { key: 'sent_mail', title: '已发邮件', status: 'healthy', icon: Promotion },
+  { key: 'agreed', title: '已同意', status: 'healthy', icon: Check },
+  { key: 'declined', title: '不同意', status: 'attention', icon: CircleClose },
+  { key: 'unsigned', title: '未签署', status: 'warning', icon: EditPen },
+]
+
+const kpiCards = computed(() =>
+  KPI_DEFINITIONS.map((card) => {
+    const stats = campOfferStats.value
+    const fallback = statsLoading.value ? '…' : '0'
+    return {
+      ...card,
+      value: stats ? String(stats[card.key] ?? 0) : fallback,
+    }
+  })
+)
+
+const tableActions = computed<TableRowAction<CampOfferRecord>[]>(() =>
+  isAdvisorRole.value ? [] : [
+    { key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog },
+  ]
+)
+
+const tableMoreActions = computed<TableRowAction<CampOfferRecord>[]>(() =>
+  isAdvisorRole.value ? [] : [
+    { key: 'delete', label: '删除', type: 'danger', onClick: handleDelete },
+  ]
+)
 
 function extractErrorMessage(error: any, fallback: string): string {
   if (axios.isAxiosError(error)) {
@@ -297,34 +342,55 @@ async function fetchTeamOptions() {
   }
 }
 
+function buildFilterParams() {
+  return {
+    keyword: filters.keyword || undefined,
+    plan_id: typeof filters.plan_id === 'number' ? filters.plan_id : undefined,
+    is_sent_mail: normalizeBooleanFilter(filters.is_sent_mail),
+    is_agree: normalizeBooleanFilter(filters.is_agree),
+    first_choice_advisor: filters.first_choice_advisor || undefined,
+    first_choice_team: filters.first_choice_team || undefined,
+    first_choice_score_op:
+      filters.first_choice_score_op && filters.first_choice_score !== null
+        ? filters.first_choice_score_op
+        : undefined,
+    first_choice_score:
+      filters.first_choice_score_op && filters.first_choice_score !== null
+        ? filters.first_choice_score
+        : undefined,
+    second_choice_advisor: filters.second_choice_advisor || undefined,
+    second_choice_team: filters.second_choice_team || undefined,
+    second_choice_score_op:
+      filters.second_choice_score_op && filters.second_choice_score !== null
+        ? filters.second_choice_score_op
+        : undefined,
+    second_choice_score:
+      filters.second_choice_score_op && filters.second_choice_score !== null
+        ? filters.second_choice_score
+        : undefined,
+  }
+}
+
+async function fetchCampOfferStats() {
+  statsLoading.value = true
+  try {
+    const response = await getCampOfferStats(buildFilterParams())
+    campOfferStats.value = response.data
+  } catch (error: any) {
+    // Stats are non-critical; surface a console warning but do not
+    // interrupt the rest of the page.
+    // eslint-disable-next-line no-console
+    console.warn('加载入营名单统计失败', error)
+  } finally {
+    statsLoading.value = false
+  }
+}
+
 async function fetchOffers() {
   loading.value = true
   try {
     const response = await listCampOffers({
-      keyword: filters.keyword || undefined,
-      plan_id: typeof filters.plan_id === 'number' ? filters.plan_id : undefined,
-      is_sent_mail: normalizeBooleanFilter(filters.is_sent_mail),
-      is_agree: normalizeBooleanFilter(filters.is_agree),
-      first_choice_advisor: filters.first_choice_advisor || undefined,
-      first_choice_team: filters.first_choice_team || undefined,
-      first_choice_score_op:
-        filters.first_choice_score_op && filters.first_choice_score !== null
-          ? filters.first_choice_score_op
-          : undefined,
-      first_choice_score:
-        filters.first_choice_score_op && filters.first_choice_score !== null
-          ? filters.first_choice_score
-          : undefined,
-      second_choice_advisor: filters.second_choice_advisor || undefined,
-      second_choice_team: filters.second_choice_team || undefined,
-      second_choice_score_op:
-        filters.second_choice_score_op && filters.second_choice_score !== null
-          ? filters.second_choice_score_op
-          : undefined,
-      second_choice_score:
-        filters.second_choice_score_op && filters.second_choice_score !== null
-          ? filters.second_choice_score
-          : undefined,
+      ...buildFilterParams(),
       sort_by: sortBy.value || undefined,
       sort_order: sortBy.value ? sortOrder.value : undefined,
       page: pager.pagination.currentPage,
@@ -342,6 +408,7 @@ async function fetchOffers() {
 function handleSearch() {
   pager.pagination.currentPage = 1
   void fetchOffers()
+  void fetchCampOfferStats()
 }
 
 function handleResetFilters() {
@@ -692,6 +759,7 @@ onMounted(async () => {
   await fetchAdvisorOptions()
   await fetchTeamOptions()
   await fetchOfferTemplates()
+  await fetchCampOfferStats()
   await fetchOffers()
 })
 </script>
@@ -699,27 +767,52 @@ onMounted(async () => {
 <template>
   <section class="camp-offer-page">
     <header class="camp-offer-page__header">
-      <div>
+      <div class="camp-offer-page__title">
         <p class="camp-offer-page__tag">招生管理 / 初筛管理</p>
         <h2>入营名单</h2>
       </div>
-      <div class="camp-offer-page__actions">
-        <el-upload
-          :show-file-list="false"
-          accept=".xlsx,.xls"
-          :before-upload="handleImportUpload"
-          :disabled="importing"
+      <div class="camp-offer-kpi-strip">
+        <div
+          v-for="card in kpiCards"
+          :key="card.key"
+          class="camp-offer-kpi-tile"
+          :data-status="card.status"
+          :title="card.title"
         >
-          <el-button :loading="importing" type="success" plain>上传导入</el-button>
-        </el-upload>
+          <el-icon class="camp-offer-kpi-tile__icon">
+            <component :is="card.icon" />
+          </el-icon>
+          <span class="camp-offer-kpi-tile__value">{{ card.value }}</span>
+          <span class="camp-offer-kpi-tile__label">{{ card.title }}</span>
+        </div>
+      </div>
+      <div class="camp-offer-page__actions">
+        <template v-if="!isAdvisorRole">
+          <el-upload
+            :show-file-list="false"
+            accept=".xlsx,.xls"
+            :before-upload="handleImportUpload"
+            :disabled="importing"
+          >
+            <el-button :loading="importing" type="success" plain>上传导入</el-button>
+          </el-upload>
+          <el-button type="warning" plain :disabled="!selectedOfferIds.length" @click="openNotifyDialog">发送通知邮件</el-button>
+          <el-button type="primary" @click="openCreateDialog">新增记录</el-button>
+        </template>
         <el-button :loading="exporting" type="primary" plain @click="handleExportList">导出清单</el-button>
-        <el-button type="warning" plain :disabled="!selectedOfferIds.length" @click="openNotifyDialog">发送通知邮件</el-button>
-        <el-button type="primary" @click="openCreateDialog">新增记录</el-button>
       </div>
     </header>
-
-    <el-card shadow="never" class="filter-card">
-      <el-form label-width="110px" class="filter-form">
+    <el-card shadow="never" class="filter-card" :class="{ 'is-collapsed': filterCollapsed }">
+      <div class="filter-card__head">
+        <span class="filter-card__title">筛选条件</span>
+        <el-button text class="filter-card__toggle" @click="toggleFilterCollapsed">
+          <span>{{ filterCollapsed ? '展开' : '收起' }}</span>
+          <el-icon class="filter-card__toggle-icon">
+            <component :is="filterCollapsed ? ArrowDown : ArrowUp" />
+          </el-icon>
+        </el-button>
+      </div>
+      <el-form v-show="!filterCollapsed" label-width="80px" class="filter-form">
         <div class="filter-row filter-row--primary">
           <el-form-item label="报名号/姓名" class="filter-row__item">
             <el-input v-model="filters.keyword" placeholder="报名号/姓名" clearable @keyup.enter="handleSearch" />
@@ -741,7 +834,7 @@ onMounted(async () => {
           </el-form-item>
         </div>
         <div class="filter-row filter-row--choice">
-          <el-form-item label="第一志愿导师" class="filter-row__item">
+          <el-form-item v-if="!isAdvisorRole" label="第一志愿导师" class="filter-row__item">
             <el-select
               v-model="filters.first_choice_advisor"
               placeholder="第一志愿导师"
@@ -752,7 +845,7 @@ onMounted(async () => {
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="第一志愿中心" class="filter-row__item">
+          <el-form-item v-if="!isAdvisorRole" label="第一志愿中心" class="filter-row__item">
             <el-select
               v-model="filters.first_choice_team"
               placeholder="第一志愿中心"
@@ -781,7 +874,7 @@ onMounted(async () => {
           </el-form-item>
         </div>
         <div class="filter-row filter-row--choice">
-          <el-form-item label="第二志愿导师" class="filter-row__item">
+          <el-form-item v-if="!isAdvisorRole" label="第二志愿导师" class="filter-row__item">
             <el-select
               v-model="filters.second_choice_advisor"
               placeholder="第二志愿导师"
@@ -792,7 +885,7 @@ onMounted(async () => {
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="第二志愿中心" class="filter-row__item">
+          <el-form-item v-if="!isAdvisorRole" label="第二志愿中心" class="filter-row__item">
             <el-select
               v-model="filters.second_choice_team"
               placeholder="第二志愿中心"
@@ -821,7 +914,7 @@ onMounted(async () => {
           </el-form-item>
         </div>
       </el-form>
-      <div class="filter-actions">
+      <div v-show="!filterCollapsed" class="filter-actions">
         <el-button type="primary" @click="handleSearch">查询</el-button>
         <el-button @click="handleResetFilters">重置</el-button>
       </div>
@@ -835,16 +928,9 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column type="selection" width="44" />
+        <el-table-column prop="plan_name" label="计划名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="candidate_no" label="报名号" min-width="140" />
-        <el-table-column label="是否已发邮件" min-width="110" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.is_sent_mail ? 'success' : 'info'">{{ row.is_sent_mail ? '是' : '否' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建日期" min-width="170">
-          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column prop="plan_name" label="计划名" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="student_name" label="学生姓名" min-width="120" show-overflow-tooltip />
         <el-table-column label="是否同意" min-width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.is_agree === true" type="success">同意</el-tag>
@@ -852,18 +938,21 @@ onMounted(async () => {
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="student_name" label="学生姓名" min-width="120" show-overflow-tooltip />
+        <el-table-column label="已发邮件" min-width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.is_sent_mail ? 'success' : 'info'">{{ row.is_sent_mail ? '是' : '否' }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="first_choice_advisor_name" label="第一志愿导师" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="first_choice_advisor_team_name" label="第一志愿导师所属团队" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="first_choice_screening_score" label="第一志愿导师分数" width="140" sortable="custom" align="center">
+        <el-table-column prop="first_choice_advisor_team_name" label="第一志愿中心" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="first_choice_screening_score" label="第一志愿分数" width="120" sortable="custom" align="center">
           <template #default="{ row }">
             {{ row.first_choice_screening_score ?? '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="second_choice_advisor_name" label="第二志愿导师" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="second_choice_advisor_team_name" label="第二志愿导师所属团队" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="second_choice_screening_score" label="第二志愿导师分数" width="140" sortable="custom" align="center">
+        <el-table-column prop="second_choice_advisor_team_name" label="第二志愿中心" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="second_choice_screening_score" label="第二志愿分数" width="120" sortable="custom" align="center">
           <template #default="{ row }">
             {{ row.second_choice_screening_score ?? '-' }}
           </template>
@@ -961,7 +1050,7 @@ onMounted(async () => {
                 </el-radio-group>
               </div>
 
-              <div class="offer-template-section">
+              <div v-if="!isAdvisorRole" class="offer-template-section">
                 <div class="offer-template-section__title">上传模板</div>
                 <el-radio-group
                   v-if="uploadedTemplateOptions.length"
@@ -1070,13 +1159,15 @@ onMounted(async () => {
 }
 
 .camp-offer-page__header {
-  display: flex;
+  display: grid;
+  /* 3 columns: title (left) | KPI strip (center, flexes) | actions (right) */
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
   padding: 14px 16px;
+  gap: 16px;
 }
 
 .camp-offer-page__tag {
@@ -1100,59 +1191,250 @@ onMounted(async () => {
   border-radius: 8px;
 }
 
+/* Reduce el-table row height by 5px: shrink the row's height
+   and pull the cell padding in. Applies to the main offers
+   table only (the notify-result table uses size="small"). */
+.table-card :deep(.el-table__row),
+.table-card :deep(.el-table__row td) {
+  height: 40px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.filter-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+  height: 25px;
+}
+
+/* Collapsed state: hide head bottom margin, drop card body padding
+   so the total card height is exactly 45px. */
+.filter-card.is-collapsed {
+  --el-card-padding: 0 16px;
+}
+
+.filter-card.is-collapsed :deep(.el-card__body) {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.filter-card.is-collapsed .filter-card__head {
+  margin-bottom: 0;
+  height: 25px;
+}
+
+.filter-card__title {
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.filter-card__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.filter-card__toggle-icon {
+  font-size: 14px;
+  transition: transform 0.15s ease-in-out;
+}
+
+.camp-offer-kpi-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-self: center;
+  justify-self: center;
+  height: 100%;
+}
+
+.camp-offer-kpi-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  min-width: 132px;
+  padding: 0 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.camp-offer-kpi-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #ffffff;
+  background: var(--brand);
+}
+
+.camp-offer-kpi-tile[data-status="attention"] .camp-offer-kpi-tile__icon {
+  background: #f2a531;
+}
+
+.camp-offer-kpi-tile[data-status="warning"] .camp-offer-kpi-tile__icon {
+  background: #ea725b;
+}
+
+.camp-offer-kpi-tile__value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-main);
+  min-width: 18px;
+  text-align: center;
+}
+
+.camp-offer-kpi-tile__label {
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+
 .filter-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
+/* Each filter row is a 4-column grid. Empty trailing cells still occupy
+   their column so controls line up vertically across rows. */
 .filter-row {
   display: grid;
-  column-gap: 12px;
-  row-gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 10px;
+  row-gap: 10px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.filter-row--primary {
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
-}
-
+.filter-row--primary,
 .filter-row--choice {
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .filter-row__item {
   margin-bottom: 0;
+  min-width: 0;
 }
 
-.filter-row__item :deep(.el-form-item__content) {
-  width: 100%;
+/* Each cell is a label (left) + control (right) with a 10px gap. The
+   label is a fixed 92px wide so all labels line up; the control is a
+   fixed 200px wide so every control in the same row is identical. */
+.filter-form :deep(.el-form-item) {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+  height: 32px;
+  box-sizing: border-box;
 }
 
+.filter-form :deep(.el-form-item__label) {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  flex: 0 0 80px;
+  text-align: left;
+  justify-content: flex-start;
+  white-space: nowrap;
+  padding: 0;
+  margin: 0;
+  height: 32px;
+  line-height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+
+.filter-form :deep(.el-form-item__content) {
+  display: flex;
+  align-items: center;
+  width: 200px;
+  min-width: 0;
+  max-width: 200px;
+  flex: 0 0 200px;
+  height: 32px;
+  box-sizing: border-box;
+}
+
+/* Every control is exactly 200px wide inside the content cell. */
+.filter-form :deep(.el-form-item__content > .el-input),
+.filter-form :deep(.el-form-item__content > .el-select),
+.filter-form :deep(.el-form-item__content > .el-input-number),
+.filter-form :deep(.el-form-item__content > .filter-score) {
+  width: 200px !important;
+  flex: 0 0 200px;
+  min-width: 200px;
+  max-width: 200px;
+}
+
+/* OP+score combined is exactly 200px, matching one text field. */
 .filter-score {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
+  gap: 5px;
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  box-sizing: border-box;
 }
 
+/* OP select: ~2x the width of one operator symbol. */
 .filter-score__op {
-  width: 86px;
-  flex-shrink: 0;
+  width: 60px;
+  flex: 0 0 60px;
+  min-width: 60px;
+  max-width: 60px;
+}
+
+.filter-score__op :deep(.el-select__wrapper) {
+  min-width: 0;
+  width: 100%;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 .filter-score__value {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  width: 135px;
+  margin-left: 0;
 }
 
 .filter-score__value :deep(.el-input-number) {
   width: 100%;
+  min-width: 0;
 }
 
 .filter-score__value :deep(.el-input-number .el-input-number__decrease),
 .filter-score__value :deep(.el-input-number .el-input-number__increase) {
-  width: 24px;
+  width: 20px;
 }
+
+
 
 .filter-actions {
   margin-top: 10px;

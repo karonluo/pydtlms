@@ -1004,12 +1004,14 @@ class PostgresStateStoreQueryStudentsMixin:
                         t.team_status,
                         COALESCE(TO_CHAR(t.established_on, 'YYYY-MM-DD'), TO_CHAR(t.created_at::date, 'YYYY-MM-DD')) AS created_date,
                         COALESCE(student_stats.member_student_count, 0) AS member_student_count,
-                        COALESCE(student_stats.active_student_count, 0) AS active_student_count
+                        COALESCE(student_stats.active_student_count, 0) AS active_student_count,
+                        COALESCE(student_stats.student_count, 0) AS student_count
                     FROM dtlms_teams t
                     LEFT JOIN dtlms_users lead ON lead.id = t.lead_user_id AND lead.is_deleted = FALSE
                     LEFT JOIN LATERAL (
                         SELECT
                             string_agg(advisor_rows.advisor_name, '、' ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_names,
+                            COALESCE(array_agg(advisor_rows.advisor_name ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id), ARRAY[]::text[]) AS advisor_names_arr,
                             array_agg(advisor_rows.advisor_user_id ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_ids,
                             array_agg(advisor_rows.relation_id ORDER BY advisor_rows.sort_role, advisor_rows.advisor_name, advisor_rows.relation_id) AS advisor_relation_ids
                         FROM (
@@ -1026,7 +1028,22 @@ class PostgresStateStoreQueryStudentsMixin:
                     LEFT JOIN LATERAL (
                         SELECT
                             COUNT(*) AS member_student_count,
-                            COUNT(*) FILTER (WHERE s.current_status IN ('enrolled', 'internship', 'outbound', 'thesis')) AS active_student_count
+                            COUNT(*) FILTER (WHERE s.current_status IN ('enrolled', 'internship', 'outbound', 'thesis')) AS active_student_count,
+                            (
+                                SELECT COUNT(DISTINCT offer.candidate_no)
+                                FROM dtlms_plan_offer offer
+                                JOIN dtlms_recruitment_applications app
+                                    ON app.candidate_no = offer.candidate_no
+                                       AND app.is_deleted = FALSE
+                                WHERE offer.submitted_at IS NOT NULL
+                                  AND offer.is_agree = TRUE
+                                  AND (
+                                        (app.first_choice_screening_score >= 80
+                                            AND app.first_choice = ANY (advisor_names.advisor_names_arr))
+                                     OR (app.second_choice_screening_score >= 80
+                                            AND app.second_choice = ANY (advisor_names.advisor_names_arr))
+                                  )
+                            ) AS student_count
                         FROM dtlms_students s
                         WHERE s.team_id = t.id AND s.is_deleted = FALSE
                     ) student_stats ON TRUE

@@ -161,6 +161,7 @@ export type CenterRecord = {
   created_date?: string | null
   member_student_count: number
   active_student_count: number
+  student_count: number
 }
 
 

@@ -180,6 +180,8 @@ class CenterRecord(BaseModel):
     created_date: str | None = None
     member_student_count: int = 0
     active_student_count: int = 0
+    # 上营名单已提交且同意入营，且第一/第二志愿导师得分>=80并选择中心所属导师的学生数
+    student_count: int = 0
 
 
 class CenterUpsert(BaseModel):

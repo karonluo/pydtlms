@@ -698,6 +698,26 @@ class CampOfferListResponse(PaginationResponseBase):
     items: list[CampOfferRecord]
 
 
+class CampOfferStats(BaseModel):
+    """Headline counts for the camp-offer workbench.
+
+    * ``sent_mail``: rows with ``is_sent_mail = true`` (operator already
+      sent the notification email).
+    * ``agreed``: rows with ``is_agree = true`` (student confirmed).
+    * ``declined``: rows with ``is_agree = false`` (student declined).
+    * ``unsigned``: rows with no ``student_offer_submitted_at`` (student
+      has not submitted the offer-confirmation form yet).
+    * ``total``: total rows considered (after applying the same filters
+      as the list endpoint, minus pagination).
+    """
+
+    sent_mail: int = 0
+    agreed: int = 0
+    declined: int = 0
+    unsigned: int = 0
+    total: int = 0
+
+
 class CampOfferImportIssue(BaseModel):
     row_number: int
     candidate_no: str | None = None
