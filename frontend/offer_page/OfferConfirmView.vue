@@ -57,6 +57,22 @@ async function handleSubmit() {
     ElMessage.warning('请先填写邮箱和密码')
     return
   }
+  // 二次确认：明确告知用户当前的选择及提交后的不可逆性
+  const choiceText = form.choice === 'accept' ? '接受邀请（确认入营）' : '拒绝邀请（放弃入营）'
+  try {
+    await ElMessageBox.confirm(
+      `您当前选择的是：${choiceText}。\n\n提交后将无法修改，请确认信息无误。`,
+      '提交确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认提交',
+        cancelButtonText: '再看看',
+        dangerouslyUseHTMLString: false,
+      },
+    )
+  } catch {
+    return
+  }
   submitting.value = true
   try {
     const payload = new FormData()
