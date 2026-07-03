@@ -14,6 +14,7 @@ from app.schemas.recruitment import (
     AdvisorScreeningScoreUpdateRequest,
     AdvisorScreeningBatchSubmitRequest,
     AdvisorScreeningBatchSubmitResponse,
+    HackathonScoreImportResult,
     CampOfferImportResult,
     CampOfferListResponse,
     CampOfferStats,
@@ -68,6 +69,7 @@ from app.services.dashboard_service import (
     update_recruitment_application,
     update_recruitment_plan,
     update_advisor_screening_score,
+    set_camp_offer_accepted_status,
 )
 from app.services.advisor_screening_pending_service import list_advisor_screening_pending_applications
 from app.services.advisor_screening_submitted_service import (
@@ -77,7 +79,10 @@ from app.services.advisor_screening_submitted_service import (
 )
 from app.services.initial_screening_confirmation_service import list_initial_screening_confirmation_applications
 from app.services.camp_offer_confirmation_service import submit_camp_offer_confirmation
-from app.services.camp_offer_import_service import import_camp_offers_from_excel
+from app.services.camp_offer_import_service import (
+    import_camp_offers_from_excel,
+    import_hackathon_scores_from_excel,
+)
 from app.services.camp_offer_notification_service import (
     OFFER_TEMPLATE_UPLOAD_DIR as _OFFER_TEMPLATE_UPLOAD_DIR,
     send_camp_offer_notifications,
@@ -819,6 +824,107 @@ def delete_camp_offer_record(
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camp offer not found") from exc
 
+# ------------------------------------------------------------------
+# 2026-07-03: 黑客松入取状态变更端点 (3 个独立端点，共用 service)
+# - accept  -> accepted = "accepted_pending_send"  (录取未发送)
+# - decline -> accepted = "declined"             (未录取)
+# - pending -> accepted = "pending"              (待定)
+# 权限: 需 recruitment_camp_offer:read (因为 service 层会基于导师/中心负责人身份做判断)。
+# 状态可逆: 允许反复修改。
+# ------------------------------------------------------------------
+@router.post(
+    "/camp-offers/{offer_id}/accept",
+    response_model=CampOfferRecord,
+)
+def accept_camp_offer(
+    offer_id: int,
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:read")),
+) -> CampOfferRecord:
+    """2026-07-03: 录取学生 (设置 accepted=accepted_pending_send)。
+
+    业务侧: 导师/中心负责人/书院管理员 在该学生 一/二志愿分数 >= 80 分时可点击。
+    实际权限校验由 service 层 (_principal_can_change_camp_offer_accepted) 执行。
+    """
+    try:
+        return set_camp_offer_accepted_status(
+            offer_id, "accepted_pending_send", principal=principal
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Camp offer not found"
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@router.post(
+    "/camp-offers/{offer_id}/decline",
+    response_model=CampOfferRecord,
+)
+def decline_camp_offer(
+    offer_id: int,
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:read")),
+) -> CampOfferRecord:
+    """2026-07-03: 不录取学生 (设置 accepted=declined)。
+
+    业务侧: 导师/中心负责人/书院管理员 在该学生 一/二志愿分数 >= 80 分时可点击。
+    实际权限校验由 service 层 (_principal_can_change_camp_offer_accepted) 执行。
+    """
+    try:
+        return set_camp_offer_accepted_status(
+            offer_id, "declined", principal=principal
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Camp offer not found"
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@router.post(
+    "/camp-offers/{offer_id}/pending",
+    response_model=CampOfferRecord,
+)
+def mark_camp_offer_pending(
+    offer_id: int,
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:read")),
+) -> CampOfferRecord:
+    """2026-07-03: 待定学生 (设置 accepted=pending)。
+
+    业务侧: 导师/中心负责人/书院管理员 在该学生 一/二志愿分数 >= 80 分时可点击。
+    实际权限校验由 service 层 (_principal_can_change_camp_offer_accepted) 执行。
+    """
+    try:
+        return set_camp_offer_accepted_status(
+            offer_id, "pending", principal=principal
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Camp offer not found"
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
 
 @router.post("/camp-offers/import", response_model=CampOfferImportResult)
 async def import_camp_offer_records(
@@ -828,6 +934,22 @@ async def import_camp_offer_records(
 ) -> CampOfferImportResult:
     try:
         return import_camp_offers_from_excel(await file.read(), plan_id=plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+# 2026-07-03: 黑客松夏令营「评分导入」专用端点
+# 区别于 /camp-offers/import (用 candidate_no 匹配入营名单), 本端点:
+#   - 通过 dtlms_recruitment_applications.student_phone + student_email 联合匹配 (Q1+Q2)
+#   - 仅更新 hackathon_score / hackathon_comments 两个字段 (Q4: 无条件覆盖)
+#   - 匹配不到入营名单的行跳过, 在 issues 中报告 (Q3)
+@router.post("/camp-offers/import-hackathon-scores", response_model=HackathonScoreImportResult)
+async def import_hackathon_score_records(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:write")),
+) -> HackathonScoreImportResult:
+    try:
+        return import_hackathon_scores_from_excel(await file.read())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

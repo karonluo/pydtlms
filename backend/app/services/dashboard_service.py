@@ -548,6 +548,24 @@ def delete_camp_offer(offer_id: int, principal: Principal | None = None) -> None
     store.delete_camp_offer(offer_id, principal=principal)
 
 
+def set_camp_offer_accepted_status(
+    offer_id: int,
+    accepted: str | None,
+    principal: Principal | None = None,
+) -> CampOfferRecord:
+    """2026-07-03: 修改入营名单 accepted 状态 (录取/不录取/待定/清空) 的统一入口。
+
+    业务侧 API 会把这个函数包装为 3 个独立端点:
+      POST /camp-offers/{id}/accept   -> accepted="accepted_pending_send"
+      POST /camp-offers/{id}/decline  -> accepted="declined"
+      POST /camp-offers/{id}/pending  -> accepted="pending"
+    service 层会做权限校验 (书院管理员/平台管理员放行，
+    其余角色需 offer_row.can_change_accepted=True)。
+    """
+    return store.set_camp_offer_accepted_status(offer_id, accepted, principal=principal)
+
+
+
 def import_camp_offers(rows: list[dict[str, Any]], plan_id: int | None = None, principal: Principal | None = None) -> CampOfferImportResult:
     return store.import_camp_offers(rows=rows, plan_id=plan_id, principal=principal)
 

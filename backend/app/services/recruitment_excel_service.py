@@ -377,6 +377,102 @@ def parse_camp_offer_template(file_bytes: bytes) -> list[dict[str, Any]]:
         result.append(item)
     return result
 
+# 2026-07-03: 黑客松夏令营「评分导入」专用解析器
+# 客户需求: 表头字段为「学生手机号 / 学生邮箱 / 夏令营评分 / 夏令营评语」
+# 匹配规则 (Q1 确认 A): 通过 dtlms_recruitment_applications.student_phone AND student_email 联合匹配
+# 返回结构: 每行 = { row_number, phone, email, hackathon_score, hackathon_comments }
+# 业务要求 (Q3): 匹配不到入营名单记录时由调用方跳过, 这里只负责解析
+def parse_hackathon_score_template(file_bytes: bytes) -> list[dict[str, Any]]:
+    """解析「黑客松评分导入」Excel 模板。
+
+    表头(中英文任一, 不区分大小写, 允许空格差异):
+        - 学生手机号 / phone / student_phone
+        - 学生邮箱 / email / student_email
+        - 夏令营评分 / hackathon_score
+        - 夏令营评语 / hackathon_comments
+
+    返回:
+        list[dict], 每项 = {
+            "row_number":  int,    # Excel 行号(从 2 起, 表头为 1)
+            "phone":       str | None,
+            "email":       str | None,
+            "hackathon_score":    float | None,  # 缺失或无法解析为 None
+            "hackathon_comments": str | None,
+        }
+    """
+    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
+    worksheet = cast(Worksheet, workbook.active)
+    rows = list(worksheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+
+    header_row = rows[0]
+    normalized_headers = [_normalize_header(item).lower() for item in header_row]
+    if not normalized_headers:
+        raise ValueError("导入文件缺少表头")
+
+    # 表头匹配集合
+    phone_headers = {"学生手机号", "phone", "student_phone", "phonenumber", "phone_number"}
+    email_headers = {"学生邮箱", "email", "student_email", "emailaddress"}
+    score_headers = {"夏令营评分", "hackathon_score", "score", "评分"}
+    comment_headers = {"夏令营评语", "hackathon_comments", "comments", "comment", "评语"}
+
+    header_index: dict[str, int] = {}
+    for idx, header in enumerate(normalized_headers):
+        if not header:
+            continue
+        if header in phone_headers:
+            header_index["phone"] = idx
+        elif header in email_headers:
+            header_index["email"] = idx
+        elif header in score_headers:
+            header_index["hackathon_score"] = idx
+        elif header in comment_headers:
+            header_index["hackathon_comments"] = idx
+
+    # 客户指定: 4 个字段都必须有, 否则表头不对
+    missing: list[str] = []
+    for field, label in [
+        ("phone", "学生手机号"),
+        ("email", "学生邮箱"),
+        ("hackathon_score", "夏令营评分"),
+        ("hackathon_comments", "夏令营评语"),
+    ]:
+        if field not in header_index:
+            missing.append(label)
+    if missing:
+        raise ValueError("导入文件缺少必要表头列: " + "、".join(missing))
+
+    result: list[dict[str, Any]] = []
+    # 跳过表头(row 1), 数据从 row 2 开始, row_number 也用 2-based 方便用户对照
+    for row_offset, row in enumerate(rows[1:], start=2):
+        if not any(value not in (None, "") for value in row):
+            continue
+        phone = _normalize_cell(row[header_index["phone"]]) if header_index["phone"] < len(row) else None
+        email = _normalize_cell(row[header_index["email"]]) if header_index["email"] < len(row) else None
+        score_raw = _normalize_cell(row[header_index["hackathon_score"]]) if header_index["hackathon_score"] < len(row) else None
+        comment = _normalize_cell(row[header_index["hackathon_comments"]]) if header_index["hackathon_comments"] < len(row) else None
+
+        # 夏令营评分: 空 -> None; 非空 -> float
+        score: float | None = None
+        if score_raw not in (None, ""):
+            try:
+                score = float(score_raw)
+            except (TypeError, ValueError):
+                # 解析失败也不抛异常, 留到 service 层决定如何处理
+                score = None
+
+        result.append({
+            "row_number": int(row_offset),
+            "phone": phone,
+            "email": email,
+            "hackathon_score": score,
+            "hackathon_comments": comment,
+        })
+    return result
+
+
+
 
 def build_recruitment_template(records: list[dict[str, Any]]) -> bytes:
     workbook = Workbook()

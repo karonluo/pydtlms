@@ -665,7 +665,25 @@ class CampOfferRecord(BaseModel):
     second_choice_screening_score: float | None = None
     created_at: str | None = None
     student_offer_submitted_at: str | None = None
+    # 黑客松夏令营专用字段 (2026-06-30 新增)
+    hackathon_score: float | None = None
+    hackathon_comments: str | None = None
+    accepted: str | None = None  # 黑客松入取状态(字典: hackathon_accepted_status)
+    # 2026-07-03: 当前登录用户能否对该行执行 [录取/不录取/待定] 操作
+    # 规则与列表可见性一致(导师/中心负责人 + 分数>=80 + 流转判断)
+    can_change_accepted: bool = False
 
+
+# 黑客松入取状态允许的字典值(对应数据库 dtlms_dict_data.hackathon_accepted_status)
+# value 为空字符串 '' 代表 NULL (待录取)
+HACKATHON_ACCEPTED_VALUES: set[str] = {
+    "declined",
+    "pending",
+    "accepted_pending_send",
+    "accepted_sent",
+    "accepted_confirmed",
+    "accepted_rejected",
+}
 
 class CampOfferUpsert(BaseModel):
     candidate_no: str
@@ -674,6 +692,13 @@ class CampOfferUpsert(BaseModel):
     is_agree: bool | None = None
     reason: str | None = None
     student_offer_submitted_at: str | None = None
+    # 黑客松夏令营专用字段 (2026-06-30 新增)
+    hackathon_score: float | None = None
+    hackathon_comments: str | None = None
+    accepted: str | None = None  # 黑客松入取状态(字典: hackathon_accepted_status)
+    # 2026-07-03: 当前登录用户能否对该行执行 [录取/不录取/待定] 操作
+    # 规则与列表可见性一致(导师/中心负责人 + 分数>=80 + 流转判断)
+    can_change_accepted: bool = False
 
     @field_validator("candidate_no", mode="before")
     @classmethod
@@ -694,6 +719,38 @@ class CampOfferUpsert(BaseModel):
     def validate_student_offer_submitted_at(cls, value: Any) -> str | None:
         text = str(value or "").strip()
         return text or None
+
+    @field_validator("hackathon_score", mode="before")
+    @classmethod
+    def validate_hackathon_score(cls, value: Any) -> float | None:
+        if value is None or value == "":
+            return None
+        try:
+            score = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("夏令营评分必须为数字") from exc
+        if score < 0 or score > 100:
+            raise ValueError("夏令营评分必须在 0~100 之间")
+        return round(score, 2)
+
+    @field_validator("hackathon_comments", mode="before")
+    @classmethod
+    def validate_hackathon_comments(cls, value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+    @field_validator("accepted", mode="before")
+    @classmethod
+    def validate_accepted(cls, value: Any) -> str | None:
+        if value is None or value == "":
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if text not in HACKATHON_ACCEPTED_VALUES:
+            allowed = "、".join(sorted(HACKATHON_ACCEPTED_VALUES))
+            raise ValueError(f"入取状态 accepted 必须是字典 hackathon_accepted_status 中的有效值(允许: {allowed})")
+        return text
 
 
 class CampOfferListResponse(PaginationResponseBase):
@@ -732,6 +789,35 @@ class CampOfferImportResult(BaseModel):
     plan_id: int
     imported_ids: list[int]
     issues: list[CampOfferImportIssue]
+
+
+# 2026-07-03: 黑客松夏令营「评分导入」专用结果
+# 与 CampOfferImportResult 不同:
+#   - 通过 手机号 + 邮箱 联合匹配入营名单记录
+#   - 只更新 hackathon_score / hackathon_comments 两个字段 (Q4: 无条件覆盖)
+#   - 匹配不到的记录 (Q3: A 跳过并在结果中报告) 不算失败, 仅记录
+class HackathonScoreImportIssue(BaseModel):
+    row_number: int
+    phone: str | None = None
+    email: str | None = None
+    reason: str
+
+
+class HackathonScoreImportResult(BaseModel):
+    """黑客松评分导入结果。
+
+    字段说明:
+        - total_rows:    Excel 中非空数据行总数
+        - matched_count: 成功匹配到入营名单并已 UPDATE 的行数
+        - unmatched_count: 手机号+邮箱联合匹配不到入营名单的行数 (Q3: 跳过)
+        - updated_ids:   被更新的入营名单主键 id 列表
+        - issues:        失败/未匹配行的明细
+    """
+    total_rows: int = 0
+    matched_count: int = 0
+    unmatched_count: int = 0
+    updated_ids: list[int] = []
+    issues: list[HackathonScoreImportIssue] = []
 
 
 class RecruitmentOptionsResponse(BaseModel):

@@ -9,7 +9,13 @@ import psycopg
 from openpyxl import load_workbook
 
 from app.core.config import settings
-from app.schemas.recruitment import CampOfferImportIssue, CampOfferImportResult
+from app.schemas.recruitment import (
+    CampOfferImportIssue,
+    CampOfferImportResult,
+    HackathonScoreImportIssue,
+    HackathonScoreImportResult,
+)
+from app.services.recruitment_excel_service import parse_hackathon_score_template
 
 
 def _conninfo() -> str:
@@ -420,5 +426,118 @@ def import_camp_offers_from_excel(file_bytes: bytes, *, plan_id: int | None = No
         skipped_count=skipped_count,
         plan_id=int(plan_id or latest_plan_id or 0),
         imported_ids=imported_ids,
+        issues=issues,
+    )
+
+
+
+# --------------------------------------------------------------------------
+# 2026-07-03: 黑客松夏令营「评分导入」专用入口
+# 业务规则(Q1~Q4 全部确认 A):
+#   Q1 匹配规则:  手机号 AND 邮箱 同时相等 (联合匹配)
+#   Q2 数据源:    dtlms_recruitment_applications.student_phone / student_email
+#   Q3 异常策略:  匹配不到入营名单 -> 跳过, 在 issues 中报告(不抛错)
+#   Q4 重复策略:  无条件覆盖 hackathon_score / hackathon_comments
+# 仅更新这 2 个字段 + updated_at, 不动其他列(避免误覆盖业务流转状态)。
+# --------------------------------------------------------------------------
+def import_hackathon_scores_from_excel(file_bytes: bytes) -> HackathonScoreImportResult:
+    """解析 + 导入 黑客松夏令营评分 Excel。
+
+    入参: file_bytes (前端 multipart/form-data 上传的 .xlsx 字节)
+    出参: HackathonScoreImportResult
+    """
+    rows = parse_hackathon_score_template(file_bytes)
+    total_rows = len(rows)
+    if total_rows == 0:
+        return HackathonScoreImportResult(
+            total_rows=0,
+            matched_count=0,
+            unmatched_count=0,
+            updated_ids=[],
+            issues=[],
+        )
+
+    issues: list[HackathonScoreImportIssue] = []
+    updated_ids: list[int] = []
+
+    with psycopg.connect(_conninfo()) as conn:
+        with conn.cursor() as cur:
+            # 1) 逐行匹配 + UPDATE; 单行失败不影响其他行 (Q3 跳过策略)
+            for row in rows:
+                row_number = int(row["row_number"])
+                phone = row.get("phone")
+                email = row.get("email")
+                score = row.get("hackathon_score")
+                comment = row.get("hackathon_comments")
+
+                # 行内校验
+                if not phone or not email:
+                    issues.append(
+                        HackathonScoreImportIssue(
+                            row_number=row_number,
+                            phone=phone,
+                            email=email,
+                            reason="学生手机号/邮箱不能为空",
+                        )
+                    )
+                    continue
+                if score is None:
+                    issues.append(
+                        HackathonScoreImportIssue(
+                            row_number=row_number,
+                            phone=phone,
+                            email=email,
+                            reason="夏令营评分不能为空或格式无法识别",
+                        )
+                    )
+                    continue
+
+                # 2) 联合匹配: 手机号 AND 邮箱 同时相等 (Q1: A)
+                #    dtlms_plan_offer 与 dtlms_recruitment_applications 通过 candidate_no 关联
+                #    实际字段: dtlms_recruitment_applications.phone_number / email
+                #    一次 UPDATE, 不影响其他字段 (Q4: 无条件覆盖)
+                cur.execute(
+                    """
+                    UPDATE dtlms_plan_offer offer
+                    SET hackathon_score = %s,
+                        hackathon_comments = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM dtlms_recruitment_applications app
+                    WHERE offer.candidate_no = app.candidate_no
+                      AND offer.plan_id = app.plan_id
+                      AND app.phone_number = %s
+                      AND app.email = %s
+                    RETURNING offer.id
+                    """,
+                    (score, comment, phone, email),
+                )
+                results = cur.fetchall()
+                if not results:
+                    # Q3: 匹配不到 -> 跳过, 在 issues 中报告
+                    issues.append(
+                        HackathonScoreImportIssue(
+                            row_number=row_number,
+                            phone=phone,
+                            email=email,
+                            reason="未匹配到入营名单记录(手机号+邮箱联合查询无结果)",
+                        )
+                    )
+                    continue
+                # 一位学生若在多个 plan 下有入营名单, 全部更新
+                for r in results:
+                    updated_ids.append(int(r[0]))
+
+            conn.commit()
+
+    # matched: 至少有一行被 UPDATE 成功的原始 Excel 行(去重)
+    # updated_ids 中可能有多条 (一个学生在多个 plan 下有入营名单), 用行号去重更合理
+    matched_row_count = total_rows - sum(
+        1 for it in issues if it.reason == "未匹配到入营名单记录(手机号+邮箱联合查询无结果)"
+    )
+    return HackathonScoreImportResult(
+        total_rows=total_rows,
+        matched_count=matched_row_count,
+        unmatched_count=total_rows - matched_row_count,
+        updated_ids=updated_ids,
         issues=issues,
     )

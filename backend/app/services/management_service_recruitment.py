@@ -437,6 +437,7 @@ class RuntimeManagementStoreRecruitmentMixin:
         principal: Any | None = None,
     ) -> CampOfferListResponse:
         visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
+        is_center_leader = self._postgres_store.resolve_camp_offer_is_center_leader(principal)
         items, total = self._postgres_store.list_camp_offers_page(
             keyword=keyword,
             plan_id=plan_id,
@@ -455,6 +456,7 @@ class RuntimeManagementStoreRecruitmentMixin:
             page=page,
             page_size=page_size,
             visible_advisor_names=visible_advisor_names,
+            is_center_leader=is_center_leader,
         )
         records = [CampOfferRecord(**item) for item in items]
         return CampOfferListResponse(items=records, total=total, page=page, page_size=page_size)
@@ -465,8 +467,11 @@ class RuntimeManagementStoreRecruitmentMixin:
         principal: Any | None = None,
     ) -> CampOfferRecord:
         visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
+        is_center_leader = self._postgres_store.resolve_camp_offer_is_center_leader(principal)
         item = self._postgres_store.get_camp_offer_detail(
-            int(offer_id), visible_advisor_names=visible_advisor_names
+            int(offer_id),
+            visible_advisor_names=visible_advisor_names,
+            is_center_leader=is_center_leader,
         )
         if item is None:
             raise KeyError("Camp offer not found")
@@ -557,6 +562,7 @@ class RuntimeManagementStoreRecruitmentMixin:
         Excel workbook for the operator."""
 
         visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
+        is_center_leader = self._postgres_store.resolve_camp_offer_is_center_leader(principal)
         items, _ = self._postgres_store.list_camp_offers_page(
             keyword=keyword,
             plan_id=plan_id,
@@ -575,6 +581,7 @@ class RuntimeManagementStoreRecruitmentMixin:
             page=1,
             page_size=50000,
             visible_advisor_names=visible_advisor_names,
+            is_center_leader=is_center_leader,
         )
         return [dict(item) for item in items]
 
@@ -638,12 +645,117 @@ class RuntimeManagementStoreRecruitmentMixin:
                     "is_agree": payload.is_agree,
                     "reason": payload.reason,
                     "student_offer_submitted_at": payload.student_offer_submitted_at,
+                    # 2026-07-03: 黑客松夏令营字段 (前端 CampOfferUpsert 已存在, 但 service 之前漏传,
+                    # 导致编辑保存后 dtlms_plan_offer.hackathon_score / hackathon_comments / accepted
+                    # 全部被写为 NULL, 出现"保存成功但值未更新" 的 bug)
+                    "hackathon_score": payload.hackathon_score,
+                    "hackathon_comments": payload.hackathon_comments,
+                    "accepted": payload.accepted,
                 },
                 operation_log,
             )
             if not updated:
                 raise KeyError("Camp offer not found")
             return self.get_camp_offer_detail(int(offer_id))
+    # ------------------------------------------------------------------
+
+    # 2026-07-03: 黑客松入取状态 (dtlms_plan_offer.accepted) 变更入口
+    # - 仅允许写入 4 个状态: NULL / "declined" / "accepted_pending_send" / "pending"
+    # - 权限校验: 书院管理员 / 平台管理员放行；
+    #             其他角色需 can_change_accepted=True (即该导师/中心负责人在该学生一/二志愿中分数 >= 80)
+    # - 写操作: 仅更新 accepted 字段 + updated_at，不联动其他字段
+    # - 状态可逆: 允许反复修改 (不锁状态机)
+    # ------------------------------------------------------------------
+    def _principal_can_change_camp_offer_accepted(
+        self,
+        offer_row: dict[str, Any],
+        principal_summary: dict[str, Any],
+        principal: Any | None = None,
+    ) -> bool:
+        """判断 principal 是否有权限修改指定入营名单的 accepted 字段。
+
+        规则 (2026-07-03 二次确认后):
+        1) 书院管理员 (AILABMGT) / 平台管理员 (platform_admin) -> 放行
+        2) 否则:
+           - 仅当 principal 是 dtlms_team_leaders 中任一中心的 lead_user_id 时,
+             才能依赖 offer_row["can_change_accepted"] (SQL 层已计算好, 只对中心负责人命中 first/second_choice 分数规则才为 True)
+           - 普通 advisor 即使 first/second_choice 命中且分数>=80 也不允许改
+        3) 其他情况 -> False
+
+        注意: SQL 层 (postgres_state_store_query_recruitment.list_camp_offers_page) 同样
+        已用 is_center_leader 守卫, 客户端即便绕过前端直接调用 API 也会被服务端拒绝。
+        """
+        role_codes = {str(item).strip() for item in principal_summary.get("roles", []) if str(item).strip()}
+        if "AILABMGT" in role_codes or "platform_admin" in role_codes:
+            return True
+        # 非白名单: 必须同时满足「是中心负责人」+ 「SQL 层算出的 can_change_accepted=True」
+        is_center_leader = self._postgres_store.resolve_camp_offer_is_center_leader(principal if principal is not None else principal_summary)
+        if not is_center_leader:
+            return False
+        return bool(offer_row.get("can_change_accepted") or False)
+
+    def set_camp_offer_accepted_status(
+        self,
+        offer_id: int,
+        accepted: str | None,
+        principal: Any | None = None,
+    ) -> CampOfferRecord:
+        """业务侧统一入口: 变更入营名单 accepted 状态 (录取/不录取/待定/清空)。
+
+        2026-07-03 需求: 录取/不录取/待定/清空 4 个动作使用同一个 service 方法，
+        由 API 层用 action 字符串区分 (accept/decline/pending/clear)，
+        这样可以共用 4 条规则的权限校验。
+
+        参数:
+            offer_id:  入营名单主键 id
+            accepted:  目标状态，4 选 1: None | "declined" | "accepted_pending_send" | "pending"
+            principal:  当前登录人 (包含 username / full_name / roles / permissions)
+
+        返回:
+            CampOfferRecord (包含更新后的状态)
+
+        异常:
+            KeyError - 入营名单不存在
+            PermissionError - 当前账号无权限修改此行
+            ValueError - accepted 状态非法 (应不会发生，sync 层会再次校验)
+        """
+        with self._lock:
+            # 1) 查询并校验存在 (带可见性 + 中心负责人标记, 让返回的 can_change_accepted 准确)
+            visible_advisor_names = self._postgres_store.resolve_camp_offer_visible_advisor_names(principal)
+            is_center_leader_for_perm = self._postgres_store.resolve_camp_offer_is_center_leader(principal)
+            existing = self._postgres_store.get_camp_offer_detail(
+                int(offer_id),
+                visible_advisor_names=visible_advisor_names,
+                is_center_leader=is_center_leader_for_perm,
+            )
+            if existing is None:
+                raise KeyError("Camp offer not found")
+
+            # 2) 权限校验 (书院管理员/平台管理员放行；其他角色需 can_change_accepted=True)
+            principal_summary = self._principal_summary(principal or {"username": "system", "full_name": "system", "roles": []})
+            if not self._principal_can_change_camp_offer_accepted(existing, principal_summary, principal=principal):
+                raise PermissionError("当前账号无权修改此入营名单的入取状态")
+
+            # 3) 仅更新 accepted 字段 (sync 层会校验状态白名单)
+            operation_log = self._record_operation(
+                "招生管理",
+                "入营名单",
+                str(offer_id),
+                "修改入取状态",
+                f"设置 accepted={accepted!r}",
+                operator_username=principal_summary["username"],
+            )
+            updated = self._postgres_store.set_camp_offer_accepted(
+                int(offer_id),
+                accepted,
+                operation_log,
+            )
+            if not updated:
+                raise KeyError("Camp offer not found")
+
+            # 4) 返回最新记录 (供前端立即刷新)
+            return self.get_camp_offer_detail(int(offer_id))
+
 
     def delete_camp_offer(self, offer_id: int, principal: Any | None = None) -> None:
         with self._lock:

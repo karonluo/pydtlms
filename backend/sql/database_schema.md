@@ -2,7 +2,7 @@
 
 > 自动生成，请勿手工修改。下次数据库结构变更后再次运行 `backend/sql/_extract_schema.py` 重新生成。
 
-- 数据源: `host=47.117.107.23 port=15431 dbname=test061502`
+- 数据源: `host=47.117.107.23 port=15431 dbname=test062601`
 - Schema: `public`
 - 表格数量: 74
 - 视图数量: 4
@@ -796,6 +796,9 @@
 | `is_sent_mail` | boolean | YES | false |
 | `submitted_at` | timestamp with time zone | YES |  |
 | `sent_mail_at` | timestamp with time zone | YES |  |
+| `hackathon_score` | numeric(5,2) | YES |  |
+| `hackathon_comments` | text | YES |  |
+| `accepted` | character varying(32) | YES |  |
 
 **主键**: (`id`)
 
@@ -803,6 +806,7 @@
 
 | 名称 | 类型 | 定义 |
 |------|------|------|
+| `dtlms_plan_offer_accepted_check` | CHECK | `CHECK (((accepted IS NULL) OR ((accepted)::text = ANY (ARRAY[('declined'::character varying)::text, ('pending'::character varying)::text, ('accepted_pending_send'::character varying)::text, ('accepted_sent'::character varying)::text, ('accepted_confirmed'::character varying)::text, ('accepted_rejected'::character varying)::text]))))` |
 | `dtlms_plan_offer_pkey` | PRIMARY KEY | `PRIMARY KEY (id)` |
 
 **索引**
@@ -1731,8 +1735,8 @@
 | 列名 | 数据类型 | 可空 | 默认值 |
 |------|----------|------|--------|
 | `id` | bigint(64,0) | NO |  |
-| `user_id` | bigint(64,0) | NO |  |
 | `team_id` | bigint(64,0) | NO |  |
+| `user_id` | bigint(64,0) | NO |  |
 | `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
 | `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
 
@@ -1742,8 +1746,8 @@
 
 | 名称 | 类型 | 定义 |
 |------|------|------|
-| `fk_dtlms_team_leaders_team_id` | FOREIGN KEY | `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id) NOT VALID` |
-| `fk_dtlms_team_leaders_user_id` | FOREIGN KEY | `FOREIGN KEY (user_id) REFERENCES dtlms_users(id) NOT VALID` |
+| `fk_dtlms_team_leaders_team_id` | FOREIGN KEY | `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id)` |
+| `fk_dtlms_team_leaders_user_id` | FOREIGN KEY | `FOREIGN KEY (user_id) REFERENCES dtlms_users(id)` |
 | `dtlms_team_leaders_pkey` | PRIMARY KEY | `PRIMARY KEY (id)` |
 | `dtlms_team_leaders_team_id_user_id_key` | UNIQUE | `UNIQUE (team_id, user_id)` |
 
@@ -1782,12 +1786,13 @@
 | `fk_dtlms_teams_lead_user_id` | FOREIGN KEY | `FOREIGN KEY (lead_user_id) REFERENCES dtlms_users(id) NOT VALID` |
 | `dtlms_teams_pkey` | PRIMARY KEY | `PRIMARY KEY (id)` |
 | `dtlms_teams_team_code_key` | UNIQUE | `UNIQUE (team_code)` |
+| `dtlms_teams_team_name_key` | UNIQUE | `UNIQUE (team_name)` |
 
 **索引**
 
 - `dtlms_teams_pkey`: `CREATE UNIQUE INDEX dtlms_teams_pkey ON public.dtlms_teams USING btree (id)`
 - `dtlms_teams_team_code_key`: `CREATE UNIQUE INDEX dtlms_teams_team_code_key ON public.dtlms_teams USING btree (team_code)`
-- `dtlms_teams_team_name_active_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_active_key ON public.dtlms_teams USING btree (team_name) WHERE (is_deleted = false)`
+- `dtlms_teams_team_name_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_key ON public.dtlms_teams USING btree (team_name)`
 - `idx_dtlms_teams_lead_user_id`: `CREATE INDEX idx_dtlms_teams_lead_user_id ON public.dtlms_teams USING btree (lead_user_id) WHERE (lead_user_id IS NOT NULL)`
 
 ### `dtlms_theses`
@@ -2773,7 +2778,7 @@
 - `dtlms_team_leaders.idx_dtlms_team_leaders_user_id`: `CREATE INDEX idx_dtlms_team_leaders_user_id ON public.dtlms_team_leaders USING btree (user_id)`
 - `dtlms_teams.dtlms_teams_pkey`: `CREATE UNIQUE INDEX dtlms_teams_pkey ON public.dtlms_teams USING btree (id)`
 - `dtlms_teams.dtlms_teams_team_code_key`: `CREATE UNIQUE INDEX dtlms_teams_team_code_key ON public.dtlms_teams USING btree (team_code)`
-- `dtlms_teams.dtlms_teams_team_name_active_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_active_key ON public.dtlms_teams USING btree (team_name) WHERE (is_deleted = false)`
+- `dtlms_teams.dtlms_teams_team_name_key`: `CREATE UNIQUE INDEX dtlms_teams_team_name_key ON public.dtlms_teams USING btree (team_name)`
 - `dtlms_teams.idx_dtlms_teams_lead_user_id`: `CREATE INDEX idx_dtlms_teams_lead_user_id ON public.dtlms_teams USING btree (lead_user_id) WHERE (lead_user_id IS NOT NULL)`
 - `dtlms_theses.dtlms_theses_pkey`: `CREATE UNIQUE INDEX dtlms_theses_pkey ON public.dtlms_theses USING btree (id)`
 - `dtlms_theses.idx_thesis_status`: `CREATE INDEX idx_thesis_status ON public.dtlms_theses USING btree (thesis_status)`
@@ -2881,6 +2886,7 @@
 - `dtlms_outbound_studies.dtlms_outbound_studies_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
 - `dtlms_permissions.dtlms_permissions_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
 - `dtlms_permissions.dtlms_permissions_permission_code_key` (UNIQUE): `UNIQUE (permission_code)`
+- `dtlms_plan_offer.dtlms_plan_offer_accepted_check` (CHECK): `CHECK (((accepted IS NULL) OR ((accepted)::text = ANY (ARRAY[('declined'::character varying)::text, ('pending'::character varying)::text, ('accepted_pending_send'::character varying)::text, ('accepted_sent'::character varying)::text, ('accepted_confirmed'::character varying)::text, ('accepted_rejected'::character varying)::text]))))`
 - `dtlms_plan_offer.dtlms_plan_offer_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
 - `dtlms_portal_application_achievement_records.dtlms_portal_application_achievement_record_application_id_fkey` (FOREIGN KEY): `FOREIGN KEY (application_id) REFERENCES dtlms_recruitment_applications(id) ON DELETE CASCADE`
 - `dtlms_portal_application_achievement_records.dtlms_portal_application_achievement_records_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
@@ -2967,14 +2973,15 @@
 - `dtlms_team_advisors.dtlms_team_advisors_team_id_fkey` (FOREIGN KEY): `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id)`
 - `dtlms_team_advisors.fk_dtlms_team_advisors_advisor_user_id` (FOREIGN KEY): `FOREIGN KEY (advisor_user_id) REFERENCES dtlms_users(id) NOT VALID`
 - `dtlms_team_advisors.dtlms_team_advisors_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
-- `dtlms_team_leaders.fk_dtlms_team_leaders_team_id` (FOREIGN KEY): `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id) NOT VALID`
-- `dtlms_team_leaders.fk_dtlms_team_leaders_user_id` (FOREIGN KEY): `FOREIGN KEY (user_id) REFERENCES dtlms_users(id) NOT VALID`
+- `dtlms_team_leaders.fk_dtlms_team_leaders_team_id` (FOREIGN KEY): `FOREIGN KEY (team_id) REFERENCES dtlms_teams(id)`
+- `dtlms_team_leaders.fk_dtlms_team_leaders_user_id` (FOREIGN KEY): `FOREIGN KEY (user_id) REFERENCES dtlms_users(id)`
 - `dtlms_team_leaders.dtlms_team_leaders_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
 - `dtlms_team_leaders.dtlms_team_leaders_team_id_user_id_key` (UNIQUE): `UNIQUE (team_id, user_id)`
 - `dtlms_teams.dtlms_teams_team_status_check` (CHECK): `CHECK (((team_status)::text = ANY (ARRAY[('active'::character varying)::text, ('inactive'::character varying)::text, ('planning'::character varying)::text, ('archived'::character varying)::text])))`
 - `dtlms_teams.fk_dtlms_teams_lead_user_id` (FOREIGN KEY): `FOREIGN KEY (lead_user_id) REFERENCES dtlms_users(id) NOT VALID`
 - `dtlms_teams.dtlms_teams_pkey` (PRIMARY KEY): `PRIMARY KEY (id)`
 - `dtlms_teams.dtlms_teams_team_code_key` (UNIQUE): `UNIQUE (team_code)`
+- `dtlms_teams.dtlms_teams_team_name_key` (UNIQUE): `UNIQUE (team_name)`
 - `dtlms_theses.dtlms_theses_plagiarism_rate_check` (CHECK): `CHECK (((plagiarism_rate IS NULL) OR (plagiarism_rate <= (100)::numeric)))`
 - `dtlms_theses.dtlms_theses_advisor_id_fkey` (FOREIGN KEY): `FOREIGN KEY (advisor_id) REFERENCES dtlms_advisors(id)`
 - `dtlms_theses.dtlms_theses_student_id_fkey` (FOREIGN KEY): `FOREIGN KEY (student_id) REFERENCES dtlms_students(id)`

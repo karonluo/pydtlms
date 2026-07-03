@@ -15,3 +15,7 @@ documents/UI设计/
 .DS_Store
 backend/app*.zip
 *.bak
+
+
+# 2026-07-04: 临时调试文件目录 (Codex 调试时遗留的脚本/输出日志统一归档, 整个目录忽略)
+backend/sql/_archive/

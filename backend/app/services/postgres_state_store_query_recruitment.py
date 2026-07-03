@@ -165,6 +165,64 @@ class PostgresStateStoreQueryRecruitmentMixin:
             # everything.
             return ["__no_match__"]
         return sorted(names)
+    def resolve_camp_offer_is_center_leader(self, principal: Any | None) -> bool:
+        """2026-07-03: 判断当前登录人是否是「研究中心负责人」(任一中心的 lead_user_id)。
+
+        业务规则:
+            - 书院管理员 (AILABMGT) / 平台管理员 (platform_admin / *): 视为 True (始终放行)
+            - 其他角色: 只要在 dtlms_team_leaders 中存在一条 team_id, user_id = 当前用户 的记录, 即为 True
+            - 查询不到的均为 False
+
+        该方法用于 SQL 层 can_change_accepted 校验:
+            仅当 is_center_leader=True 时才允许该用户对入营名单行执行
+            「录取/不录取/待定」操作 (普通 advisor 即使命中 first/second_choice 分数规则也不能改)。
+        """
+        if principal is None:
+            return True  # 无登录人上下文 -> 视为白名单(与 None 表示无限制保持一致)
+        permissions: list[Any] = []
+        try:
+            permissions = list(getattr(principal, "permissions", []) or [])
+        except Exception:
+            permissions = []
+        if not permissions and isinstance(principal, dict):
+            raw = principal.get("permissions") or []
+            if isinstance(raw, (list, tuple, set)):
+                permissions = list(raw)
+        if any(str(p or "").strip() == "*" for p in permissions):
+            return True
+
+        roles: list[Any] = []
+        try:
+            roles = list(getattr(principal, "roles", []) or [])
+        except Exception:
+            roles = []
+        if not roles and isinstance(principal, dict):
+            raw = principal.get("roles") or []
+            if isinstance(raw, (list, tuple, set)):
+                roles = list(raw)
+        role_codes = {str(role or "").strip() for role in roles}
+        if "platform_admin" in role_codes or "AILABMGT" in role_codes:
+            return True
+
+        viewer_username = str(getattr(principal, "username", "") or "").strip()
+        if not viewer_username and isinstance(principal, dict):
+            viewer_username = str(principal.get("username") or "").strip()
+        if not viewer_username:
+            return False
+
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM dtlms_team_leaders tl
+                    JOIN dtlms_users u ON u.id = tl.user_id
+                    WHERE u.username = %s
+                    LIMIT 1
+                    """,
+                    (viewer_username,),
+                )
+                return cur.fetchone() is not None
 
     def get_recruitment_application_detail(self, application_id: int) -> dict[str, Any] | None:
         """Execute query logic for `get_recruitment_application_detail`."""
@@ -745,6 +803,17 @@ class PostgresStateStoreQueryRecruitmentMixin:
         normalized["second_choice_screening_score"] = self._to_optional_float(normalized.get("second_choice_screening_score"))
         normalized["created_at"] = self._stringify_datetime(normalized.get("created_at"))
         normalized["student_offer_submitted_at"] = self._stringify_datetime(normalized.get("student_offer_submitted_at"))
+        # 2026-07-01: 黑客松夏令营专用字段
+        normalized["hackathon_score"] = self._to_optional_float(normalized.get("hackathon_score"))
+        normalized["hackathon_comments"] = str(normalized.get("hackathon_comments") or "").strip() or None
+        accepted_value = normalized.get("accepted")
+        if isinstance(accepted_value, str):
+            accepted_value = accepted_value.strip() or None
+        else:
+            accepted_value = None
+        normalized["accepted"] = accepted_value
+        # 2026-07-03: 当前用户能否对该行执行入取操作(后端 SQL 计算)
+        normalized["can_change_accepted"] = bool(normalized.get("can_change_accepted") or False)
         return normalized
 
     def get_latest_recruitment_plan_id(self) -> int | None:
@@ -831,18 +900,24 @@ class PostgresStateStoreQueryRecruitmentMixin:
             params.append(float(second_choice_score))
 
         if visible_advisor_names:
-            # 范围过滤规则（客户需求 2026-06-20）：
-            #   - 第一志愿：保持原样（first_choice = ANY(visible_advisor_names)）
-            #   - 第二志愿：必须满足"第二志愿已流转"才显示：
-            #       (a) 例外：学生第一/第二志愿选的是同一个导师（自己看到自己）
-            #       (b) 或者第二志愿已提交打分 且 第二志愿分数 >= 80
-            #     业务不变量：如果 second_choice_screening_submitted_at IS NOT NULL，
-            #     则必然 second_choice_screening_score >= 80（不及格不会流转给候选人）。
+            # 2026-07-03 范围过滤规则（按客户 4 条规则 + 保留流转判断）
+            #   规则 1: 第一志愿: 我是导师 AND first_choice_screening_score >= 80
+            #   规则 2: 第一志愿 score < 80: 不可见
+            #   规则 3: 第二志愿: 我是导师 AND second_choice_screening_score >= 80
+            #   规则 4: 业务不变量 - 不存在 second_score < 80 的情况
+            #   流转判断保留（客户 2026-07-03 确认）:
+            #     (a) 例外: 第一/第二志愿选的是同一个导师
+            #     (b) 或者 second_choice_screening_submitted_at IS NOT NULL
+            #         AND second_choice_screening_score >= 80
             where_clauses.append(
                 "("
-                "  NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)"
+                "  ("
+                "    NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)"
+                "    AND app.first_choice_screening_score >= 80"
+                "  )"
                 "  OR ("
                 "    NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s)"
+                "    AND app.second_choice_screening_score >= 80"
                 "    AND ("
                 "      NULLIF(BTRIM(COALESCE(app.first_choice, '')), '')"
                 "        = NULLIF(BTRIM(COALESCE(app.second_choice, '')), '')"
@@ -879,6 +954,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
         page: int = 1,
         page_size: int = 10,
         visible_advisor_names: list[str] | None = None,
+        is_center_leader: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         self.ensure_schema()
         offset = max(page - 1, 0) * page_size
@@ -953,7 +1029,35 @@ class PostgresStateStoreQueryRecruitmentMixin:
                         second_team.team_names AS second_choice_advisor_team_name,
                         app.second_choice_screening_score,
                         offer.created_at,
-                        offer.submitted_at AS student_offer_submitted_at
+                        offer.submitted_at AS student_offer_submitted_at,
+                        -- 2026-07-01: 黑客松夏令营专用字段
+                        offer.hackathon_score,
+                        offer.hackathon_comments,
+                        offer.accepted,
+                        -- 2026-07-03: 当前用户能否对该行执行入取操作(录取/不录取/待定)
+                        -- 权限收紧 (2026-07-03 二次确认): 书院/平台放行; 普通 advisor 即使命中
+                        --   first/second_choice 分数规则也不能改; 仅「研究中心负责人」在
+                        --   first/second_choice 命中时才能改。
+                        -- 5 个 placeholder: is_unrestricted, is_center_leader, ANY(first_choice names),
+                        --                  is_center_leader(再次), ANY(second_choice names)
+                        (CASE
+                            WHEN %s::BOOLEAN THEN TRUE
+                            WHEN %s::BOOLEAN AND
+                                 NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)
+                                 AND app.first_choice_screening_score >= 80 THEN TRUE
+                            WHEN %s::BOOLEAN AND
+                                 NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s)
+                                 AND app.second_choice_screening_score >= 80
+                                 AND (
+                                   NULLIF(BTRIM(COALESCE(app.first_choice, '')), '')
+                                     = NULLIF(BTRIM(COALESCE(app.second_choice, '')), '')
+                                   OR (
+                                     app.second_choice_screening_submitted_at IS NOT NULL
+                                     AND app.second_choice_screening_score >= 80
+                                   )
+                                 ) THEN TRUE
+                            ELSE FALSE
+                          END) AS can_change_accepted
                     FROM dtlms_plan_offer offer
                     LEFT JOIN dtlms_recruitment_plans plan ON plan.id = offer.plan_id
                     LEFT JOIN LATERAL (
@@ -990,7 +1094,23 @@ class PostgresStateStoreQueryRecruitmentMixin:
                     {order_sql}
                     LIMIT %s OFFSET %s
                 """
-                self._execute_dynamic(cur, page_sql, [*params, page_size, offset])
+                # 2026-07-03: 追加 can_change_accepted 计算所需参数
+                # SQL 中有 5 个 %s (2026-07-03 权限收紧后):
+                #   1. is_unrestricted     (True=书院/平台)
+                #   2. is_center_leader    (True=当前用户是任一中心 lead)
+                #   3. ANY(first_choice)   -- first_choice 命中
+                #   4. is_center_leader(再次)
+                #   5. ANY(second_choice)
+                is_unrestricted = visible_advisor_names is None
+                advisor_names_list = list(visible_advisor_names or [])
+                can_change_params = [
+                    bool(is_unrestricted),
+                    bool(is_center_leader),
+                    advisor_names_list,
+                    bool(is_center_leader),
+                    advisor_names_list,
+                ]
+                self._execute_dynamic(cur, page_sql, [*can_change_params, *params, page_size, offset])
                 rows = [self._normalize_camp_offer_row(dict(row)) for row in cur.fetchall()]
                 return rows, total
 
@@ -1083,6 +1203,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
         self,
         offer_id: int,
         visible_advisor_names: list[str] | None = None,
+        is_center_leader: bool = False,
     ) -> dict[str, Any] | None:
         self.ensure_schema()
         detail_sql = """
@@ -1105,7 +1226,31 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 second_team.team_names AS second_choice_advisor_team_name,
                 app.second_choice_screening_score,
                 offer.created_at,
-                offer.submitted_at AS student_offer_submitted_at
+                offer.submitted_at AS student_offer_submitted_at,
+                offer.hackathon_score,
+                offer.hackathon_comments,
+                offer.accepted,
+                -- 2026-07-03: 当前用户能否对该行执行入取操作 (录取/不录取/待定)
+                -- 5 个 placeholder: is_unrestricted, is_center_leader, ANY(first_choice names),
+                --                  is_center_leader(再次), ANY(second_choice names)
+                (CASE
+                    WHEN %s::BOOLEAN THEN TRUE
+                    WHEN %s::BOOLEAN AND
+                         NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)
+                         AND app.first_choice_screening_score >= 80 THEN TRUE
+                    WHEN %s::BOOLEAN AND
+                         NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s)
+                         AND app.second_choice_screening_score >= 80
+                         AND (
+                           NULLIF(BTRIM(COALESCE(app.first_choice, '')), '')
+                             = NULLIF(BTRIM(COALESCE(app.second_choice, '')), '')
+                           OR (
+                             app.second_choice_screening_submitted_at IS NOT NULL
+                             AND app.second_choice_screening_score >= 80
+                           )
+                         ) THEN TRUE
+                    ELSE FALSE
+                  END) AS can_change_accepted
             FROM dtlms_plan_offer offer
             LEFT JOIN dtlms_recruitment_plans plan ON plan.id = offer.plan_id
             LEFT JOIN LATERAL (
@@ -1140,7 +1285,18 @@ class PostgresStateStoreQueryRecruitmentMixin:
             ) second_team ON TRUE
             WHERE offer.id = %s
         """
-        detail_params: list[Any] = [int(offer_id)]
+        is_unrestricted = visible_advisor_names is None
+        advisor_names_list = list(visible_advisor_names or [])
+        # 5 个 can_change 参数 (与 list_camp_offers_page 保持一致)
+        can_change_params = [
+            bool(is_unrestricted),
+            bool(is_center_leader),
+            advisor_names_list,
+            bool(is_center_leader),
+            advisor_names_list,
+        ]
+        # detail_params 顺序: can_change_5 个, then offer_id, then 可见性 2 个 (如果有)
+        detail_params: list[Any] = [*can_change_params, int(offer_id)]
         if visible_advisor_names:
             detail_sql += (
                 " AND (NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s) "

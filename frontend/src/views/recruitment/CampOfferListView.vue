@@ -2,10 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Promotion, Check, CircleClose, EditPen, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { MoreFilled, Promotion, Check, CircleClose, EditPen, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import TableRowActions, { type TableRowAction } from '../../components/table/TableRowActions.vue'
 import { getRecruitmentOptions, getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail, type RecruitmentOptions } from '../../api/recruitment'
 import { useServerPagination } from '../../composables/useServerPagination'
 import {
@@ -15,7 +14,11 @@ import {
   exportCampOffers,
   fetchOfferTemplatePreview,
   getCampOfferStats,
+  acceptCampOffer,
+  declineCampOffer,
   importCampOffers,
+  importHackathonScores,
+  markCampOfferPending,
   listCampOffers,
   listOfferTemplates,
   listRecruitmentPlans,
@@ -25,11 +28,13 @@ import {
   type CampOfferNotificationSendResponse,
   type CampOfferRecord,
   type CampOfferStats,
+  type HackathonScoreImportResult,
   type CampOfferUpsert,
   type OfferTemplateRecord,
   type RecruitPlanRecord,
 } from '../../api/recruitment'
 import { listCenters } from '../../api/students'
+import { listDictData, type DictDataRecord } from '../../api/system'
 import { useAuthStore } from '../../stores/auth'
 import RecruitmentPortalApplicationDrawer from '../../components/recruitment/RecruitmentPortalApplicationDrawer.vue'
 
@@ -81,8 +86,101 @@ const notifyResult = ref<CampOfferNotificationSendResponse | null>(null)
 
 const authStore = useAuthStore()
 const roleSet = computed(() => new Set(authStore.roles || []))
-// advisor 角色仅查看入营名单（隐藏所有写操作 UI）
-const isAdvisorRole = computed(() => roleSet.value.has('advisor') && !roleSet.value.has('*'))
+// 2026-07-03: 白名单用户(平台管理员 + 书院管理员), 只有他们可见'评分导入'等写操作按钮
+const isWhiteListUser = computed(() => roleSet.value.has('platform_admin') || roleSet.value.has('AILABMGT'))
+
+// 2026-07-04: 判断一行入营名单是否已导入「夏令营评分/评语」。
+// 规则: hackathon_score 和 hackathon_comments 都不为空 (即不 NULL 不空字符串) 时返回 true。
+// 用于控制 录取/不录取/待定 3 个按钮的可见性: 未导入评分的行不允许操作。
+function rowHasHackathonEvaluation(row: CampOfferRecord | null | undefined): boolean {
+  if (!row) return false
+  const score = row.hackathon_score
+  const comment = row.hackathon_comments
+  const scoreFilled = score !== null && score !== undefined && !Number.isNaN(score)
+  const commentFilled = typeof comment === 'string' && comment.trim().length > 0
+  return scoreFilled && commentFilled
+}
+
+// 2026-07-04: 操作列宽度自适应。
+// 计算策略: 遍历当前页 offers, 统计每行可见的按钮数量, 取最大者, 加上间距/padding。
+//   - 每个按钮: 100px (中文文本宽度估算, 例如 "查看学生详情" / "录取")
+//   - 按钮间距: 8px
+//   - 下拉/更多: 80px
+//   - 列内 padding: 24px (左右各 12px)
+//   - 最小宽度 100, 最大宽度 540
+const ACTIONS_BUTTON_WIDTH = 100
+const ACTIONS_DROPDOWN_WIDTH = 80
+const ACTIONS_BUTTON_GAP = 8
+const ACTIONS_COLUMN_PADDING = 24
+const ACTIONS_COLUMN_MIN_WIDTH = 100
+const ACTIONS_COLUMN_MAX_WIDTH = 540
+
+function computeRowActionButtonCount(row: CampOfferRecord): number {
+  // 与模板内的 v-if 保持一致
+  let count = 0
+  // "查看学生详情" 永远可见
+  count += 1
+  // 录取/不录取/待定
+  if (row.can_change_accepted && rowHasHackathonEvaluation(row)) {
+    count += 3
+  }
+  return count
+}
+
+function computeRowHasDropdown(row: CampOfferRecord): boolean {
+  // 当 3 个操作按钮不显示时, 才显示 "更多" dropdown
+  return !(row.can_change_accepted && rowHasHackathonEvaluation(row))
+}
+
+const actionsColumnWidth = computed(() => {
+  if (!Array.isArray(offers.value) || offers.value.length === 0) {
+    return ACTIONS_COLUMN_MIN_WIDTH
+  }
+  let maxButtons = 0
+  let anyHasDropdown = false
+  for (const row of offers.value) {
+    const cnt = computeRowActionButtonCount(row)
+    if (cnt > maxButtons) maxButtons = cnt
+    if (computeRowHasDropdown(row)) anyHasDropdown = true
+  }
+  // 宽度 = 按钮总和 + 间距*(按钮数-1) + dropdown + padding
+  const buttonArea = maxButtons * ACTIONS_BUTTON_WIDTH
+  const gap = maxButtons > 1 ? (maxButtons - 1) * ACTIONS_BUTTON_GAP : 0
+  const dropdown = anyHasDropdown ? ACTIONS_DROPDOWN_WIDTH : 0
+  // dropdown 与最后一个按钮之间再加一个 gap
+  const dropdownGap = anyHasDropdown ? ACTIONS_BUTTON_GAP : 0
+  let total = buttonArea + gap + dropdown + dropdownGap + ACTIONS_COLUMN_PADDING
+  if (total < ACTIONS_COLUMN_MIN_WIDTH) total = ACTIONS_COLUMN_MIN_WIDTH
+  if (total > ACTIONS_COLUMN_MAX_WIDTH) total = ACTIONS_COLUMN_MAX_WIDTH
+  return total
+})
+
+// 2026-07-01 黑客松入取状态字典选项
+const hackathonAcceptedOptions = ref<{ label: string; value: string; colorType: string }[]>([])
+async function loadHackathonAcceptedDict() {
+  try {
+    const response = await listDictData({ dict_type: 'hackathon_accepted_status', status: '启用', page_size: 1000 })
+    hackathonAcceptedOptions.value = (response.data.items || [])
+      .map((item: DictDataRecord) => ({
+        label: item.label,
+        value: item.value,
+        colorType: item.color_type || 'info',
+      }))
+      .sort((a, b) => {
+        // 待录取(value='') 排第一；其余按 sort_order 升序
+        if (a.value === '') return -1
+        if (b.value === '') return 1
+        return 0
+      })
+  } catch (error) {
+    // 字典加载失败不阻塞主流程
+    console.warn('加载黑客松入取状态字典失败:', error)
+  }
+}
+function getAcceptedOption(value: string | null | undefined) {
+  if (!value) return { label: '待录取', value: '', colorType: 'info' }
+  return hackathonAcceptedOptions.value.find((item) => item.value === value) || { label: value, value, colorType: 'info' }
+}
 
 // 学生填报详情弹窗（复用 /recruitment/registered-students 同款组件）
 const portalApplicationDetailVisible = ref(false)
@@ -165,6 +263,10 @@ const formModel = reactive<CampOfferUpsert>({
   is_agree: null,
   reason: '',
   student_offer_submitted_at: '',
+  // 2026-07-01 黑客松夏令营专用字段
+  hackathon_score: null,
+  hackathon_comments: '',
+  accepted: null,
 })
 
 const formRules: FormRules<CampOfferUpsert> = {
@@ -214,14 +316,6 @@ const kpiCards = computed(() =>
   })
 )
 
-const tableActions = computed<TableRowAction<CampOfferRecord>[]>(() =>
-  isAdvisorRole.value ? [{ key: 'view-detail', label: '查看学生详情', type: 'info', onClick: openCampOfferPortalApplicationDetail }] : [
-    { key: 'view-detail', label: '查看学生详情', type: 'info', onClick: openCampOfferPortalApplicationDetail },
-    { key: 'edit', label: '编辑', type: 'primary', onClick: openEditDialog },
-  ]
-)
-
-
 async function openCampOfferPortalApplicationDetail(row: CampOfferRecord) {
   if (!row.recruitment_application_id) {
     ElMessage.warning('该入营记录未关联报名详情')
@@ -241,12 +335,6 @@ async function openCampOfferPortalApplicationDetail(row: CampOfferRecord) {
     portalApplicationDetailLoading.value = false
   }
 }
-
-const tableMoreActions = computed<TableRowAction<CampOfferRecord>[]>(() =>
-  isAdvisorRole.value ? [] : [
-    { key: 'delete', label: '删除', type: 'danger', onClick: handleDelete },
-  ]
-)
 
 function extractErrorMessage(error: any, fallback: string): string {
   if (axios.isAxiosError(error)) {
@@ -323,6 +411,10 @@ function resetForm() {
   formModel.is_agree = null
   formModel.reason = ''
   formModel.student_offer_submitted_at = ''
+  // 2026-07-01 黑客松夏令营字段重置
+  formModel.hackathon_score = null
+  formModel.hackathon_comments = ''
+  formModel.accepted = null
   currentOfferId.value = null
 }
 
@@ -574,6 +666,143 @@ async function handleDeleteTemplateById(id: string | number) {
   }
 }
 
+// ------------------------------------------------------------------
+// 2026-07-03: 黑客松入取状态变更 (录取/不录取/待定) - 二次确认 + 调用 API + 刷新
+// ------------------------------------------------------------------
+/** 操作列"录取/不录取/待定"的统一入口 (带 ElMessageBox 二次确认)。
+ *  action: 'accept' | 'decline' | 'pending"
+ *  服务端使用 3 个独立端点，前端也按 action 区分提示文案与状态值。
+ */
+async function confirmAndChangeAccepted(row: CampOfferRecord, action: 'accept' | 'decline' | 'pending') {
+  if (!row || !row.id) {
+    ElMessage.warning('记录无效，无法操作')
+    return
+  }
+  const actionLabels: Record<typeof action, { title: string; confirmText: string; successMsg: string; apiCall: (id: number) => Promise<unknown> }> = {
+    accept: {
+      title: '确认录取该学生？',
+      confirmText: '确认录取',
+      successMsg: '已录取',
+      apiCall: (id) => acceptCampOffer(id),
+    },
+    decline: {
+      title: '确认不录取该学生？',
+      confirmText: '确认不录取',
+      successMsg: '已标记不录取',
+      apiCall: (id) => declineCampOffer(id),
+    },
+    pending: {
+      title: '确认将该学生标记为待定？',
+      confirmText: '确认待定',
+      successMsg: '已标记待定',
+      apiCall: (id) => markCampOfferPending(id),
+    },
+  }
+  const cfg = actionLabels[action]
+  const candidate = String(row.candidate_no || '').trim() || '该学生'
+  try {
+    await ElMessageBox.confirm(
+      `${cfg.title}\n报名号: ${candidate}`,
+      '二次确认',
+      {
+        confirmButtonText: cfg.confirmText,
+        cancelButtonText: '取消',
+        type: action === 'decline' ? 'warning' : 'info',
+        dangerouslyUseHTMLString: false,
+      },
+    )
+  } catch {
+    // 用户取消
+    return
+  }
+  try {
+    await cfg.apiCall(Number(row.id))
+    ElMessage.success(`${cfg.successMsg} (${candidate})`)
+    // 刷新当前页
+    await fetchOffers()
+    await fetchCampOfferStats()
+  } catch (error: any) {
+    const message = axios.isAxiosError(error)
+      ? String(error.response?.data?.detail || error.message)
+      : '操作失败'
+    ElMessage.error(message)
+  }
+}
+
+/** 操作列"更多"下拉 (目前只有删除) 的命令处理。 */
+function runMoreAction(key: string, row: CampOfferRecord) {
+  if (key === 'delete') {
+    void handleDelete(row)
+  }
+}
+
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// 2026-07-03: 黑客松夏令营专用工具栏按钮
+// - 评分导入: 已对接后端 (通过 手机号+邮箱 联合匹配, 仅更新 hackathon_score/comments)
+// - 上传录取学校 / 发送录取通知: 后续实现
+// ------------------------------------------------------------------
+
+// 评分导入 弹窗状态
+const hackathonImportDialogVisible = ref(false)
+const hackathonImportFile = ref<File | null>(null)
+const hackathonImporting = ref(false)
+const hackathonImportResult = ref<HackathonScoreImportResult | null>(null)
+const hackathonImportFileInputRef = ref<HTMLInputElement | null>(null)
+
+// 触发文件选择: 通过隐藏的 input[type=file]
+function onHackathonScoreImport() {
+  hackathonImportResult.value = null
+  hackathonImportFile.value = null
+  hackathonImportDialogVisible.value = true
+}
+
+function onHackathonImportFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files && target.files[0] ? target.files[0] : null
+  hackathonImportFile.value = file
+  // 重置 input, 允许同名文件再次选择
+  if (target) target.value = ''
+}
+
+async function submitHackathonImport() {
+  if (!hackathonImportFile.value) {
+    ElMessage.warning('请先选择 Excel 文件')
+    return
+  }
+  hackathonImporting.value = true
+  try {
+    const response = await importHackathonScores(hackathonImportFile.value)
+    hackathonImportResult.value = response.data
+    const r = response.data
+    if (r.matched_count > 0) {
+      ElMessage.success(`评分导入完成: 匹配 ${r.matched_count} 行, 未匹配 ${r.unmatched_count} 行`)
+      // 刷新列表
+      pager.pagination.currentPage = 1
+      await fetchOffers()
+    } else if (r.total_rows === 0) {
+      ElMessage.warning('Excel 文件中没有可导入的数据行')
+    } else {
+      ElMessage.warning('评分导入完成: 无任何匹配行, 请检查手机号/邮箱是否正确')
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || '评分导入失败')
+  } finally {
+    hackathonImporting.value = false
+  }
+}
+
+function onHackathonUploadSchools() {
+  // 占位: 后续将对接 '上传录取学校' 后端端点
+  ElMessage.info('上传录取学校功能待后续实现')
+}
+
+function onHackathonSendNotification() {
+  // 占位: 后续将对接 '发送录取通知' 后端端点 (录取通知书发送)
+  ElMessage.info('发送录取通知功能待后续实现')
+}
+
+
 function openNotifyDialog() {
   if (!selectedOfferIds.value.length) {
     ElMessage.warning('请先勾选要发送通知的入营名单')
@@ -640,6 +869,10 @@ function openEditDialog(row: CampOfferRecord) {
   formModel.is_agree = row.is_agree ?? null
   formModel.reason = row.reason || ''
   formModel.student_offer_submitted_at = parseDateTimeInput(row.student_offer_submitted_at)
+  // 2026-07-01 黑客松夏令营字段回填
+  formModel.hackathon_score = typeof row.hackathon_score === 'number' ? row.hackathon_score : null
+  formModel.hackathon_comments = row.hackathon_comments || ''
+  formModel.accepted = row.accepted || null
   dialogVisible.value = true
 }
 
@@ -662,6 +895,10 @@ async function submitDialog() {
       is_agree: formModel.is_agree,
       reason: String(formModel.reason || '').trim() || null,
       student_offer_submitted_at: String(formModel.student_offer_submitted_at || '').trim() || null,
+      // 2026-07-03: 黑客松夏令营字段, 之前漏传导致后端写库为 NULL
+      hackathon_score: formModel.hackathon_score === null || formModel.hackathon_score === undefined ? null : Number(formModel.hackathon_score),
+      hackathon_comments: String(formModel.hackathon_comments || '').trim() || null,
+      accepted: formModel.accepted || null,
     }
 
     if (dialogMode.value === 'create') {
@@ -783,6 +1020,8 @@ async function handleExportList() {
 }
 
 onMounted(async () => {
+  // 2026-07-01 加载黑客松入取状态字典(不阻塞主流程)
+  void loadHackathonAcceptedDict()
   await fetchPlans()
   await fetchAdvisorOptions()
   await fetchTeamOptions()
@@ -815,7 +1054,7 @@ onMounted(async () => {
         </div>
       </div>
       <div class="camp-offer-page__actions">
-        <template v-if="!isAdvisorRole">
+        <template v-if="isWhiteListUser">
           <el-upload
             :show-file-list="false"
             accept=".xlsx,.xls"
@@ -827,7 +1066,6 @@ onMounted(async () => {
           <el-button type="warning" plain :disabled="!selectedOfferIds.length" @click="openNotifyDialog">发送通知邮件</el-button>
           <el-button type="primary" @click="openCreateDialog">新增记录</el-button>
         </template>
-        <el-button :loading="exporting" type="primary" plain @click="handleExportList">导出清单</el-button>
       </div>
     </header>
     <el-card shadow="never" class="filter-card" :class="{ 'is-collapsed': filterCollapsed }">
@@ -862,7 +1100,7 @@ onMounted(async () => {
           </el-form-item>
         </div>
         <div class="filter-row filter-row--choice">
-          <el-form-item v-if="!isAdvisorRole" label="第一志愿导师" class="filter-row__item">
+          <el-form-item v-if="isWhiteListUser" label="第一志愿导师" class="filter-row__item">
             <el-select
               v-model="filters.first_choice_advisor"
               placeholder="第一志愿导师"
@@ -873,7 +1111,7 @@ onMounted(async () => {
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item v-if="!isAdvisorRole" label="第一志愿中心" class="filter-row__item">
+          <el-form-item v-if="isWhiteListUser" label="第一志愿中心" class="filter-row__item">
             <el-select
               v-model="filters.first_choice_team"
               placeholder="第一志愿中心"
@@ -902,7 +1140,7 @@ onMounted(async () => {
           </el-form-item>
         </div>
         <div class="filter-row filter-row--choice">
-          <el-form-item v-if="!isAdvisorRole" label="第二志愿导师" class="filter-row__item">
+          <el-form-item v-if="isWhiteListUser" label="第二志愿导师" class="filter-row__item">
             <el-select
               v-model="filters.second_choice_advisor"
               placeholder="第二志愿导师"
@@ -913,7 +1151,7 @@ onMounted(async () => {
               <el-option v-for="item in advisorOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item v-if="!isAdvisorRole" label="第二志愿中心" class="filter-row__item">
+          <el-form-item v-if="isWhiteListUser" label="第二志愿中心" class="filter-row__item">
             <el-select
               v-model="filters.second_choice_team"
               placeholder="第二志愿中心"
@@ -949,6 +1187,22 @@ onMounted(async () => {
     </el-card>
 
     <el-card shadow="never" class="table-card">
+      <!--
+        2026-07-03 需求: 列表工具栏 (放在 el-card 顶部, 紧贴表格上方)
+        - 左侧 (左对齐): 黑客松夏令营专用按钮 (评分导入 / 上传录取学校 / 发送录取通知)
+          仅 isWhiteListUser (平台管理员+书院管理员) 时显示 (其他角色无写操作权限)
+        - 右侧 (右对齐): 导出清单 (对所有角色可见)
+      -->
+      <div class="table-card__toolbar">
+        <div class="table-card__toolbar-left" v-if="isWhiteListUser">
+          <el-button type="primary" plain @click="onHackathonScoreImport">评分导入</el-button>
+          <el-button type="success" plain @click="onHackathonUploadSchools">上传录取学校</el-button>
+          <el-button type="warning" plain @click="onHackathonSendNotification">发送录取通知</el-button>
+        </div>
+        <div class="table-card__toolbar-right">
+          <el-button :loading="exporting" type="primary" plain @click="handleExportList">导出清单</el-button>
+        </div>
+      </div>
       <el-table :data="offers" v-loading="loading" border @selection-change="handleOfferSelectionChange" @sort-change="handleOfferSortChange">
         <el-table-column type="index" label="序号" width="64" align="center">
           <template #default="scope">
@@ -959,6 +1213,21 @@ onMounted(async () => {
         <el-table-column prop="plan_name" label="计划名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="candidate_no" label="报名号" min-width="140" />
         <el-table-column prop="student_name" label="学生姓名" min-width="120" show-overflow-tooltip />
+        <!-- 2026-07-01 黑客松夏令营专用列 -->
+        <el-table-column prop="hackathon_score" label="夏令营评分" min-width="110" align="center">
+          <template #default="{ row }">
+            <span v-if="row.hackathon_score !== null && row.hackathon_score !== undefined">{{ row.hackathon_score }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="hackathon_comments" label="夏令营评语" min-width="180" show-overflow-tooltip />
+        <el-table-column label="入取状态" min-width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="getAcceptedOption(row.accepted).colorType as any" disable-transitions>
+              {{ getAcceptedOption(row.accepted).label }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="是否同意" min-width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.is_agree === true" type="success">同意</el-tag>
@@ -990,9 +1259,66 @@ onMounted(async () => {
         <el-table-column label="学生提交日期" min-width="170">
           <template #default="{ row }">{{ formatDateTime(row.student_offer_submitted_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right" align="right">
-          <template #default="scope">
-            <TableRowActions :row="scope.row" :main-actions="tableActions" :more-actions="tableMoreActions" />
+        <!--
+          2026-07-04: 操作列宽度按可见按钮数量自适应 (actionsColumnWidth); 仅显示必要按钮。
+          - 查看学生详情: 所有人可见，点击后弹窗显示 portal 详情
+          - 编辑: 仅非 advisor 角色可见
+          - 录取/不录取/待定: 仅 can_change_accepted=True 且 rowHasHackathonEvaluation(row)=True (hackathon_score 和 hackathon_comments 都不为空) 时可见, 否则隐藏. 2026-07-04 新增: 未导入评分的行不允许操作.
+          - 删除: 移到"更多"下拉菜单，仅非 advisor 角色可见
+        -->
+        <el-table-column label="操作" :width="actionsColumnWidth" fixed="right" align="right">
+          <template #default="{ row }">
+            <div class="table-row-actions" @click.stop>
+              <el-button link size="small" type="info" @click.stop="openCampOfferPortalApplicationDetail(row)">
+                查看学生详情
+              </el-button>
+              <!-- 2026-07-03 修正: 录取/不录取/待定 按钮独立于 isWhiteListUser, 让中心负责人也能看到 (后端 SQL 已用 is_center_leader 守卫) -->
+              <el-button
+                v-if="row.can_change_accepted && rowHasHackathonEvaluation(row)"
+                link
+                size="small"
+                type="success"
+                @click.stop="confirmAndChangeAccepted(row, 'accept')"
+              >
+                录取
+              </el-button>
+              <el-button
+                v-if="row.can_change_accepted && rowHasHackathonEvaluation(row)"
+                link
+                size="small"
+                type="danger"
+                @click.stop="confirmAndChangeAccepted(row, 'decline')"
+              >
+                不录取
+              </el-button>
+              <el-button
+                v-if="row.can_change_accepted && rowHasHackathonEvaluation(row)"
+                link
+                size="small"
+                type="warning"
+                @click.stop="confirmAndChangeAccepted(row, 'pending')"
+              >
+                待定
+              </el-button>
+
+              <!-- 仅白名单用户 (书院管理员/平台管理员) 可见: 编辑 + 更多/删除 -->
+              <template v-if="isWhiteListUser">
+                <el-button link size="small" type="primary" @click.stop="openEditDialog(row)">
+                  编辑
+                </el-button>
+                <el-dropdown v-if="!(row.can_change_accepted && rowHasHackathonEvaluation(row))" trigger="click" @command="(key: string) => runMoreAction(key, row)">
+                  <el-button link size="small" type="primary" @click.stop>
+                    更多
+                    <el-icon><MoreFilled /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="delete" class="is-danger">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -1037,6 +1363,39 @@ onMounted(async () => {
               placeholder="格式：YYYY-MM-DD HH:mm:ss"
             />
           </el-form-item>
+          <!-- 2026-07-01 黑客松夏令营专用字段 -->
+          <el-form-item label="夏令营评分" class="dialog-grid--full">
+            <el-input-number
+              v-model="formModel.hackathon_score"
+              :min="0"
+              :max="100"
+              :step="0.01"
+              :precision="2"
+              placeholder="0~100，2 位小数"
+              style="width: 200px"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="夏令营评语" class="dialog-grid--full">
+            <el-input
+              v-model="formModel.hackathon_comments"
+              type="textarea"
+              :rows="3"
+              maxlength="500"
+              show-word-limit
+              placeholder="可选，限 500 字以内"
+            />
+          </el-form-item>
+          <el-form-item label="入取状态" class="dialog-grid--full">
+            <el-select v-model="formModel.accepted" clearable placeholder="请选择入取状态(可选)" style="width: 100%">
+              <el-option
+                v-for="item in hackathonAcceptedOptions"
+                :key="item.value || 'empty'"
+                :label="item.label"
+                :value="item.value || null"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="原因" class="dialog-grid--full">
             <el-input v-model="formModel.reason" type="textarea" :rows="3" maxlength="300" show-word-limit />
           </el-form-item>
@@ -1078,7 +1437,7 @@ onMounted(async () => {
                 </el-radio-group>
               </div>
 
-              <div v-if="!isAdvisorRole" class="offer-template-section">
+              <div v-if="isWhiteListUser" class="offer-template-section">
                 <div class="offer-template-section__title">上传模板</div>
                 <el-radio-group
                   v-if="uploadedTemplateOptions.length"
@@ -1175,6 +1534,76 @@ onMounted(async () => {
       </div>
       <template #footer>
         <el-button @click="previewDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 2026-07-03: 黑客松夏令营「评分导入」弹窗
+         - 限制: 仅白名单用户 (平台管理员 + 书院管理员) 可见
+         - 表头: 学生手机号 / 学生邮箱 / 夏令营评分 / 夏令营评语
+         - 匹配: 手机号+邮箱 联合匹配入营名单
+         - 结果: 显示 matched / unmatched / issues 明细
+    -->
+    <el-dialog v-model="hackathonImportDialogVisible" title="夏令营评分导入" width="640px" destroy-on-close>
+      <el-alert
+        title="导入说明"
+        type="info"
+        :closable="false"
+        show-icon
+      >
+        <template #default>
+          <div>Excel 表头必须包含: 学生手机号 / 学生邮箱 / 夏令营评分 / 夏令营评语</div>
+          <div>匹配规则: 学生的手机号 + 邮箱 联合匹配入营名单</div>
+          <div>写入字段: 仅更新 <b>夏令营评分</b> / <b>夏令营评语</b> 两列, 不影响其他字段</div>
+          <div>未匹配的行: 跳过并在下方报告, 不会报错</div>
+        </template>
+      </el-alert>
+      <div style="margin: 16px 0;">
+        <input
+          ref="hackathonImportFileInputRef"
+          type="file"
+          accept=".xlsx,.xls"
+          style="display: none"
+          @change="onHackathonImportFileChange"
+        />
+        <el-button @click="() => hackathonImportFileInputRef?.click()">选择文件</el-button>
+        <span style="margin-left: 12px; color: #909399;" v-if="hackathonImportFile">
+          已选择: {{ hackathonImportFile.name }} ({{ (hackathonImportFile.size / 1024).toFixed(1) }} KB)
+        </span>
+        <span style="margin-left: 12px; color: #909399;" v-else>未选择文件</span>
+      </div>
+
+      <div v-if="hackathonImportResult" class="hackathon-import-result">
+        <el-divider content-position="left">导入结果</el-divider>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="总行数">{{ hackathonImportResult.total_rows }}</el-descriptions-item>
+          <el-descriptions-item label="匹配成功">
+            <el-tag type="success">{{ hackathonImportResult.matched_count }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="未匹配">
+            <el-tag :type="hackathonImportResult.unmatched_count > 0 ? 'warning' : 'info'">
+              {{ hackathonImportResult.unmatched_count }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div v-if="hackathonImportResult.issues.length" style="margin-top: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">问题明细 ({{ hackathonImportResult.issues.length }} 条)</div>
+          <el-table :data="hackathonImportResult.issues" size="small" border max-height="240">
+            <el-table-column prop="row_number" label="行号" width="80" align="center" />
+            <el-table-column prop="phone" label="手机号" width="140" />
+            <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="reason" label="原因" min-width="200" show-overflow-tooltip />
+          </el-table>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="hackathonImportDialogVisible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :loading="hackathonImporting"
+          :disabled="!hackathonImportFile"
+          @click="submitHackathonImport"
+        >开始导入</el-button>
       </template>
     </el-dialog>
 
@@ -1609,4 +2038,26 @@ onMounted(async () => {
 .offer-preview :deep(p) {
   line-height: 1.7;
 }
+/* 2026-07-03: 列表上方工具栏 (左: 黑客松按钮组, 右: 导出清单) */
+.table-card__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.table-card__toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.table-card__toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 </style>

@@ -1355,6 +1355,13 @@ class PostgresStateStoreSyncMixin:
         self.sync_recruitment_plan(payload, None)
 
     def create_camp_offer(self, payload: dict[str, Any], operation_log: dict[str, Any] | None = None) -> dict[str, Any]:
+        """创建入营名单记录 (dtlms_plan_offer)。
+
+        2026-07-01 新增黑客松夏令营专用字段：
+        - hackathon_score    夏令营评分 numeric(5,2)
+        - hackathon_comments 夏令营评语 text
+        - accepted           入取状态 varchar(32)，字典: hackathon_accepted_status
+        """
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
@@ -1369,9 +1376,16 @@ class PostgresStateStoreSyncMixin:
                         is_agree,
                         reson,
                         submitted_at,
+                        hackathon_score,     -- 2026-07-01: 夏令营评分
+                        hackathon_comments,  -- 2026-07-01: 夏令营评语
+                        accepted,            -- 2026-07-01: 黑客松入取状态
                         created_at,
                         updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s,  -- 黑客松 3 字段
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
                     RETURNING id
                     """,
                     (
@@ -1381,6 +1395,10 @@ class PostgresStateStoreSyncMixin:
                         payload.get("is_agree"),
                         (str(payload.get("reason") or "").strip() or None),
                         payload.get("student_offer_submitted_at"),
+                        # 2026-07-01: 黑客松夏令营字段
+                        payload.get("hackathon_score"),
+                        payload.get("hackathon_comments"),
+                        payload.get("accepted"),
                     ),
                 )
                 inserted = cur.fetchone() or {}
@@ -1388,6 +1406,13 @@ class PostgresStateStoreSyncMixin:
         return {"id": int(inserted.get("id") or 0)}
 
     def update_camp_offer(self, offer_id: int, payload: dict[str, Any], operation_log: dict[str, Any] | None = None) -> bool:
+        """更新入营名单记录 (dtlms_plan_offer)。
+
+        2026-07-01 新增黑客松夏令营专用字段：
+        - hackathon_score    夏令营评分 numeric(5,2)
+        - hackathon_comments 夏令营评语 text
+        - accepted           入取状态 varchar(32)，字典: hackathon_accepted_status
+        """
         self.ensure_schema()
         with self._connect(settings.postgres_db) as conn:
             with conn.cursor() as cur:
@@ -1402,6 +1427,9 @@ class PostgresStateStoreSyncMixin:
                         is_agree = %s,
                         reson = %s,
                         submitted_at = %s,
+                        hackathon_score = %s,     -- 2026-07-01: 夏令营评分
+                        hackathon_comments = %s,  -- 2026-07-01: 夏令营评语
+                        accepted = %s,            -- 2026-07-01: 黑客松入取状态
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     """,
@@ -1412,8 +1440,65 @@ class PostgresStateStoreSyncMixin:
                         payload.get("is_agree"),
                         (str(payload.get("reason") or "").strip() or None),
                         payload.get("student_offer_submitted_at"),
+                        # 2026-07-01: 黑客松夏令营字段
+                        payload.get("hackathon_score"),
+                        payload.get("hackathon_comments"),
+                        payload.get("accepted"),
                         int(offer_id),
                     ),
+                )
+                updated = cur.rowcount > 0
+            conn.commit()
+        return updated
+
+    def set_camp_offer_accepted(
+        self,
+        offer_id: int,
+        accepted: str | None,
+        operation_log: dict[str, Any] | None = None,
+    ) -> bool:
+        """仅更新 dtlms_plan_offer.accepted (黑客松入取状态) + updated_at。
+
+        2026-07-03 需求: 录取/不录取/待定 这 3 个操作使用独立端点，
+        仅写入 accepted 字段，不联动其他字段，避免误覆盖。
+
+        参数:
+            offer_id:  入营名单主键 id
+            accepted:  状态值,可选: NULL (清空, 灰色)、"declined" (红色, 未录取)、
+                       "accepted_pending_send" (绿色, 录取未发送)、"pending" (黄色, 待定)。
+                       不允许写 "accepted_sent" / "accepted_confirmed" / "accepted_rejected",
+                       这三种状态必须由后续发送/确认/拒绝录取通知书流程触发。
+            operation_log: 可选操作日志 (由 service 层提供)
+
+        返回:
+            bool - 是否真的更新了 (rowcount > 0)
+        """
+        # 2026-07-03: 允许的状态白名单 (只允许业务侧主动操作的状态)
+        allowed_statuses = {
+            None,
+            "declined",
+            "accepted_pending_send",
+            "pending",
+        }
+        if accepted not in allowed_statuses:
+            raise ValueError(
+                f"非法 accepted 状态: {accepted!r}。"
+                f" 仅允许 None / 'declined' / 'accepted_pending_send' / 'pending'。"
+            )
+
+        self.ensure_schema()
+        with self._connect(settings.postgres_db) as conn:
+            with conn.cursor() as cur:
+                self._sync_operation_log_in_tx(cur, operation_log)
+                cur.execute(
+                    """
+                    UPDATE dtlms_plan_offer
+                    SET accepted = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """
+                    ,
+                    (accepted, int(offer_id)),
                 )
                 updated = cur.rowcount > 0
             conn.commit()

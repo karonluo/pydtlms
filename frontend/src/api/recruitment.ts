@@ -226,6 +226,20 @@ export type CampOfferRecord = {
   second_choice_advisor_name?: string | null
   second_choice_advisor_team_name?: string | null
   second_choice_screening_score?: number | null
+  // 2026-07-03: 黑客松夏令营字段 (后端 dtlms_plan_offer 已有对应列)
+  hackathon_score?: number | null
+  hackathon_comments?: string | null
+  // accepted: 黑客松入取状态 (字典 hackathon_accepted_status)
+  //  - null                          待处理 (灰色)
+  //  - "declined"                    未录取 (红色)
+  //  - "accepted_pending_send"       录取未发送 (绿色)
+  //  - "accepted_sent"               录取已发送 (绿色)
+  //  - "accepted_confirmed"          录取已确认 (绿色)
+  //  - "accepted_rejected"           录取已拒绝 (红色)
+  //  - "pending"                     待定 (黄色)
+  accepted?: string | null
+  // 2026-07-03: 当前登录人是否可修改 accepted (导师/中心负责人 一/二志愿分数 >= 80)
+  can_change_accepted?: boolean
   created_at?: string | null
   student_offer_submitted_at?: string | null
 }
@@ -246,6 +260,10 @@ export type CampOfferUpsert = {
   is_sent_mail?: boolean
   is_agree?: boolean | null
   reason?: string | null
+  // 2026-07-03: 黑客松夏令营字段
+  hackathon_score?: number | null
+  hackathon_comments?: string | null
+  accepted?: string | null
   student_offer_submitted_at?: string | null
 }
 
@@ -261,6 +279,21 @@ export type CampOfferImportResult = {
   plan_id: number
   imported_ids: number[]
   issues: CampOfferImportIssue[]
+}
+// 2026-07-03: 黑客松夏令营「评分导入」专用类型
+export type HackathonScoreImportIssue = {
+  row_number: number
+  phone?: string | null
+  email?: string | null
+  reason: string
+}
+
+export type HackathonScoreImportResult = {
+  total_rows: number
+  matched_count: number
+  unmatched_count: number
+  updated_ids: number[]
+  issues: HackathonScoreImportIssue[]
 }
 
 export type OfferTemplateRecord = {
@@ -669,6 +702,25 @@ export function deleteCampOffer(offerId: number) {
   return http.delete<void>(`/recruitment/camp-offers/${offerId}`)
 }
 
+// 2026-07-03: 黑客松入取状态变更端点 (3 个独立端点)
+// 状态可逆: 允许反复修改 (后端不做状态机锁)
+// 权限校验: 后端 service 层负责，前端按钮是否可点完全由 record.can_change_accepted 决定
+
+/** 录取 - 设置 accepted="accepted_pending_send" */
+export function acceptCampOffer(offerId: number) {
+  return http.post<CampOfferRecord>(`/recruitment/camp-offers/${offerId}/accept`)
+}
+
+/** 不录取 - 设置 accepted="declined" */
+export function declineCampOffer(offerId: number) {
+  return http.post<CampOfferRecord>(`/recruitment/camp-offers/${offerId}/decline`)
+}
+
+/** 待定 - 设置 accepted="pending" */
+export function markCampOfferPending(offerId: number) {
+  return http.post<CampOfferRecord>(`/recruitment/camp-offers/${offerId}/pending`)
+}
+
 export function importCampOffers(file: File, planId?: number) {
   const formData = new FormData()
   formData.append('file', file)
@@ -734,5 +786,14 @@ export function exportCampOffers(params: {
     params,
     responseType: "blob",
     transformResponse: [(data: unknown) => data as Blob] as any,
+  })
+}
+// 2026-07-03: 黑客松夏令营「评分导入」专用 API
+// 与 importCampOffers 区别: 用 学生手机号+邮箱 联合匹配, 仅更新 hackathon_score/comments
+export function importHackathonScores(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<HackathonScoreImportResult>('/recruitment/camp-offers/import-hackathon-scores', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
