@@ -3,6 +3,51 @@
 > 重大变更与功能说明。新增放在最上面，按时间倒序。
 > 本文件由 Codex 在重大功能/字段变更后维护。
 
+## [2026-07-06] 修复字典写接口缺失导入的 bug
+
+### 问题
+ackend/app/api/v1/system.py 的 导入列表里缺失 create_dict_type 与 create_dict_data，导致 POST /api/v1/system/dict-types 与 POST /api/v1/system/dict-data 调用时报 NameError: name 'create_dict_type' / 'create_dict_data' is not defined。该 bug 在本代码仓库中原就存在，与上一条审计增量改动无关。
+
+### 修复
+- 在 rom app.services.dashboard_service import (...) 块中按字母顺序补入 create_dict_data 与 create_dict_type，其他函数保持不变
+
+### 验证
+- pytest backend/tests/api/test_backoffice_operation_audit.py 3/3 仍然 PASS
+
+### 备份
+- ackend/app/api/v1/system_20260706153311.py.bak（本文件被 .gitignore 中 *.bak 忽略）
+
+## [2026-07-06] 字典管理写操作增量审计
+
+### 背景
+字典管理（/api/v1/system/dict-types、/api/v1/system/dict-data）之前的写操作仅靠 
+ecord_backoffice_operation_audit 中间件兑底记录，summary 是机械的接口路径文案，不友好且无法区分 "字典类型" 与 "字典数据"。本次为字典写接口加入业务审计描述器。
+
+### 后端变更
+- ackend/app/main.py
+  - 解决业务审计描述器 (_resolve_business_audit_descriptor) 新增 6 个字典路径分支：
+    - POST /system/dict-types -> 模块="系统治理"，实体=dict-types，动作="新增"，summary=""新增 dict-types - POST /api/v1/system/dict-types""
+    - PUT /system/dict-types/{id} -> "编辑 dict-types id={id} - PUT /api/v1/system/dict-types/{id}""
+    - DELETE /system/dict-types/{id} -> "删除 dict-types id={id} - DELETE /api/v1/system/dict-types/{id}""
+    - POST /system/dict-data / PUT /system/dict-data/{id} / DELETE /system/dict-data/{id} 同上，实体=dict-data
+  - summary 同时保留 method+path，以保证现有 	est_backoffice_write_request_records_operation_log 等约束仍然成立
+  - 不动 dashboard_service.py / pi/v1/system.py：业务函数仍由中间件兑底，原有 业务函数已写手工日志 -> 中间件不重复 约束保持生效
+
+### 验证
+- pytest backend/tests/api/test_backoffice_operation_audit.py 全 3 个用例全部 PASS：
+  - 	est_backoffice_write_request_records_operation_log 验证总结为“系统治理 / dict-types / 1 / 编辑”，operator=admin，result=success，summary 包含 PUT /api/v1/system/dict-types/1
+  - 	est_auth_post_request_is_excluded_from_backoffice_audit 仍然排除 /auth/token
+  - 	est_backoffice_write_request_keeps_single_log_when_manual_log_exists 仍然保证“业务已写手工日志中间件不重复”约束不受影响
+
+### 备份
+- 本次只改动一个源文件：ackend/app/main.py
+- 备份文件：ackend/app/main_20260706150250.py.bak（本文件在 .gitignore 中被 § *.bak 忽略，不会提交到版本控制）
+
+### 本期不做（后续迭代）
+- [ ] 字典写接口在 dtlms_operation_logs 中填写详细的 old_value / new_value JSONB
+- [ ] 为字典选项读接口加入 Redis 缓存，写后自动失效
+- [ ] 字典写接口在失败时（如类型下还有子数据无法删除）也记一条 result=failed 的审计日志
+
 ## [2026-07-01] 黑客松夏令营（hackathon）入取流程
 
 ### 业务背景

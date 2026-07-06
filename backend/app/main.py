@@ -155,6 +155,26 @@ def _resolve_business_audit_descriptor(request: Request) -> tuple[str, str, str,
     if method == "POST" and path == f"{prefix}/recruitment/news/batch-publish":
         return "招生宣传", "新闻", "批量", "发布", "批量发布新闻"
 
+    if method == "POST" and path == f"{prefix}/system/dict-types":
+        return "系统治理", "dict-types", "-", "新增", f"新增 dict-types - {method} {path}"
+    dict_type_put = f"{prefix}/system/dict-types/"
+    if method == "PUT" and path.startswith(dict_type_put) and len(path) > len(dict_type_put):
+        entity_id = path[len(dict_type_put):].strip("/") or "-"
+        return "系统治理", "dict-types", entity_id, "编辑", f"编辑 dict-types id={entity_id} - {method} {path}"
+    if method == "DELETE" and path.startswith(dict_type_put) and len(path) > len(dict_type_put):
+        entity_id = path[len(dict_type_put):].strip("/") or "-"
+        return "系统治理", "dict-types", entity_id, "删除", f"删除 dict-types id={entity_id} - {method} {path}"
+
+    if method == "POST" and path == f"{prefix}/system/dict-data":
+        return "系统治理", "dict-data", "-", "新增", f"新增 dict-data - {method} {path}"
+    dict_data_put = f"{prefix}/system/dict-data/"
+    if method == "PUT" and path.startswith(dict_data_put) and len(path) > len(dict_data_put):
+        entity_id = path[len(dict_data_put):].strip("/") or "-"
+        return "系统治理", "dict-data", entity_id, "编辑", f"编辑 dict-data id={entity_id} - {method} {path}"
+    if method == "DELETE" and path.startswith(dict_data_put) and len(path) > len(dict_data_put):
+        entity_id = path[len(dict_data_put):].strip("/") or "-"
+        return "系统治理", "dict-data", entity_id, "删除", f"删除 dict-data id={entity_id} - {method} {path}"
+
     return None
 
 
