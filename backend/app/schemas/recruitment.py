@@ -672,6 +672,8 @@ class CampOfferRecord(BaseModel):
     # 2026-07-03: 当前登录用户能否对该行执行 [录取/不录取/待定] 操作
     # 规则与列表可见性一致(导师/中心负责人 + 分数>=80 + 流转判断)
     can_change_accepted: bool = False
+    # 2026-07-06: 录取学校 (来自 dtlms_plan_offer.admission_offered_school varchar(64))
+    admission_offered_school: str | None = None
 
 
 # 黑客松入取状态允许的字典值(对应数据库 dtlms_dict_data.hackathon_accepted_status)
@@ -699,6 +701,8 @@ class CampOfferUpsert(BaseModel):
     # 2026-07-03: 当前登录用户能否对该行执行 [录取/不录取/待定] 操作
     # 规则与列表可见性一致(导师/中心负责人 + 分数>=80 + 流转判断)
     can_change_accepted: bool = False
+    # 2026-07-06: 录取学校 (来自 dtlms_plan_offer.admission_offered_school varchar(64))
+    admission_offered_school: str | None = None
 
     @field_validator("candidate_no", mode="before")
     @classmethod
@@ -750,6 +754,18 @@ class CampOfferUpsert(BaseModel):
         if text not in HACKATHON_ACCEPTED_VALUES:
             allowed = "、".join(sorted(HACKATHON_ACCEPTED_VALUES))
             raise ValueError(f"入取状态 accepted 必须是字典 hackathon_accepted_status 中的有效值(允许: {allowed})")
+        return text
+
+    @field_validator("admission_offered_school", mode="before")
+    @classmethod
+    def validate_admission_offered_school(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) > 64:
+            text = text[:64]
         return text
 
 
@@ -954,3 +970,5 @@ class OfferTemplateRecord(BaseModel):
 
 class OfferTemplateListResponse(BaseModel):
     items: list[OfferTemplateRecord] = Field(default_factory=list)
+
+

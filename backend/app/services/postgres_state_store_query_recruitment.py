@@ -812,6 +812,13 @@ class PostgresStateStoreQueryRecruitmentMixin:
         else:
             accepted_value = None
         normalized["accepted"] = accepted_value
+        # 2026-07-06: 录取学校 (dtlms_plan_offer.admission_offered_school varchar(64))
+        school_value = normalized.get("admission_offered_school")
+        if isinstance(school_value, str):
+            school_value = school_value.strip() or None
+        else:
+            school_value = None
+        normalized["admission_offered_school"] = school_value
         # 2026-07-03: 当前用户能否对该行执行入取操作(后端 SQL 计算)
         normalized["can_change_accepted"] = bool(normalized.get("can_change_accepted") or False)
         return normalized
@@ -1034,6 +1041,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
                         offer.hackathon_score,
                         offer.hackathon_comments,
                         offer.accepted,
+                        -- 2026-07-06: 录取学校 (来自 dtlms_plan_offer.admission_offered_school)
+                        offer.admission_offered_school,
                         -- 2026-07-03: 当前用户能否对该行执行入取操作(录取/不录取/待定)
                         -- 权限收紧 (2026-07-03 二次确认): 书院/平台放行; 普通 advisor 即使命中
                         --   first/second_choice 分数规则也不能改; 仅「研究中心负责人」在
@@ -1230,6 +1239,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 offer.hackathon_score,
                 offer.hackathon_comments,
                 offer.accepted,
+                -- 2026-07-06: 录取学校 (来自 dtlms_plan_offer.admission_offered_school)
+                offer.admission_offered_school,
                 -- 2026-07-03: 当前用户能否对该行执行入取操作 (录取/不录取/待定)
                 -- 5 个 placeholder: is_unrestricted, is_center_leader, ANY(first_choice names),
                 --                  is_center_leader(再次), ANY(second_choice names)

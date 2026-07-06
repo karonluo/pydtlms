@@ -240,6 +240,8 @@ export type CampOfferRecord = {
   accepted?: string | null
   // 2026-07-03: 当前登录人是否可修改 accepted (导师/中心负责人 一/二志愿分数 >= 80)
   can_change_accepted?: boolean
+  // 2026-07-06: 录取学校 (dtlms_plan_offer.admission_offered_school varchar(64))
+  admission_offered_school?: string | null
   created_at?: string | null
   student_offer_submitted_at?: string | null
 }
@@ -264,6 +266,8 @@ export type CampOfferUpsert = {
   hackathon_score?: number | null
   hackathon_comments?: string | null
   accepted?: string | null
+  // 2026-07-06: 录取学校
+  admission_offered_school?: string | null
   student_offer_submitted_at?: string | null
 }
 

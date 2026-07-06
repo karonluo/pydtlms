@@ -1379,11 +1379,13 @@ class PostgresStateStoreSyncMixin:
                         hackathon_score,     -- 2026-07-01: 夏令营评分
                         hackathon_comments,  -- 2026-07-01: 夏令营评语
                         accepted,            -- 2026-07-01: 黑客松入取状态
+                        admission_offered_school,  -- 2026-07-06: 录取学校
                         created_at,
                         updated_at
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s,  -- 黑客松 3 字段
+                        %s, %s, %s,
+                        %s,  -- 2026-07-06: 录取学校
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                     )
                     RETURNING id
@@ -1399,6 +1401,8 @@ class PostgresStateStoreSyncMixin:
                         payload.get("hackathon_score"),
                         payload.get("hackathon_comments"),
                         payload.get("accepted"),
+                        # 2026-07-06: 录取学校
+                        payload.get("admission_offered_school"),
                     ),
                 )
                 inserted = cur.fetchone() or {}
@@ -1430,6 +1434,7 @@ class PostgresStateStoreSyncMixin:
                         hackathon_score = %s,     -- 2026-07-01: 夏令营评分
                         hackathon_comments = %s,  -- 2026-07-01: 夏令营评语
                         accepted = %s,            -- 2026-07-01: 黑客松入取状态
+                        admission_offered_school = %s,  -- 2026-07-06: 录取学校
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     """,
@@ -1444,6 +1449,8 @@ class PostgresStateStoreSyncMixin:
                         payload.get("hackathon_score"),
                         payload.get("hackathon_comments"),
                         payload.get("accepted"),
+                        # 2026-07-06: 录取学校
+                        payload.get("admission_offered_school"),
                         int(offer_id),
                     ),
                 )

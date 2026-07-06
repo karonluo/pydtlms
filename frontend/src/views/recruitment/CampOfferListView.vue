@@ -177,6 +177,20 @@ async function loadHackathonAcceptedDict() {
     console.warn('加载黑客松入取状态字典失败:', error)
   }
 }
+
+// 2026-07-06: 录取学校字典选项 (字典类型 admission_offered_school)
+const admissionOfferedSchoolOptions = ref<{ label: string; value: string }[]>([])
+async function loadAdmissionOfferedSchoolDict() {
+  try {
+    const response = await listDictData({ dict_type: 'admission_offered_school', status: '启用', page_size: 1000 })
+    // 服务端 listDictData 已按 sort_order 升序返回，前端不再二次排序
+    admissionOfferedSchoolOptions.value = (response.data.items || [])
+      .map((item: DictDataRecord) => ({ label: item.label, value: item.value }))
+  } catch (error) {
+    // 字典加载失败不阻塞主流程
+    console.warn('加载录取学校字典失败:', error)
+  }
+}
 function getAcceptedOption(value: string | null | undefined) {
   if (!value) return { label: '待录取', value: '', colorType: 'info' }
   // 1) 优先从字典查找
@@ -283,6 +297,8 @@ const formModel = reactive<CampOfferUpsert>({
   hackathon_score: null,
   hackathon_comments: '',
   accepted: null,
+  // 2026-07-06: 录取学校
+  admission_offered_school: '',
 })
 
 const formRules: FormRules<CampOfferUpsert> = {
@@ -431,6 +447,8 @@ function resetForm() {
   formModel.hackathon_score = null
   formModel.hackathon_comments = ''
   formModel.accepted = null
+  // 2026-07-06: 录取学校
+  formModel.admission_offered_school = ''
   currentOfferId.value = null
 }
 
@@ -952,6 +970,8 @@ function openEditDialog(row: CampOfferRecord) {
   formModel.hackathon_score = typeof row.hackathon_score === 'number' ? row.hackathon_score : null
   formModel.hackathon_comments = row.hackathon_comments || ''
   formModel.accepted = row.accepted || null
+  // 2026-07-06: 录取学校
+  formModel.admission_offered_school = row.admission_offered_school || ''
   dialogVisible.value = true
 }
 
@@ -978,6 +998,8 @@ async function submitDialog() {
       hackathon_score: formModel.hackathon_score === null || formModel.hackathon_score === undefined ? null : Number(formModel.hackathon_score),
       hackathon_comments: String(formModel.hackathon_comments || '').trim() || null,
       accepted: formModel.accepted || null,
+      // 2026-07-06: 录取学校
+      admission_offered_school: String(formModel.admission_offered_school || '').trim() || null,
     }
 
     if (dialogMode.value === 'create') {
@@ -1101,6 +1123,8 @@ async function handleExportList() {
 onMounted(async () => {
   // 2026-07-01 加载黑客松入取状态字典(不阻塞主流程)
   void loadHackathonAcceptedDict()
+  // 2026-07-06: 加载录取学校字典(不阻塞主流程)
+  void loadAdmissionOfferedSchoolDict()
   await fetchPlans()
   await fetchAdvisorOptions()
   await fetchTeamOptions()
@@ -1291,6 +1315,13 @@ onMounted(async () => {
         <el-table-column type="selection" width="44" />
         <el-table-column prop="plan_name" label="计划名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="candidate_no" label="报名号" min-width="140" />
+        <!-- 2026-07-06: 录取学校 (dtlms_plan_offer.admission_offered_school) -->
+        <el-table-column prop="admission_offered_school" label="录取学校" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.admission_offered_school">{{ row.admission_offered_school }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="student_name" label="学生姓名" min-width="120" show-overflow-tooltip />
         <!-- 2026-07-01 黑客松夏令营专用列 -->
         <el-table-column prop="hackathon_score" label="夏令营评分" min-width="110" align="center">
@@ -1472,6 +1503,23 @@ onMounted(async () => {
                 :key="item.value || 'empty'"
                 :label="item.label"
                 :value="item.value || null"
+              />
+            </el-select>
+          </el-form-item>
+          <!-- 2026-07-06: 录取学校 (字典 admission_offered_school) -->
+          <el-form-item label="录取学校" class="dialog-grid--full">
+            <el-select
+              v-model="formModel.admission_offered_school"
+              clearable
+              filterable
+              placeholder="请选择录取学校(可选)"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="item in admissionOfferedSchoolOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
               />
             </el-select>
           </el-form-item>

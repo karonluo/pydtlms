@@ -610,6 +610,12 @@ class RuntimeManagementStoreRecruitmentMixin:
                     "is_agree": payload.is_agree,
                     "reason": payload.reason,
                     "student_offer_submitted_at": payload.student_offer_submitted_at,
+                    # 2026-07-03: 黑客松夏令营字段 (新增路径, 与 update 保持一致)
+                    "hackathon_score": payload.hackathon_score,
+                    "hackathon_comments": payload.hackathon_comments,
+                    "accepted": payload.accepted,
+                    # 2026-07-06: 录取学校
+                    "admission_offered_school": payload.admission_offered_school,
                 },
                 operation_log,
             )
@@ -651,6 +657,8 @@ class RuntimeManagementStoreRecruitmentMixin:
                     "hackathon_score": payload.hackathon_score,
                     "hackathon_comments": payload.hackathon_comments,
                     "accepted": payload.accepted,
+                    # 2026-07-06: 录取学校
+                    "admission_offered_school": payload.admission_offered_school,
                 },
                 operation_log,
             )
