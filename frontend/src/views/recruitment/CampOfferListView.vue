@@ -16,6 +16,7 @@ import {
   getCampOfferStats,
   acceptCampOffer,
   declineCampOffer,
+  importAdmissionOfferedSchools,
   importCampOffers,
   importHackathonScores,
   markCampOfferPending,
@@ -25,6 +26,7 @@ import {
   sendCampOfferNotification,
   updateCampOffer,
   uploadOfferTemplate,
+  type AdmissionOfferedSchoolImportResult,
   type CampOfferNotificationSendResponse,
   type CampOfferRecord,
   type CampOfferStats,
@@ -847,6 +849,13 @@ const hackathonImporting = ref(false)
 const hackathonImportResult = ref<HackathonScoreImportResult | null>(null)
 const hackathonImportFileInputRef = ref<HTMLInputElement | null>(null)
 
+// 2026-07-06: 黑客松夏令营“上传录取学校”弹窗状态
+const admissionSchoolImportDialogVisible = ref(false)
+const admissionSchoolImportFile = ref<File | null>(null)
+const admissionSchoolImporting = ref(false)
+const admissionSchoolImportResult = ref<AdmissionOfferedSchoolImportResult | null>(null)
+const admissionSchoolImportFileInputRef = ref<HTMLInputElement | null>(null)
+
 // 触发文件选择: 通过隐藏的 input[type=file]
 function onHackathonScoreImport() {
   hackathonImportResult.value = null
@@ -890,8 +899,42 @@ async function submitHackathonImport() {
 }
 
 function onHackathonUploadSchools() {
-  // 占位: 后续将对接 '上传录取学校' 后端端点
-  ElMessage.info('上传录取学校功能待后续实现')
+  admissionSchoolImportResult.value = null
+  admissionSchoolImportFile.value = null
+  admissionSchoolImportDialogVisible.value = true
+}
+
+function onAdmissionSchoolImportFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files && target.files[0] ? target.files[0] : null
+  admissionSchoolImportFile.value = file
+  if (target) target.value = ''
+}
+
+async function submitAdmissionSchoolImport() {
+  if (!admissionSchoolImportFile.value) {
+    ElMessage.warning('请先选择 Excel 文件')
+    return
+  }
+  admissionSchoolImporting.value = true
+  try {
+    const response = await importAdmissionOfferedSchools(admissionSchoolImportFile.value)
+    admissionSchoolImportResult.value = response.data
+    const r = response.data
+    if (r.matched_count > 0) {
+      ElMessage.success(`录取学校导入完成: 匹配 ${r.matched_count} 行, 未匹配 ${r.unmatched_count} 行`)
+      pager.pagination.currentPage = 1
+      await fetchOffers()
+    } else if (r.total_rows === 0) {
+      ElMessage.warning('Excel 文件中没有可导入的数据行')
+    } else {
+      ElMessage.warning('录取学校导入完成: 无任何匹配行, 请检查手机号/邮箱是否正确')
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || '录取学校导入失败')
+  } finally {
+    admissionSchoolImporting.value = false
+  }
 }
 
 function onHackathonSendNotification() {
@@ -1731,6 +1774,77 @@ onMounted(async () => {
           :disabled="!hackathonImportFile"
           @click="submitHackathonImport"
         >开始导入</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 2026-07-06: 黑客松夏令营“上传录取学校”弹窗
+         - 表头必须包含学生手机号20学生邮箱20录取学校
+         - 匹配规则手机号20邮箱联合匹配入营名单
+         - 写入字段: 仅更新admission_offered_school一列不影响其他字段
+         - 未匹配的行: 跳过并在下方报告, 不会报错
+    -->
+    <el-dialog v-model="admissionSchoolImportDialogVisible" title="夏令营录取学校导入" width="640px" destroy-on-close>
+      <el-alert
+        title="导入说明"
+        type="info"
+        :closable="false"
+        show-icon
+      >
+        <template #default>
+          <div>Excel 表头必须包含: 学生手机号 / 学生邮箱 / 录取学校</div>
+          <div>匹配规则: 学生的手机号 + 邮箱 联合匹配入营名单</div>
+          <div>写入字段: 仅更新 <b>录取学校</b> 一列不影响其他字段</div>
+          <div>未匹配的行: 跳过并在下方报告, 不会报错</div>
+        </template>
+      </el-alert>
+      <div style="margin: 16px 0;">
+        <input
+          ref="admissionSchoolImportFileInputRef"
+          type="file"
+          accept=".xlsx,.xls"
+          style="display: none"
+          @change="onAdmissionSchoolImportFileChange"
+        />
+        <el-button @click="() => admissionSchoolImportFileInputRef?.click()">选择文件</el-button>
+        <span style="margin-left: 12px; color: #909399;" v-if="admissionSchoolImportFile">
+          已选择: {{ admissionSchoolImportFile.name }} ({{ (admissionSchoolImportFile.size / 1024).toFixed(1) }} KB)
+        </span>
+        <span style="margin-left: 12px; color: #909399;" v-else>未选择文件</span>
+      </div>
+
+      <div v-if="admissionSchoolImportResult" class="admission-school-import-result">
+        <el-divider content-position="left">导入结果</el-divider>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="总行数">{{ admissionSchoolImportResult.total_rows }}</el-descriptions-item>
+          <el-descriptions-item label="匹配成功">
+            <el-tag type="success">{{ admissionSchoolImportResult.matched_count }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="未匹配">
+            <el-tag :type="admissionSchoolImportResult.unmatched_count > 0 ? 'warning' : 'info'">
+              {{ admissionSchoolImportResult.unmatched_count }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div v-if="admissionSchoolImportResult.issues.length" style="margin-top: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">问题明细 ({{ admissionSchoolImportResult.issues.length }} 条)</div>
+          <el-table :data="admissionSchoolImportResult.issues" size="small" border max-height="240">
+            <el-table-column prop="row_number" label="行号" width="80" align="center" />
+            <el-table-column prop="phone" label="手机号" width="140" />
+            <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="school" label="录取学校" width="160" show-overflow-tooltip />
+            <el-table-column prop="reason" label="原因" min-width="200" show-overflow-tooltip />
+          </el-table>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="admissionSchoolImportDialogVisible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :loading="admissionSchoolImporting"
+          :disabled="!admissionSchoolImportFile"
+          @click="submitAdmissionSchoolImport"
+        >开始导入录取学校</el-button>
       </template>
     </el-dialog>
 

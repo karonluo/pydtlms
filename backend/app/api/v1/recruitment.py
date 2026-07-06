@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
 from app.schemas.recruitment import (
+    AdmissionOfferedSchoolImportResult,
     AdvisorScreeningScoreUpdateRequest,
     AdvisorScreeningBatchSubmitRequest,
     AdvisorScreeningBatchSubmitResponse,
@@ -80,6 +81,7 @@ from app.services.advisor_screening_submitted_service import (
 from app.services.initial_screening_confirmation_service import list_initial_screening_confirmation_applications
 from app.services.camp_offer_confirmation_service import submit_camp_offer_confirmation
 from app.services.camp_offer_import_service import (
+    import_admission_offered_schools_from_excel,
     import_camp_offers_from_excel,
     import_hackathon_scores_from_excel,
 )
@@ -950,6 +952,22 @@ async def import_hackathon_score_records(
 ) -> HackathonScoreImportResult:
     try:
         return import_hackathon_scores_from_excel(await file.read())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+# 2026-07-06: 黑客松夏令营 “上传录取学校” 专用端点
+# 区别于 /camp-offers/import-hackathon-scores:
+#   - 通过 手机号 + 邮箱 联合匹配入营名单
+#   - 仅更新 dtlms_plan_offer.admission_offered_school
+#   - 未匹配的行: 跳过并在结果 issues 中报告 (不报错)
+@router.post("/camp-offers/import-admission-offered-schools", response_model=AdmissionOfferedSchoolImportResult)
+async def import_admission_offered_school_records(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:write")),
+) -> AdmissionOfferedSchoolImportResult:
+    try:
+        return import_admission_offered_schools_from_excel(await file.read())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

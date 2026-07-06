@@ -472,6 +472,86 @@ def parse_hackathon_score_template(file_bytes: bytes) -> list[dict[str, Any]]:
     return result
 
 
+# 2026-07-06: 录取学校导入专用解析 (字典 admission_offered_school)
+# 表头必须包含: 学生手机号 / 学生邮箱 / 录取学校
+# 匹配规则 (service 层负责): 学生的手机号 + 邮箱 联合匹配入营名单
+# 返回值 (每行):
+#   {
+#       "row_number": int,
+#       "phone":      str | None,
+#       "email":      str | None,
+#       "admission_offered_school": str | None,
+#   }
+def parse_admission_offered_school_template(file_bytes: bytes) -> list[dict[str, Any]]:
+    """解析 录取学校导入 Excel。
+
+    入参: file_bytes (前端 multipart/form-data 上传的 .xlsx 字节)
+    出参: list[dict]
+    """
+    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
+    worksheet = cast(Worksheet, workbook.active)
+    rows = list(worksheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+
+    header_row = rows[0]
+    normalized_headers = [_normalize_header(item).lower() for item in header_row]
+    if not normalized_headers:
+        raise ValueError("导入文件缺少表头")
+
+    # 表头匹配集合 (兼容多种写法)
+    phone_headers = {"\u5b66\u751f\u624b\u673a\u53f7", "phone", "student_phone", "phonenumber", "phone_number", "\u624b\u673a\u53f7"}
+    email_headers = {"\u5b66\u751f\u90ae\u7bb1", "email", "student_email", "emailaddress", "\u90ae\u7bb1"}
+    school_headers = {"\u5f55\u53d6\u5b66\u6821", "admission_offered_school", "offered_school", "school"}
+
+    header_index: dict[str, int] = {}
+    for idx, header in enumerate(normalized_headers):
+        if not header:
+            continue
+        if header in phone_headers:
+            header_index["phone"] = idx
+        elif header in email_headers:
+            header_index["email"] = idx
+        elif header in school_headers:
+            header_index["admission_offered_school"] = idx
+
+    # 客户要求: 3 个字段都必须有, 否则表头不对
+    missing: list[str] = []
+    for field, label in [
+        ("phone", "学生手机号"),
+        ("email", "学生邮箱"),
+        ("admission_offered_school", "录取学校"),
+    ]:
+        if field not in header_index:
+            missing.append(label)
+    if missing:
+        raise ValueError("导入文件缺少必要表头列: " + "、".join(missing))
+
+    result: list[dict[str, Any]] = []
+    for row_offset, row in enumerate(rows[1:], start=2):
+        if not any(value not in (None, "") for value in row):
+            continue
+        phone = _normalize_cell(row[header_index["phone"]]) if header_index["phone"] < len(row) else None
+        email = _normalize_cell(row[header_index["email"]]) if header_index["email"] < len(row) else None
+        school_raw = _normalize_cell(row[header_index["admission_offered_school"]]) if header_index["admission_offered_school"] < len(row) else None
+
+        # 录取学校: 截断到 64 字符 (与数据库列宽保持一致)
+        school: str | None = None
+        if school_raw not in (None, ""):
+            school = str(school_raw).strip()
+            if len(school) > 64:
+                school = school[:64]
+            if not school:
+                school = None
+
+        result.append({
+            "row_number": int(row_offset),
+            "phone": phone,
+            "email": email,
+            "admission_offered_school": school,
+        })
+    return result
+
 
 
 def build_recruitment_template(records: list[dict[str, Any]]) -> bytes:

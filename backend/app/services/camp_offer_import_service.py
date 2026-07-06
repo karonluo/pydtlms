@@ -10,12 +10,17 @@ from openpyxl import load_workbook
 
 from app.core.config import settings
 from app.schemas.recruitment import (
+    AdmissionOfferedSchoolImportIssue,
+    AdmissionOfferedSchoolImportResult,
     CampOfferImportIssue,
     CampOfferImportResult,
     HackathonScoreImportIssue,
     HackathonScoreImportResult,
 )
-from app.services.recruitment_excel_service import parse_hackathon_score_template
+from app.services.recruitment_excel_service import (
+    parse_admission_offered_school_template,
+    parse_hackathon_score_template,
+)
 
 
 def _conninfo() -> str:
@@ -535,6 +540,109 @@ def import_hackathon_scores_from_excel(file_bytes: bytes) -> HackathonScoreImpor
         1 for it in issues if it.reason == "未匹配到入营名单记录(手机号+邮箱联合查询无结果)"
     )
     return HackathonScoreImportResult(
+        total_rows=total_rows,
+        matched_count=matched_row_count,
+        unmatched_count=total_rows - matched_row_count,
+        updated_ids=updated_ids,
+        issues=issues,
+    )
+
+
+# --------------------------------------------------------------------------
+# 2026-07-06: 黑客松夏令营 “上传录取学校” 专用导入
+# 区别于 /camp-offers/import-hackathon-scores:
+#   - 通过 dtlms_recruitment_applications.phone_number + email 联合匹配入营名单
+#   - 仅更新 dtlms_plan_offer.admission_offered_school (varchar(64))
+#   - 匹配不到入营名单的行跳过, 在 issues 中报告 (Q3: 不报错)
+def import_admission_offered_schools_from_excel(file_bytes: bytes) -> AdmissionOfferedSchoolImportResult:
+    """解析 + 导入 录取学校 Excel.
+
+    入参: file_bytes (前端 multipart/form-data 上传的 .xlsx 字节)
+    出参: AdmissionOfferedSchoolImportResult
+    """
+    rows = parse_admission_offered_school_template(file_bytes)
+    total_rows = len(rows)
+    if total_rows == 0:
+        return AdmissionOfferedSchoolImportResult(
+            total_rows=0,
+            matched_count=0,
+            unmatched_count=0,
+            updated_ids=[],
+            issues=[],
+        )
+
+    issues: list[AdmissionOfferedSchoolImportIssue] = []
+    updated_ids: list[int] = []
+
+    with psycopg.connect(_conninfo()) as conn:
+        with conn.cursor() as cur:
+            for row in rows:
+                row_number = int(row["row_number"])
+                phone = row.get("phone")
+                email = row.get("email")
+                school = row.get("admission_offered_school")
+
+                if not phone or not email:
+                    issues.append(
+                        AdmissionOfferedSchoolImportIssue(
+                            row_number=row_number,
+                            phone=phone,
+                            email=email,
+                            school=school,
+                            reason="学生手机号/邮箱不能为空",
+                        )
+                    )
+                    continue
+                if school is None:
+                    issues.append(
+                        AdmissionOfferedSchoolImportIssue(
+                            row_number=row_number,
+                            phone=phone,
+                            email=email,
+                            school=school,
+                            reason="录取学校不能为空",
+                        )
+                    )
+                    continue
+
+                cur.execute(
+                    """
+                    UPDATE dtlms_plan_offer offer
+                    SET admission_offered_school = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM dtlms_recruitment_applications app
+                    WHERE offer.candidate_no = app.candidate_no
+                      AND offer.plan_id = app.plan_id
+                      AND app.phone_number = %s
+                      AND app.email = %s
+                    RETURNING offer.id
+                    """,
+                    (school, phone, email),
+                )
+                results = cur.fetchall()
+                if not results:
+                    issues.append(
+                        AdmissionOfferedSchoolImportIssue(
+                            row_number=row_number,
+                            phone=phone,
+                            email=email,
+                            school=school,
+                            reason="未匹配到入营名单记录(手机号+邮箱联合查询无结果)",
+                        )
+                    )
+                    continue
+                for r in results:
+                    updated_ids.append(int(r[0]))
+
+            conn.commit()
+
+    unmatched_reasons = {
+        "学生手机号/邮箱不能为空",
+        "录取学校不能为空",
+        "未匹配到入营名单记录(手机号+邮箱联合查询无结果)",
+    }
+    matched_row_count = total_rows - sum(1 for it in issues if it.reason in unmatched_reasons)
+    return AdmissionOfferedSchoolImportResult(
         total_rows=total_rows,
         matched_count=matched_row_count,
         unmatched_count=total_rows - matched_row_count,

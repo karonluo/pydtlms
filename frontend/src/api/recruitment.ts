@@ -300,6 +300,16 @@ export type HackathonScoreImportResult = {
   issues: HackathonScoreImportIssue[]
 }
 
+// 2026-07-06: 黑客松夏令营 “上传录取学校” 结果
+// 区别于 HackathonScoreImportResult: 仅更新 dtlms_plan_offer.admission_offered_school
+export type AdmissionOfferedSchoolImportResult = {
+  total_rows: number
+  matched_count: number
+  unmatched_count: number
+  updated_ids: number[]
+  issues: HackathonScoreImportIssue[]
+}
+
 export type OfferTemplateRecord = {
   id: string | number
   filename: string
@@ -798,6 +808,16 @@ export function importHackathonScores(file: File) {
   const formData = new FormData()
   formData.append('file', file)
   return http.post<HackathonScoreImportResult>('/recruitment/camp-offers/import-hackathon-scores', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+// 2026-07-06: 黑客松夏令营「上传录取学校」专用 API
+// 与 importHackathonScores 区别: 仅更新 dtlms_plan_offer.admission_offered_school
+export function importAdmissionOfferedSchools(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<AdmissionOfferedSchoolImportResult>('/recruitment/camp-offers/import-admission-offered-schools', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }

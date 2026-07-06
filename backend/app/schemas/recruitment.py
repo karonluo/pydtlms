@@ -835,6 +835,34 @@ class HackathonScoreImportResult(BaseModel):
     updated_ids: list[int] = []
     issues: list[HackathonScoreImportIssue] = []
 
+# 2026-07-06: 录取学校导入 (Excel -> 仅更新 admission_offered_school)
+# 区别于 CampOfferImportResult / HackathonScoreImportResult:
+#   - 通过 手机号 + 邮箱 联合匹配入营名单
+#   - 仅更新 admission_offered_school (dtlms_plan_offer.admission_offered_school varchar(64))
+#   - 匹配不到 -> 跳过并在 issues 中报告 (不抛错)
+class AdmissionOfferedSchoolImportIssue(BaseModel):
+    row_number: int
+    phone: str | None = None
+    email: str | None = None
+    school: str | None = None
+    reason: str
+
+
+class AdmissionOfferedSchoolImportResult(BaseModel):
+    u"录取学校导入结果。"
+
+    u"字段说明:"
+    u"        - total_rows:    Excel 中非空数据行总数"
+    u"        - matched_count: 成功匹配到入营名单并已 UPDATE 的行数"
+    u"        - unmatched_count: 手机号+邮箱联合匹配不到入营名单的行数 (跳过)"
+    u"        - updated_ids:   被更新的入营名单主键 id 列表"
+    u"        - issues:        失败/未匹配行的明细"
+    total_rows: int = 0
+    matched_count: int = 0
+    unmatched_count: int = 0
+    updated_ids: list[int] = []
+    issues: list[AdmissionOfferedSchoolImportIssue] = []
+
 
 class RecruitmentOptionsResponse(BaseModel):
     semester_options: list[SelectOption]
