@@ -1879,8 +1879,10 @@ onMounted(async () => {
 
 .camp-offer-page__header {
   display: grid;
-  /* 3 columns: title (left) | KPI strip (center, flexes) | actions (right) */
-  grid-template-columns: auto 1fr auto;
+  /* 3 columns: title (left) | KPI strip (center, fits content) | actions (right) */
+  /* 2026-07-06: KPI 改为 4 列 × 2 行后，中间列改为自适应宽度，避免被拉伸 */
+  grid-template-columns: auto auto auto;
+  justify-content: space-between;
   align-items: center;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -1965,15 +1967,15 @@ onMounted(async () => {
 }
 
 .camp-offer-kpi-strip {
-  display: flex;
+  /* 2026-07-06: 8 张卡片固定 4 列 × 2 行 布局 */
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 10px 14px;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  justify-items: stretch;
   min-width: 0;
-  flex-wrap: wrap;
   align-self: center;
   justify-self: center;
-  height: 100%;
 }
 
 .camp-offer-kpi-tile {
@@ -1982,7 +1984,8 @@ onMounted(async () => {
   justify-content: center;
   gap: 6px;
   height: 32px;
-  min-width: 132px;
+  width: 100%;
+  min-width: 0;
   padding: 0 12px;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
