@@ -326,7 +326,16 @@ const mailOptions = [
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增入营名单' : '编辑入营名单'))
 
 type CampOfferKpi = {
-  key: 'sent_mail' | 'agreed' | 'declined' | 'unsigned'
+  key:
+    | 'sent_mail'
+    | 'agreed'
+    | 'declined'
+    | 'unsigned'
+    // 2026-07-06: 入取 / 不入取 / 待定 / 待入取
+    | 'accepted_count'
+    | 'unaccepted_count'
+    | 'pending_count'
+    | 'pending_send_count'
   title: string
   status: 'healthy' | 'attention' | 'warning'
   icon: unknown
@@ -337,6 +346,11 @@ const KPI_DEFINITIONS: CampOfferKpi[] = [
   { key: 'agreed', title: '已同意', status: 'healthy', icon: Check },
   { key: 'declined', title: '不同意', status: 'attention', icon: CircleClose },
   { key: 'unsigned', title: '未签署', status: 'warning', icon: EditPen },
+  // 2026-07-06: 入取 / 不入取 / 待定 / 待入取 统计，在未签署右侧
+  { key: 'accepted_count', title: '录取', status: 'healthy', icon: Check },
+  { key: 'unaccepted_count', title: '不录取', status: 'attention', icon: CircleClose },
+  { key: 'pending_count', title: '待定', status: 'warning', icon: EditPen },
+  { key: 'pending_send_count', title: '待录取', status: 'warning', icon: Promotion },
 ]
 
 const kpiCards = computed(() =>
@@ -1367,7 +1381,8 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="student_name" label="学生姓名" min-width="120" show-overflow-tooltip />
         <!-- 2026-07-01 黑客松夏令营专用列 -->
-        <el-table-column prop="hackathon_score" label="夏令营评分" min-width="110" align="center">
+        <!-- 2026-07-06: 加入 sortable="custom" 支持按夏令营评分排序 -->
+        <el-table-column prop="hackathon_score" label="夏令营评分" min-width="110" sortable="custom" align="center">
           <template #default="{ row }">
             <span v-if="row.hackathon_score !== null && row.hackathon_score !== undefined">{{ row.hackathon_score }}</span>
             <span v-else class="text-muted">-</span>

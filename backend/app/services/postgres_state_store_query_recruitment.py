@@ -988,6 +988,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
             order_sql = f"ORDER BY app.first_choice_screening_score {normalized_sort_order} NULLS LAST, offer.created_at DESC NULLS LAST, offer.id DESC"
         elif normalized_sort_by == "second_choice_screening_score":
             order_sql = f"ORDER BY app.second_choice_screening_score {normalized_sort_order} NULLS LAST, offer.created_at DESC NULLS LAST, offer.id DESC"
+        elif normalized_sort_by == "hackathon_score":
+            order_sql = f"ORDER BY offer.hackathon_score {normalized_sort_order} NULLS LAST, offer.created_at DESC NULLS LAST, offer.id DESC"
 
         with self._connect(settings.postgres_db) as conn:
             conn.row_factory = dict_row
@@ -1166,6 +1168,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
                     offer.candidate_no,
                     COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
                     offer.is_agree,
+                    offer.accepted,
                     offer.submitted_at AS student_offer_submitted_at
                 FROM dtlms_plan_offer offer
                 LEFT JOIN dtlms_recruitment_applications app
@@ -1191,7 +1194,20 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 COUNT(*) FILTER (WHERE is_sent_mail) AS sent_mail,
                 COUNT(*) FILTER (WHERE is_agree IS TRUE) AS agreed,
                 COUNT(*) FILTER (WHERE is_agree IS FALSE) AS declined,
-                COUNT(*) FILTER (WHERE student_offer_submitted_at IS NULL) AS unsigned
+                COUNT(*) FILTER (WHERE student_offer_submitted_at IS NULL) AS unsigned,
+                -- 2026-07-06: 录取2f不录取2f待定2f待录取统计
+                COUNT(*) FILTER (
+                    WHERE accepted IN ('accepted_pending_send', 'accepted_sent', 'accepted_confirmed')
+                ) AS accepted_count,
+                COUNT(*) FILTER (
+                    WHERE accepted IN ('declined', 'accepted_rejected')
+                ) AS unaccepted_count,
+                COUNT(*) FILTER (
+                    WHERE accepted = 'pending'
+                ) AS pending_count,
+                COUNT(*) FILTER (
+                    WHERE accepted IS NULL
+                ) AS pending_send_count
             FROM base
         """
 
@@ -1206,6 +1222,10 @@ class PostgresStateStoreQueryRecruitmentMixin:
             "agreed": int(row.get("agreed") or 0),
             "declined": int(row.get("declined") or 0),
             "unsigned": int(row.get("unsigned") or 0),
+            "accepted_count": int(row.get("accepted_count") or 0),
+            "unaccepted_count": int(row.get("unaccepted_count") or 0),
+            "pending_count": int(row.get("pending_count") or 0),
+            "pending_send_count": int(row.get("pending_send_count") or 0),
         }
 
     def get_camp_offer_detail(

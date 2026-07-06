@@ -253,6 +253,11 @@ export type CampOfferStats = {
   agreed: number
   declined: number
   unsigned: number
+  // 2026-07-06: 入取 / 不入取 / 待定 / 待入取 统计
+  accepted_count: number
+  unaccepted_count: number
+  pending_count: number
+  pending_send_count: number
   total: number
 }
 

@@ -782,6 +782,14 @@ class CampOfferStats(BaseModel):
     * ``declined``: rows with ``is_agree = false`` (student declined).
     * ``unsigned``: rows with no ``student_offer_submitted_at`` (student
       has not submitted the offer-confirmation form yet).
+    * ``accepted_count``: rows whose ``accepted`` value indicates a
+      positive offer (pending_send / sent / confirmed).
+    * ``unaccepted_count``: rows whose ``accepted`` value indicates a
+      negative outcome (declined / rejected).
+    * ``pending_count``: rows whose ``accepted = pending`` (operator
+      marked the row as pending review).
+    * ``pending_send_count``: rows whose ``accepted`` is NULL (no
+      decision has been made yet).
     * ``total``: total rows considered (after applying the same filters
       as the list endpoint, minus pagination).
     """
@@ -790,6 +798,10 @@ class CampOfferStats(BaseModel):
     agreed: int = 0
     declined: int = 0
     unsigned: int = 0
+    accepted_count: int = 0
+    unaccepted_count: int = 0
+    pending_count: int = 0
+    pending_send_count: int = 0
     total: int = 0
 
 
