@@ -1372,6 +1372,36 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 row = cur.fetchone()
         return dict(row) if row else None
 
+
+    def find_camp_offer_is_in_camp_selection(self, *, candidate_no: str, plan_id: int) -> bool:
+        """2026-07-06: portal 进度展示用。
+
+        按 candidate_no + plan_id 查 dtlms_plan_offer.is_in_camp_selection，用于判断是否进入「夏令营选拔」环节。
+        未命中 / 出错 → False (与未入营语义一致)。
+        """
+        self.ensure_schema()
+        normalized_candidate_no = str(candidate_no or "").strip()
+        if not normalized_candidate_no or int(plan_id or 0) <= 0:
+            return False
+        try:
+            with self._connect(settings.postgres_db) as conn:
+                conn.row_factory = dict_row
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT is_in_camp_selection
+                        FROM dtlms_plan_offer
+                        WHERE candidate_no = %s AND plan_id = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (normalized_candidate_no, int(plan_id)),
+                    )
+                    row = cur.fetchone()
+        except Exception:
+            return False
+        return bool((row or {}).get("is_in_camp_selection")) if row else False
+
     def list_background_assessments(self, application_id: int) -> list[dict[str, Any]]:
         """Execute query logic for `list_background_assessments`."""
         self.ensure_schema()

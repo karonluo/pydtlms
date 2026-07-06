@@ -42,8 +42,9 @@ class RuntimeManagementStorePortalMixin:
 
         normalized_advisor_screening_status = str(advisor_screening_status or "").strip().lower()
         normalized_initial_screening_result = str(initial_screening_result or "").strip().lower()
+        # 2026-07-06: 初筛环节移除后，初筛未通过 → 停留在背景评估环节 (UI 上不再有初筛卡)
         if normalized_initial_screening_result in {"rejected", "不通过", "未通过"} or normalized_advisor_screening_status == "rejected":
-            return "initial_screening"
+            return "background_review"
 
         for item in background_assessments or []:
             assessment_result = str((item or {}).get("assessment_result") or "").strip().lower()
@@ -80,15 +81,18 @@ class RuntimeManagementStorePortalMixin:
         initial_screening_result: str | None = None,
         background_assessments: list[dict[str, Any]] | None = None,
         review_comment: str | None = None,
+        # 2026-07-06: 用于「在初筛中」分支判断是否进入夏令营选拔 (True 进 / False 停)
+        is_in_camp_selection: bool = False,
     ) -> PortalWorkflowProgressSummary:
         normalized_status = str(application_status or "").strip()
         application_form_status = self._portal_application_summary_form_status(submitted_at, normalized_status or None)
+        # 2026-07-06: 去掉"初筛"环节; stages 由 7 贴减为 6. 原「初筛」环节在 UI 上去掉，
+        # 在初筛中的学生看 dtlms_plan_offer.is_in_camp_selection：True → 进入夏令营选拔 / False → 停留在背景评估。
         stage_labels = [
             ("online_application", "在线申请"),
             ("material_review", "资料审核"),
             ("background_review", "背景评估"),
-            ("initial_screening", "初筛"),
-            ("camp_interview", "入营面试"),
+            ("camp_interview", "夏令营选拔"),
             ("result_publish", "结果公布"),
             ("pre_admission", "预录取"),
         ]
@@ -143,48 +147,52 @@ class RuntimeManagementStorePortalMixin:
             "待导师初筛-第二志愿",
             "待初筛确认",
         }:
+            # 2026-07-06: 本轮需求——去掉"初筛"环节。在初筛中的学生，看 dtlms_plan_offer.is_in_camp_selection:
+            #   - True  -> 背景评估 completed，夏令营选拔 current (代替原初筛 current)
+            #   - False -> 背景评估 current（停留），夏令营选拔 不浮现
+            stages[0].status = "completed"
+            stages[1].status = "completed"
+            if is_in_camp_selection:
+                stages[2].status = "completed"
+                stages[3].status = "current"
+                stages[3].description = "已进入夏令营选拔" # 已进入夏令营选拔，请留意报到通知
+                current_stage_key = "camp_interview"
+                current_stage_label = "夏令营选拔"
+            else:
+                stages[2].status = "current"
+                stages[2].description = "已完成背景评估" # 初筛阶段中，请等待初筛完成
+                current_stage_key = "background_review"
+                current_stage_label = "背景评估"
+            normalized_status = "待初筛确认"
+        elif normalized_status in {"入营面试", "面试待安排", "面试完成"}:
+            # 2026-07-06: 初筛环节移除后，夏令营选拔 从原 stages[4] 上移至 stages[3]
             stages[0].status = "completed"
             stages[1].status = "completed"
             stages[2].status = "completed"
             stages[3].status = "current"
-            current_stage_key = "initial_screening"
-            current_stage_label = "初筛"
-            if normalized_status == "待导师初筛-第二志愿":
-                stages[3].description = "" # "当前进入第二志愿初筛阶段" #，完成评分后系统将自动判定结果"
-            elif normalized_status == "待初筛确认":
-                stages[3].description = "" #"初筛已完成，等待书院管理员完成初筛确认"
-            else:
-                stages[3].description = "等待初筛完成"
-                normalized_status = "待导师初筛"
-        elif normalized_status in {"入营面试", "面试待安排", "面试完成"}:
+            stages[3].description = "初筛已通过，当前进入夏令营选拔环节"
+            current_stage_key = "camp_interview"
+            current_stage_label = "夏令营选拔"
+            normalized_status = "入营面试"
+        elif normalized_status in {"结果公布"}:
+            # 2026-07-06: 初筛环节移除后，结果公布 从原 stages[5] 上移至 stages[4]
             stages[0].status = "completed"
             stages[1].status = "completed"
             stages[2].status = "completed"
             stages[3].status = "completed"
             stages[4].status = "current"
-            stages[4].description = "初筛已通过，当前进入入营面试环节"
-            current_stage_key = "camp_interview"
-            current_stage_label = "入营面试"
-            normalized_status = "入营面试"
-        elif normalized_status in {"结果公布"}:
+            stages[4].description = "结果待发布，请留意门户与邮件通知"
+            current_stage_key = "result_publish"
+            current_stage_label = "结果公布"
+        elif normalized_status in {"预录取", "同意录取"}:
+            # 2026-07-06: 初筛环节移除后，预录取 从原 stages[6] 上移至 stages[5]
             stages[0].status = "completed"
             stages[1].status = "completed"
             stages[2].status = "completed"
             stages[3].status = "completed"
             stages[4].status = "completed"
             stages[5].status = "current"
-            stages[5].description = "结果待发布，请留意门户与邮件通知"
-            current_stage_key = "result_publish"
-            current_stage_label = "结果公布"
-        elif normalized_status in {"预录取", "同意录取"}:
-            stages[0].status = "completed"
-            stages[1].status = "completed"
-            stages[2].status = "completed"
-            stages[3].status = "completed"
-            stages[4].status = "completed"
-            stages[5].status = "completed"
-            stages[6].status = "current"
-            stages[6].description = "结果已发布，请按要求完成预录取确认"
+            stages[5].description = "结果已发布，请按要求完成预录取确认"
             current_stage_key = "pre_admission"
             current_stage_label = "预录取"
             result_label = "已进入预录取"
@@ -302,6 +310,17 @@ class RuntimeManagementStorePortalMixin:
                 None,
             )
             latest_workflow_comment = self._normalize_rejection_review_comment((matched_task or {}).get("latest_comment"))
+        # 2026-07-06: 用最新申请的 candidate_no + plan_id 查 dtlms_plan_offer.is_in_camp_selection,
+        # 决定"在初筛中"的学生是进入夏令营选拔还是停留在背景评估
+        is_in_camp_selection = False
+        if latest_application is not None:
+            try:
+                is_in_camp_selection = self._postgres_store.find_camp_offer_is_in_camp_selection(
+                    candidate_no=str((latest_application or {}).get("candidate_no") or "").strip(),
+                    plan_id=int((latest_application or {}).get("plan_id") or 0),
+                )
+            except Exception:
+                is_in_camp_selection = False
         normalized["workflow_progress"] = self._build_portal_workflow_progress_summary(
             normalized.get("submitted_at"),
             application_status,
@@ -309,6 +328,7 @@ class RuntimeManagementStorePortalMixin:
             initial_screening_result=normalized.get("initial_screening_result"),
             background_assessments=background_assessments,
             review_comment=latest_workflow_comment,
+            is_in_camp_selection=is_in_camp_selection,
         )
         profile = normalized.get("profile")
         if isinstance(profile, dict):

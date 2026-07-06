@@ -31,14 +31,13 @@ function trimText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+// 2026-07-06: 初筛环节已从后端去掉，不再需要 .replaceAll('初筛环节', '初筛') 兑底。仅保留"入营面试 -> 夏令营选拔"这条依然有效（其他处可能还在用老文案的 label）。
 function normalizeStudentWorkflowText(value: unknown): string {
   const text = trimText(value)
   if (!text) {
     return ''
   }
-  return text
-    .replaceAll('初筛环节', '初筛')
-    .replaceAll('入营面试', '夏令营选拔')
+  return text.replaceAll('入营面试', '夏令营选拔')
 }
 
 function resolveProgressCount(value: unknown): number {
@@ -139,22 +138,7 @@ function resolveWorkflowStageDescription(status: WorkflowStageCard['status']): s
   return '待开始'
 }
 
-const workflowInitialScreeningStepLabel = computed(() => {
-  const status = trimText(workflowSummary.value?.recruitment_application_status)
-  if (status === '待导师初筛-第一志愿') {
-    //return '当前在第一志愿老师评估中'
-    return '等待初筛完成'
-  }
-  if (status === '待导师初筛-第二志愿') {
-    // return '当前在第二志愿老师评估中'
-    return '等待初筛完成'
-  }
-  if (status === '待初筛确认') {
-    // return '书院确认中'
-    return '等待初筛完成'
-  }
-  return ''
-})
+// 2026-07-06: 初筛环节从后端去掉，初筛 sub-step computed 不再需要（原来展示在初筛卡片下的“等待初筛完成”）。
 
 const progressCards = computed<ProgressCard[]>(() => {
   const student = portalStudent.value
@@ -523,9 +507,6 @@ onMounted(() => {
                 <span class="portal-home-workflow__stage-index">{{ String(index + 1).padStart(2, '0') }}</span>
                 <strong>{{ stage.label }}</strong>
                 <p>{{ stage.description }}</p>
-                <p v-if="stage.key === 'initial_screening' && workflowInitialScreeningStepLabel" class="portal-home-workflow__stage-step">
-                  {{ workflowInitialScreeningStepLabel }}
-                </p>
               </article>
               <span v-if="index < workflowStageCards.length - 1" class="portal-home-workflow__arrow"
                 aria-hidden="true">→</span>
