@@ -650,6 +650,8 @@ class CampOfferRecord(BaseModel):
     plan_id: int
     plan_name: str | None = None
     is_sent_mail: bool = False
+    # 2026-07-06: 是否已进入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection)
+    is_in_camp_selection: bool = False
     is_agree: bool | None = None
     reason: str | None = None
     # 关联的报名记录 id（用于跳转到 /recruitment/registered-students 的同款填报详情弹窗）
@@ -691,6 +693,8 @@ class CampOfferUpsert(BaseModel):
     candidate_no: str
     plan_id: int | None = None
     is_sent_mail: bool = False
+    # 2026-07-06: 是否已进入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection)
+    is_in_camp_selection: bool = False
     is_agree: bool | None = None
     reason: str | None = None
     student_offer_submitted_at: str | None = None
@@ -874,6 +878,35 @@ class AdmissionOfferedSchoolImportResult(BaseModel):
     unmatched_count: int = 0
     updated_ids: list[int] = []
     issues: list[AdmissionOfferedSchoolImportIssue] = []
+
+# 2026-07-06: 夏令营选拔导入 (Excel -> 仅更新 is_in_camp_selection)
+# 区别于 AdmissionOfferedSchoolImportResult:
+#   - 通过 dtlms_plan_offer.candidate_no (报名号) 匹配入营名单
+#   - 仅更新 is_in_camp_selection (dtlms_plan_offer.is_in_camp_selection boolean)
+#   - 匹配不到 -> 跳过并在 issues 中报告 (不抛错)
+class IsInCampSelectionImportIssue(BaseModel):
+    row_number: int
+    candidate_no: str | None = None
+    raw_value: str | None = None
+    reason: str
+
+
+class IsInCampSelectionImportResult(BaseModel):
+    u"夏令营选拔导入结果。"
+
+    u"字段说明:"
+    u"        - total_rows:    Excel 中非空数据行总数"
+    u"        - matched_count: 成功匹配到入营名单并已 UPDATE 的行数"
+    u"        - unmatched_count: 报名号匹配不到入营名单的行数 (跳过)"
+    u"        - updated_ids:   被更新的入营名单主键 id 列表"
+    u"        - issues:        失败/未匹配行的明细"
+    total_rows: int = 0
+    matched_count: int = 0
+    unmatched_count: int = 0
+    updated_ids: list[int] = []
+    issues: list[IsInCampSelectionImportIssue] = []
+
+
 
 
 class RecruitmentOptionsResponse(BaseModel):

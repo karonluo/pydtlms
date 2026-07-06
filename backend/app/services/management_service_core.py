@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.core.operation_audit_context import mark_manual_operation_log
+from app.core.operation_audit_context import (
+    clear_audit_context,
+    get_audit_context,
+    mark_manual_operation_log,
+    update_audit_context,
+)
 
 from .management_service_shared import *
 
@@ -474,12 +479,34 @@ class RuntimeManagementStoreCoreMixin:
         *,
         target_name: str | None = None,
         result: str = "success",
+        old_value: dict[str, Any] | None = None,
+        new_value: dict[str, Any] | None = None,
+        request_payload: dict[str, Any] | None = None,
+        request_ip: str | None = None,
+        status_code: int | None = None,
+        elapsed_ms: float | None = None,
+        error_detail: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_summary = str(summary or "").strip()
         normalized_target_name = str(target_name or "").strip()
         if normalized_target_name:
             normalized_summary = f"{normalized_summary} - {normalized_target_name}" if normalized_summary else normalized_target_name
-        entry = {
+
+        # 业务手工未显式传入时，回填上下文（中间件兜底路径下生效）
+        ctx = get_audit_context()
+        resolved_old_value = old_value if old_value is not None else ctx.get("old_value")
+        resolved_new_value = new_value if new_value is not None else ctx.get("new_value")
+        resolved_request_payload = request_payload if request_payload is not None else ctx.get("request_payload")
+        resolved_request_ip = request_ip if request_ip is not None else ctx.get("request_ip")
+        resolved_status_code = status_code if status_code is not None else ctx.get("status_code")
+        resolved_elapsed_ms = elapsed_ms if elapsed_ms is not None else ctx.get("elapsed_ms")
+        resolved_error_detail = error_detail if error_detail is not None else ctx.get("error_detail")
+
+        # 默认 new_value 用 request_payload（中间件兜底场景下既拿不到业务层 new_value 也能有值）
+        if resolved_new_value is None and resolved_request_payload is not None:
+            resolved_new_value = resolved_request_payload
+
+        entry: dict[str, Any] = {
             "id": self._next_id("operation_logs"),
             "operated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "operator_username": operator_username,
@@ -490,6 +517,22 @@ class RuntimeManagementStoreCoreMixin:
             "result": result,
             "summary": normalized_summary,
         }
+        # 仅写入有值的字段（保持向后兼容，旧调用方不传这些 key 时不会出现空字段）
+        if resolved_old_value is not None:
+            entry["old_value"] = resolved_old_value
+        if resolved_new_value is not None:
+            entry["new_value"] = resolved_new_value
+        if resolved_request_payload is not None:
+            entry["request_payload"] = resolved_request_payload
+        if resolved_request_ip is not None:
+            entry["request_ip"] = resolved_request_ip
+        if resolved_status_code is not None:
+            entry["status_code"] = resolved_status_code
+        if resolved_elapsed_ms is not None:
+            entry["elapsed_ms"] = resolved_elapsed_ms
+        if resolved_error_detail is not None:
+            entry["error_detail"] = resolved_error_detail
+
         mark_manual_operation_log()
         self._list("operation_logs").insert(0, entry)
         return entry
@@ -514,6 +557,13 @@ class RuntimeManagementStoreCoreMixin:
         *,
         target_name: str | None = None,
         result: str = "success",
+        old_value: dict[str, Any] | None = None,
+        new_value: dict[str, Any] | None = None,
+        request_payload: dict[str, Any] | None = None,
+        request_ip: str | None = None,
+        status_code: int | None = None,
+        elapsed_ms: float | None = None,
+        error_detail: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation_log = self._record_operation(
             module_name,
@@ -524,6 +574,13 @@ class RuntimeManagementStoreCoreMixin:
             operator_username=operator_username,
             target_name=target_name,
             result=result,
+            old_value=old_value,
+            new_value=new_value,
+            request_payload=request_payload,
+            request_ip=request_ip,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error_detail=error_detail,
         )
         self._persist_operation_log(operation_log)
         return operation_log

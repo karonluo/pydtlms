@@ -213,6 +213,8 @@ export type CampOfferRecord = {
   plan_id: number
   plan_name?: string | null
   is_sent_mail: boolean
+  // 2026-07-06: 是否已进入夏令营选拔
+  is_in_camp_selection?: boolean
   is_agree?: boolean | null
   // 关联的报名记录 id（用于跳转到 /recruitment/registered-students 的同款填报详情弹窗）
   recruitment_application_id?: number | null
@@ -265,6 +267,8 @@ export type CampOfferUpsert = {
   candidate_no: string
   plan_id?: number | null
   is_sent_mail?: boolean
+  // 2026-07-06: 已进入夏令营选拔 (NOT NULL boolean, 默认 false)
+  is_in_camp_selection?: boolean
   is_agree?: boolean | null
   reason?: string | null
   // 2026-07-03: 黑客松夏令营字段
@@ -313,6 +317,24 @@ export type AdmissionOfferedSchoolImportResult = {
   unmatched_count: number
   updated_ids: number[]
   issues: HackathonScoreImportIssue[]
+}
+
+// 2026-07-06: 黑客松夏令营 “导入夏令营选拔的学生” 结果
+// 区别于 AdmissionOfferedSchoolImportResult: 仅更新 dtlms_plan_offer.is_in_camp_selection
+// 表头: 报名号 / 夏令营选拔
+export type IsInCampSelectionImportIssue = {
+  row_number: number
+  candidate_no?: string | null
+  raw_value?: string | null
+  reason: string
+}
+
+export type IsInCampSelectionImportResult = {
+  total_rows: number
+  matched_count: number
+  unmatched_count: number
+  updated_ids: number[]
+  issues: IsInCampSelectionImportIssue[]
 }
 
 export type OfferTemplateRecord = {
@@ -823,6 +845,16 @@ export function importAdmissionOfferedSchools(file: File) {
   const formData = new FormData()
   formData.append('file', file)
   return http.post<AdmissionOfferedSchoolImportResult>('/recruitment/camp-offers/import-admission-offered-schools', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+// 2026-07-06: 黑客松夏令营「导入夏令营选拔的学生」专用 API
+// 与 importAdmissionOfferedSchools 区别: 仅更新 dtlms_plan_offer.is_in_camp_selection
+export function importIsInCampSelection(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<IsInCampSelectionImportResult>('/recruitment/camp-offers/import-is-in-camp-selection', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }

@@ -16,10 +16,13 @@ from app.schemas.recruitment import (
     CampOfferImportResult,
     HackathonScoreImportIssue,
     HackathonScoreImportResult,
+    IsInCampSelectionImportIssue,
+    IsInCampSelectionImportResult,
 )
 from app.services.recruitment_excel_service import (
     parse_admission_offered_school_template,
     parse_hackathon_score_template,
+    parse_is_in_camp_selection_template,
 )
 
 
@@ -643,6 +646,131 @@ def import_admission_offered_schools_from_excel(file_bytes: bytes) -> AdmissionO
     }
     matched_row_count = total_rows - sum(1 for it in issues if it.reason in unmatched_reasons)
     return AdmissionOfferedSchoolImportResult(
+        total_rows=total_rows,
+        matched_count=matched_row_count,
+        unmatched_count=total_rows - matched_row_count,
+        updated_ids=updated_ids,
+        issues=issues,
+    )
+
+
+# --------------------------------------------------------------------------
+# 2026-07-06: 黑客松夏令营 “导入夏令营选拔的学生” 专用导入
+# 区别于 /camp-offers/import-admission-offered-schools:
+#   - 通过 dtlms_plan_offer.candidate_no (报名号) 匹配入营名单
+#   - 仅更新 dtlms_plan_offer.is_in_camp_selection (boolean)
+#   - 表头: 报名号 / 夏令营选拔 (内容: 是 / 否)
+#   - 匹配不到入营名单的行跳过, 在 issues 中报告 (Q3: 不报错)
+#
+# 允许的“夏令营选拔”值 (大小写不敏感):
+#   - True  (是 / yes / y / true / 1)
+#   - False (否 / no  / n / false / 0)
+#   - 其他 -> 记录 issue (reason=夏令营选拔值无法识别)
+_TRUE_TOKENS = {"是", "yes", "y", "true", "1"}
+_FALSE_TOKENS = {"否", "no", "n", "false", "0"}
+
+
+def _parse_selection_value(raw: str | None) -> bool | None:
+    """将表格中的“夏令营选拔”文本转为 bool。
+
+    返回:
+        - True / False: 识别成功
+        - None:         文本为空 / 无法识别 (service 会记录 issue)
+    """
+    if raw is None:
+        return None
+    token = str(raw).strip().lower()
+    if not token:
+        return None
+    if token in _TRUE_TOKENS:
+        return True
+    if token in _FALSE_TOKENS:
+        return False
+    return None
+
+
+def import_is_in_camp_selection_from_excel(file_bytes: bytes) -> IsInCampSelectionImportResult:
+    """解析 + 导入 夏令营选拔 Excel。
+
+    入参: file_bytes (前端 multipart/form-data 上传的 .xlsx 字节)
+    出参: IsInCampSelectionImportResult
+    """
+    rows = parse_is_in_camp_selection_template(file_bytes)
+    total_rows = len(rows)
+    if total_rows == 0:
+        return IsInCampSelectionImportResult(
+            total_rows=0,
+            matched_count=0,
+            unmatched_count=0,
+            updated_ids=[],
+            issues=[]
+        )
+
+    issues: list[IsInCampSelectionImportIssue] = []
+    updated_ids: list[int] = []
+
+    with psycopg.connect(_conninfo()) as conn:
+        with conn.cursor() as cur:
+            for row in rows:
+                row_number = int(row["row_number"])
+                candidate_no = row.get("candidate_no")
+                raw_value = row.get("is_in_camp_selection_raw")
+
+                if not candidate_no:
+                    issues.append(
+                        IsInCampSelectionImportIssue(
+                            row_number=row_number,
+                            candidate_no=candidate_no,
+                            raw_value=raw_value,
+                            reason="报名号不能为空"
+                        )
+                    )
+                    continue
+
+                selection = _parse_selection_value(raw_value)
+                if selection is None:
+                    issues.append(
+                        IsInCampSelectionImportIssue(
+                            row_number=row_number,
+                            candidate_no=candidate_no,
+                            raw_value=raw_value,
+                            reason="夏令营选拔值无法识别(期待: 是 / 否 / yes / no / true / false / 1 / 0)"
+                        )
+                    )
+                    continue
+
+                cur.execute(
+                    """
+                    UPDATE dtlms_plan_offer
+                    SET is_in_camp_selection = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE candidate_no = %s
+                    RETURNING id
+                    """
+                    , (selection, candidate_no))
+                results = cur.fetchall()
+                if not results:
+                    issues.append(
+                        IsInCampSelectionImportIssue(
+                            row_number=row_number,
+                            candidate_no=candidate_no,
+                            raw_value=raw_value,
+                            reason="未匹配到入营名单记录(报名号查询无结果)"
+                        )
+                    )
+                    continue
+                for r in results:
+                    updated_ids.append(int(r[0]))
+
+            conn.commit()
+
+    unmatched_reasons = {
+        "报名号不能为空",
+        "夏令营选拔值无法识别(期待: 是 / 否 / yes / no / true / false / 1 / 0)",
+        "未匹配到入营名单记录(报名号查询无结果)",
+    }
+    matched_row_count = total_rows - sum(1 for it in issues if it.reason in unmatched_reasons)
+    return IsInCampSelectionImportResult(
         total_rows=total_rows,
         matched_count=matched_row_count,
         unmatched_count=total_rows - matched_row_count,

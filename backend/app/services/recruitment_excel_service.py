@@ -242,7 +242,8 @@ CAMP_OFFER_TEMPLATE_COLUMNS: list[tuple[str, str]] = [
 
 
 def _normalize_header(value: Any) -> str:
-    return str(value or "").replace(" ", "").replace("\n", "").strip()
+    # 2026-07-06: 去掉 UTF-8 BOM (\ufeff) + 全角空格 (\u3000) + 半角空格 + 换行, 容错 Excel/WPS 导出
+    return str(value or "").replace("\ufeff", "").replace("\u3000", "").replace("\u00a0", "").replace("\u200b", "").replace("\t", "").replace(" ", "").replace("\n", "").strip()
 
 
 def _normalize_cell(value: Any) -> str | None:
@@ -551,6 +552,84 @@ def parse_admission_offered_school_template(file_bytes: bytes) -> list[dict[str,
             "admission_offered_school": school,
         })
     return result
+
+# 2026-07-06: 夏令营选拔导入专用解析
+# 表头必须包含: 报名号 / 夏令营选拔
+#   - 夏令营选拔 列内容允许: 是 / 否 / yes / no / true / false / 1 / 0 (大小写不敏感)
+#   - 不在这几个值里 -> 记录 issue (reason=夏令营选拔值无法识别)
+# 匹配规则 (service 层负责): 通过 dtlms_plan_offer.candidate_no 匹配入营名单
+# 返回值 (每行):
+#   {
+#       "row_number":  int,
+#       "candidate_no": str | None,
+#       "is_in_camp_selection_raw": str | None,
+#   }
+def parse_is_in_camp_selection_template(file_bytes: bytes) -> list[dict[str, Any]]:
+    """解析 夏令营选拔导入 Excel。
+
+    入参: file_bytes (前端 multipart/form-data 上传的 .xlsx 字节)
+    出参: list[dict]
+    """
+    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
+    worksheet = cast(Worksheet, workbook.active)
+    rows = list(worksheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+
+    header_row = rows[0]
+    normalized_headers = [_normalize_header(item).lower() for item in header_row]
+    if not normalized_headers:
+        raise ValueError("导入文件缺少表头")
+
+    # 表头匹配集合 (兼容多种写法)
+    candidate_no_headers = {"\u62a5\u540d\u53f7", "candidate_no", "candidateno", "\u62a5\u540d\u7f16\u53f7"}
+    selection_headers = {
+        "\u590f\u4ee4\u8425\u9009\u62d4",
+        "is_in_camp_selection",
+        "isincampselection",
+        "\u590f\u4ee4\u8425\u9009\u62d4\u72b6\u6001",
+        "\u9009\u62d4",
+    }
+
+    header_index: dict[str, int] = {}
+    for idx, header in enumerate(normalized_headers):
+        if not header:
+            continue
+        if header in candidate_no_headers:
+            header_index["candidate_no"] = idx
+        elif header in selection_headers:
+            header_index["is_in_camp_selection"] = idx
+
+    # 客户要求: 2 个字段都必须有, 否则表头不对
+    missing: list[str] = []
+    for field, label in [
+        ("candidate_no", "\u62a5\u540d\u53f7"),
+        ("is_in_camp_selection", "\u590f\u4ee4\u8425\u9009\u62d4"),
+    ]:
+        if field not in header_index:
+            missing.append(label)
+    if missing:
+        raise ValueError("\u5bfc\u5165\u6587\u4ef6\u7f3a\u5c11\u5fc5\u8981\u8868\u5934\u5217: " + "\u3001".join(missing))
+
+    result: list[dict[str, Any]] = []
+    for row_offset, row in enumerate(rows[1:], start=2):
+        if not any(value not in (None, "") for value in row):
+            continue
+        candidate_no = _normalize_cell(row[header_index["candidate_no"]]) if header_index["candidate_no"] < len(row) else None
+        if candidate_no is not None:
+            candidate_no = str(candidate_no).strip() or None
+        selection_raw = _normalize_cell(row[header_index["is_in_camp_selection"]]) if header_index["is_in_camp_selection"] < len(row) else None
+        if selection_raw is not None:
+            selection_raw = str(selection_raw).strip() or None
+
+        result.append({
+            "row_number": int(row_offset),
+            "candidate_no": candidate_no,
+            "is_in_camp_selection_raw": selection_raw,
+        })
+    return result
+
+
 
 
 

@@ -17,6 +17,7 @@ import {
   acceptCampOffer,
   declineCampOffer,
   importAdmissionOfferedSchools,
+  importIsInCampSelection,
   importCampOffers,
   importHackathonScores,
   markCampOfferPending,
@@ -27,6 +28,7 @@ import {
   updateCampOffer,
   uploadOfferTemplate,
   type AdmissionOfferedSchoolImportResult,
+  type IsInCampSelectionImportResult,
   type CampOfferNotificationSendResponse,
   type CampOfferRecord,
   type CampOfferStats,
@@ -301,6 +303,8 @@ const formModel = reactive<CampOfferUpsert>({
   accepted: null,
   // 2026-07-06: 录取学校
   admission_offered_school: '',
+  // 2026-07-06: 已取夏令营选拔 (NOT NULL boolean, 默认 false)
+  is_in_camp_selection: false,
 })
 
 const formRules: FormRules<CampOfferUpsert> = {
@@ -465,6 +469,8 @@ function resetForm() {
   formModel.accepted = null
   // 2026-07-06: 录取学校
   formModel.admission_offered_school = ''
+  // 2026-07-06: 重置 已入夏令营选拔
+  formModel.is_in_camp_selection = false
   currentOfferId.value = null
 }
 
@@ -870,6 +876,13 @@ const admissionSchoolImporting = ref(false)
 const admissionSchoolImportResult = ref<AdmissionOfferedSchoolImportResult | null>(null)
 const admissionSchoolImportFileInputRef = ref<HTMLInputElement | null>(null)
 
+// 2026-07-06: 黑客松夏令营“导入夏令营选拔的学生”弹窗状态
+const selectionImportDialogVisible = ref(false)
+const selectionImportFile = ref<File | null>(null)
+const selectionImporting = ref(false)
+const selectionImportResult = ref<IsInCampSelectionImportResult | null>(null)
+const selectionImportFileInputRef = ref<HTMLInputElement | null>(null)
+
 // 触发文件选择: 通过隐藏的 input[type=file]
 function onHackathonScoreImport() {
   hackathonImportResult.value = null
@@ -951,6 +964,45 @@ async function submitAdmissionSchoolImport() {
   }
 }
 
+function onImportCampSelection() {
+  selectionImportResult.value = null
+  selectionImportFile.value = null
+  selectionImportDialogVisible.value = true
+}
+
+function onSelectionImportFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files && target.files[0] ? target.files[0] : null
+  selectionImportFile.value = file
+  if (target) target.value = ''
+}
+
+async function submitSelectionImport() {
+  if (!selectionImportFile.value) {
+    ElMessage.warning('请先选择 Excel 文件')
+    return
+  }
+  selectionImporting.value = true
+  try {
+    const response = await importIsInCampSelection(selectionImportFile.value)
+    selectionImportResult.value = response.data
+    const r = response.data
+    if (r.matched_count > 0) {
+      ElMessage.success(`夏令营选拔导入完成: 匹配 ${r.matched_count} 行, 未匹配 ${r.unmatched_count} 行`)
+      pager.pagination.currentPage = 1
+      await fetchOffers()
+    } else if (r.total_rows === 0) {
+      ElMessage.warning('Excel 文件中没有可导入的数据行')
+    } else {
+      ElMessage.warning('夏令营选拔导入完成: 无任何匹配行, 请检查报名号是否正确')
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || '夏令营选拔导入失败')
+  } finally {
+    selectionImporting.value = false
+  }
+}
+
 function onHackathonSendNotification() {
   // 占位: 后续将对接 '发送录取通知' 后端端点 (录取通知书发送)
   ElMessage.info('发送录取通知功能待后续实现')
@@ -1029,6 +1081,8 @@ function openEditDialog(row: CampOfferRecord) {
   formModel.accepted = row.accepted || null
   // 2026-07-06: 录取学校
   formModel.admission_offered_school = row.admission_offered_school || ''
+  // 2026-07-06: 回填 已入夏令营选拔
+  formModel.is_in_camp_selection = Boolean(row.is_in_camp_selection)
   dialogVisible.value = true
 }
 
@@ -1057,6 +1111,8 @@ async function submitDialog() {
       accepted: formModel.accepted || null,
       // 2026-07-06: 录取学校
       admission_offered_school: String(formModel.admission_offered_school || '').trim() || null,
+      // 2026-07-06: 已入夏令营选拔 (NOT NULL boolean, 转 bool 以保证传递)
+      is_in_camp_selection: Boolean(formModel.is_in_camp_selection),
     }
 
     if (dialogMode.value === 'create') {
@@ -1357,6 +1413,7 @@ onMounted(async () => {
         <div class="table-card__toolbar-left" v-if="isWhiteListUser">
           <el-button type="primary" plain @click="onHackathonScoreImport">评分导入</el-button>
           <el-button type="success" plain @click="onHackathonUploadSchools">上传录取学校</el-button>
+          <el-button type="primary" plain @click="onImportCampSelection">导入夏令营选拔的学生</el-button>
           <el-button type="warning" plain @click="onHackathonSendNotification">发送录取通知</el-button>
         </div>
         <div class="table-card__toolbar-right">
@@ -1389,6 +1446,13 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="hackathon_comments" label="夏令营评语" min-width="180" show-overflow-tooltip />
+        <!-- 2026-07-06: 已入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection) -->
+        <el-table-column prop="is_in_camp_selection" label="已入夏令营选拔" min-width="130" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.is_in_camp_selection" type="success" disable-transitions>是</el-tag>
+            <span v-else class="text-muted">否</span>
+          </template>
+        </el-table-column>
         <el-table-column label="入取状态" min-width="120" align="center">
           <template #default="{ row }">
             <el-tag :type="getAcceptedOption(row.accepted).colorType as any" disable-transitions>
@@ -1581,6 +1645,18 @@ onMounted(async () => {
               />
             </el-select>
           </el-form-item>
+          <!-- 2026-07-06: 已进入夏令营选拔 (开关控件, 对应 dtlms_plan_offer.is_in_camp_selection) -->
+          <el-form-item label="夏令营选拔" class="dialog-grid--full">
+            <el-switch
+              v-model="formModel.is_in_camp_selection"
+              inline-prompt
+              active-text="是"
+              inactive-text="否"
+              style="--el-switch-on-color: #13ce66; --el-switch-off-color: #dcdfe6;"
+            />
+            <span class="text-muted" style="margin-left: 12px; font-size: 12px;">&nbsp;</span><!--开关显示是/否，仅作标记使用，不会改变现有入营业务。-->
+          </el-form-item>
+
           <el-form-item label="原因" class="dialog-grid--full">
             <el-input v-model="formModel.reason" type="textarea" :rows="3" maxlength="300" show-word-limit />
           </el-form-item>
@@ -1860,6 +1936,79 @@ onMounted(async () => {
           :disabled="!admissionSchoolImportFile"
           @click="submitAdmissionSchoolImport"
         >开始导入录取学校</el-button>
+      </template>
+    </el-dialog>
+
+
+
+    <!-- 2026-07-06: 黑客松夏令营“导入夏令营选拔的学生”弹窗
+         - 表头必须包含: 报名号 / 夏令营选拔
+         - 匹配规则: 报名号 → dtlms_plan_offer.candidate_no
+         - 写入字段: 仅更新 is_in_camp_selection 一列，不影响其他字段
+         - 未匹配的行: 跳过并在下方报告，不会报错
+    -->
+    <el-dialog v-model="selectionImportDialogVisible" title="夏令营选拔导入" width="640px" destroy-on-close>
+      <el-alert
+        title="导入说明"
+        type="info"
+        :closable="false"
+        show-icon
+      >
+        <template #default>
+          <div>Excel 表头必须包含: 报名号 / 夏令营选拔</div>
+          <div>夏令营选拔 列内容: 是 / 否 (也可写 yes/no/true/false/1/0，大小写不敏感)</div>
+          <div>匹配规则: 报名号 → 入营名单查询</div>
+          <div>写入字段: 仅更新 <b>夏令营选拔</b> 一列，不影响其他字段</div>
+          <div>未匹配的行: 跳过并在下方报告，不会报错</div>
+        </template>
+      </el-alert>
+      <div style="margin: 16px 0;">
+        <input
+          ref="selectionImportFileInputRef"
+          type="file"
+          accept=".xlsx,.xls"
+          style="display: none"
+          @change="onSelectionImportFileChange"
+        />
+        <el-button @click="() => selectionImportFileInputRef?.click()">选择文件</el-button>
+        <span style="margin-left: 12px; color: #909399;" v-if="selectionImportFile">
+          已选择: {{ selectionImportFile.name }} ({{ (selectionImportFile.size / 1024).toFixed(1) }} KB)
+        </span>
+        <span style="margin-left: 12px; color: #909399;" v-else>未选择文件</span>
+      </div>
+
+      <div v-if="selectionImportResult" class="selection-import-result">
+        <el-divider content-position="left">导入结果</el-divider>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="总行数">{{ selectionImportResult.total_rows }}</el-descriptions-item>
+          <el-descriptions-item label="匹配成功">
+            <el-tag type="success">{{ selectionImportResult.matched_count }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="未匹配">
+            <el-tag :type="selectionImportResult.unmatched_count > 0 ? 'warning' : 'info'">
+              {{ selectionImportResult.unmatched_count }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div v-if="selectionImportResult.issues.length" style="margin-top: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">问题明细 ({{ selectionImportResult.issues.length }} 条)</div>
+          <el-table :data="selectionImportResult.issues" size="small" border max-height="240">
+            <el-table-column prop="row_number" label="行号" width="80" align="center" />
+            <el-table-column prop="candidate_no" label="报名号" width="140" />
+            <el-table-column prop="raw_value" label="选拔原值" width="120" />
+            <el-table-column prop="reason" label="原因" min-width="240" show-overflow-tooltip />
+          </el-table>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="selectionImportDialogVisible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :loading="selectionImporting"
+          :disabled="!selectionImportFile"
+          @click="submitSelectionImport"
+        >开始导入夏令营选拔</el-button>
       </template>
     </el-dialog>
 

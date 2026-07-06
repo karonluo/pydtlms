@@ -12,6 +12,7 @@ from app.core.rbac import require_permissions
 from app.schemas.auth import Principal
 from app.schemas.recruitment import (
     AdmissionOfferedSchoolImportResult,
+    IsInCampSelectionImportResult,
     AdvisorScreeningScoreUpdateRequest,
     AdvisorScreeningBatchSubmitRequest,
     AdvisorScreeningBatchSubmitResponse,
@@ -82,6 +83,7 @@ from app.services.initial_screening_confirmation_service import list_initial_scr
 from app.services.camp_offer_confirmation_service import submit_camp_offer_confirmation
 from app.services.camp_offer_import_service import (
     import_admission_offered_schools_from_excel,
+    import_is_in_camp_selection_from_excel,
     import_camp_offers_from_excel,
     import_hackathon_scores_from_excel,
 )
@@ -968,6 +970,22 @@ async def import_admission_offered_school_records(
 ) -> AdmissionOfferedSchoolImportResult:
     try:
         return import_admission_offered_schools_from_excel(await file.read())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+# 2026-07-06: 黑客松夏令营 "导入夏令营选拔的学生" 专用端点
+# 区别于 /camp-offers/import-admission-offered-schools:
+#   - 通过 报名号 (表头: 报名号 / 夏令营选拔) 匹配入营名单
+#   - 仅更新 dtlms_plan_offer.is_in_camp_selection (boolean)
+#   - 未匹配的行: 跳过并在结果 issues 中报告 (不报错)
+@router.post("/camp-offers/import-is-in-camp-selection", response_model=IsInCampSelectionImportResult)
+async def import_is_in_camp_selection_records(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:write")),
+) -> IsInCampSelectionImportResult:
+    try:
+        return import_is_in_camp_selection_from_excel(await file.read())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

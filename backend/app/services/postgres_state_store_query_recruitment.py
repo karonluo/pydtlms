@@ -782,6 +782,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
         normalized["candidate_no"] = str(normalized.get("candidate_no") or "").strip()
         normalized["plan_id"] = int(normalized.get("plan_id") or 0)
         normalized["is_sent_mail"] = bool(normalized.get("is_sent_mail") or False)
+        # 2026-07-06: 是否已进入夏令营选拔 (与 is_sent_mail 同风格, COALESCE 兜底)
+        normalized["is_in_camp_selection"] = bool(normalized.get("is_in_camp_selection") or False)
         normalized["is_agree"] = normalized.get("is_agree")
         normalized["reason"] = str(normalized.get("reason") or "").strip() or None
         recruitment_application_id = normalized.get("recruitment_application_id")
@@ -1026,6 +1028,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
                         plan.plan_name,
                         COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
                         offer.is_agree,
+                        -- 2026-07-06: 是否已进入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection)
+                        COALESCE(offer.is_in_camp_selection, FALSE) AS is_in_camp_selection,
                         COALESCE(offer.reson, '') AS reason,
                         app.id AS recruitment_application_id,
                         app.student_name,
@@ -1243,6 +1247,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 plan.plan_name,
                 COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
                 offer.is_agree,
+                -- 2026-07-06: 是否已进入夏令营选拔
+                COALESCE(offer.is_in_camp_selection, FALSE) AS is_in_camp_selection,
                 COALESCE(offer.reson, '') AS reason,
                 app.id AS recruitment_application_id,
                 app.student_name,

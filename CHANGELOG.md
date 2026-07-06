@@ -3,6 +3,55 @@
 > 重大变更与功能说明。新增放在最上面，按时间倒序。
 > 本文件由 Codex 在重大功能/字段变更后维护。
 
+## [2026-07-06] 操作日志详情增强（步骤 1/8）
+
+### 背景
+操作日志现状缺乏详情：old_value/new_value/request_ip、错误原因都不入库。本期依据 `CMMI3_Documents/20260706操作日志改造开发计划.md`，分 8 步逐步改造。本次仅完成「步骤 1：扩展 audit 上下文与 store 接口（无破坏）」。
+
+### 后端变更
+- `backend/app/core/operation_audit_context.py`
+  - 新增 ContextVar `_operation_audit_context`（dict），保留原 `_manual_operation_log_count` 不变
+  - 新增公共 API：
+    - `get_audit_context() -> dict` 获取当前上下文快照（拷贝）
+    - `set_audit_context_value(key, value)` 写入单个字段
+    - `update_audit_context(values: dict)` 批量合并字段
+    - `clear_audit_context()` 清空（请求结束时调用）
+  - 支持的 key：request_payload / old_value / new_value / request_ip / status_code / elapsed_ms / error_detail
+- `backend/app/services/management_service_core.py`
+  - 记录操作日志入口 (`_record_operation`) 新增 7 个 keyword-only 参数（全部 optional，默认 None）：
+    - `old_value / new_value / request_payload / request_ip / status_code / elapsed_ms / error_detail`
+  - 记录操作事件入口 (`record_operation_event`) 同步增加这 7 个参数，全部透传到 `_record_operation`
+  - 增量合并逻辑：业务未显式传入 → 从 `get_audit_context()` 读取；`new_value` 仍为 None 且 `request_payload` 非空 → 用 `request_payload` 填充
+  - entry 字典仅写入有值的字段（向后兼容，旧调用方不传这些参数不会出现空字段）
+
+### 不变动
+- `_persist_operation_log` 未动
+- SQL 同步层 未动（本步骤仅准备接口，下个步骤 2 再扩展列）
+- 业务调用点 未动（下一个步骤 4 再补 old/new）
+- main.py 中间件 未动（下一个步骤 3 再接入）
+
+### 验证
+- `pytest backend/tests/api/test_backoffice_operation_audit.py` 3/3 PASS
+  - `test_backoffice_write_request_records_operation_log`
+  - `test_auth_post_request_is_excluded_from_backoffice_audit`
+  - `test_backoffice_write_request_keeps_single_log_when_manual_log_exists`
+- 其他相关写日志路径（portal login/register failure、management update_system_user failure）皆 PASS，未引入新回归
+
+### 备份
+- `backend/app/core/operation_audit_context_20260706164142.py.bak`
+- `backend/app/services/management_service_core_20260706164142.py.bak`
+- `CHANGELOG_20260706164142.md.bak`
+（本文件被 `.gitignore` 中 `*.bak` 忽略）
+
+### 本期不做
+- SQL 层列扩展（步骤 2）
+- 中间件接入 body/IP/error（步骤 3）
+- 业务路径补 old/new（步骤 4）
+- 脱敏/截断（步骤 5）
+- 前端/schema/CHANGELOG 更新（步骤 6）
+
+### 接下来
+执行步骤 2：扩展 SQL 同步层使 new column 能入库。
 ## [2026-07-06] 修复字典写接口缺失导入的 bug
 
 ### 问题

@@ -1435,6 +1435,7 @@ class PostgresStateStoreSyncMixin:
                         hackathon_comments = %s,  -- 2026-07-01: 夏令营评语
                         accepted = %s,            -- 2026-07-01: 黑客松入取状态
                         admission_offered_school = %s,  -- 2026-07-06: 录取学校
+                        is_in_camp_selection = %s,  -- 2026-07-06: 已进入夏令营选拔
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     """,
@@ -1451,6 +1452,8 @@ class PostgresStateStoreSyncMixin:
                         payload.get("accepted"),
                         # 2026-07-06: 录取学校
                         payload.get("admission_offered_school"),
+                        # 2026-07-06: 已进入夏令营选拔 (NOT NULL boolean, 转 bool 以防上传 null)
+                        bool(payload.get("is_in_camp_selection")),
                         int(offer_id),
                     ),
                 )

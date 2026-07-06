@@ -800,6 +800,7 @@
 | `hackathon_comments` | text | YES |  |
 | `accepted` | character varying(32) | YES |  |
 | `admission_offered_school` | character varying(64) | YES |  |
+| `is_in_camp_selection` | boolean | NO | false |
 
 **主键**: (`id`)
 

@@ -616,6 +616,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                     "accepted": payload.accepted,
                     # 2026-07-06: 录取学校
                     "admission_offered_school": payload.admission_offered_school,
+                    "is_in_camp_selection": payload.is_in_camp_selection,
                 },
                 operation_log,
             )
@@ -659,6 +660,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                     "accepted": payload.accepted,
                     # 2026-07-06: 录取学校
                     "admission_offered_school": payload.admission_offered_school,
+                    "is_in_camp_selection": payload.is_in_camp_selection,
                 },
                 operation_log,
             )
