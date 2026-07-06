@@ -1981,7 +1981,8 @@ onMounted(async () => {
 .camp-offer-kpi-tile {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  /* 2026-07-06: 图标与文字居左对齐 */
+  justify-content: flex-start;
   gap: 6px;
   height: 32px;
   width: 100%;
