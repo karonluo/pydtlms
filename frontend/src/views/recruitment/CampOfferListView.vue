@@ -113,7 +113,7 @@ const ACTIONS_DROPDOWN_WIDTH = 80
 const ACTIONS_BUTTON_GAP = 8
 const ACTIONS_COLUMN_PADDING = 24
 const ACTIONS_COLUMN_MIN_WIDTH = 100
-const ACTIONS_COLUMN_MAX_WIDTH = 540
+const ACTIONS_COLUMN_MAX_WIDTH = 360
 
 function computeRowActionButtonCount(row: CampOfferRecord): number {
   // 与模板内的 v-if 保持一致
@@ -179,7 +179,23 @@ async function loadHackathonAcceptedDict() {
 }
 function getAcceptedOption(value: string | null | undefined) {
   if (!value) return { label: '待录取', value: '', colorType: 'info' }
-  return hackathonAcceptedOptions.value.find((item) => item.value === value) || { label: value, value, colorType: 'info' }
+  // 1) 优先从字典查找
+  const fromDict = hackathonAcceptedOptions.value.find((item) => item.value === value)
+  if (fromDict) return fromDict
+  // 2) 字典未命中 (字典未加载完成 / 字典缺失该 value) 时, 用前端硬编码兜底
+  //    2026-07-04: 避免出现英文 accepted_pending_send 等原始 value 直接显示在列表中
+  const fallbackMap: Record<string, { label: string; colorType: string }> = {
+    declined: { label: '未录取', colorType: 'danger' },
+    pending: { label: '待定', colorType: 'warning' },
+    accepted_pending_send: { label: '录取未发送', colorType: 'success' },
+    accepted_sent: { label: '录取已发送', colorType: 'success' },
+    accepted_confirmed: { label: '录取已确认', colorType: 'success' },
+    accepted_rejected: { label: '录取已拒绝', colorType: 'danger' },
+  }
+  const fallback = fallbackMap[value]
+  if (fallback) return { label: fallback.label, value, colorType: fallback.colorType }
+  // 3) 实在找不到, 才显示原始 value
+  return { label: value, value, colorType: 'info' }
 }
 
 // 学生填报详情弹窗（复用 /recruitment/registered-students 同款组件）
@@ -678,37 +694,100 @@ async function confirmAndChangeAccepted(row: CampOfferRecord, action: 'accept' |
     ElMessage.warning('记录无效，无法操作')
     return
   }
-  const actionLabels: Record<typeof action, { title: string; confirmText: string; successMsg: string; apiCall: (id: number) => Promise<unknown> }> = {
+  // 2026-07-04: 二次确认对话框样式, 仿照上传图标的效果 (信息卡片 + 黄色提示条)
+  // 标题: 颜色方块图标 + 标题文字
+  // 信息卡片: 学生姓名 + 评分(按动作配色) + 评语
+  // 黄色提示条: 提示动作后果
+  // 主按钮: 按动作语义配色
+  interface ActionStyle {
+    title: string
+    iconColor: string
+    iconChar: string
+    iconTextColor: string
+    scoreColor: string
+    tipText: string
+    confirmText: string
+    confirmButtonColor: string
+    successMsg: string
+    apiCall: (id: number) => Promise<unknown>
+  }
+  const actionStyles: Record<typeof action, ActionStyle> = {
     accept: {
-      title: '确认录取该学生？',
-      confirmText: '确认录取',
-      successMsg: '已录取',
+      title: "确认录取",
+      iconColor: "#e1f3d8",
+      iconChar: "✓",
+      iconTextColor: "#67c23a",
+      scoreColor: "#409eff",
+      tipText: "确认后该学生将被标记为「录取」状态。",
+      confirmText: "确认录取",
+      confirmButtonColor: "#67c23a",
+      successMsg: "已录取",
       apiCall: (id) => acceptCampOffer(id),
     },
     decline: {
-      title: '确认不录取该学生？',
-      confirmText: '确认不录取',
-      successMsg: '已标记不录取',
+      title: "确认不录取",
+      iconColor: "#fde2e2",
+      iconChar: "×",
+      iconTextColor: "#f56c6c",
+      scoreColor: "#f56c6c",
+      tipText: "确认后该学生将被标记为「不录取」状态, 此操作不可撤销。",
+      confirmText: "确认不录取",
+      confirmButtonColor: "#f56c6c",
+      successMsg: "已标记不录取",
       apiCall: (id) => declineCampOffer(id),
     },
     pending: {
-      title: '确认将该学生标记为待定？',
-      confirmText: '确认待定',
-      successMsg: '已标记待定',
+      title: "确认为待定",
+      iconColor: "#fdf6d8",
+      iconChar: "□",
+      iconTextColor: "#e6a23c",
+      scoreColor: "#e6a23c",
+      tipText: "确认后该学生将被标记为「待定」状态, 后续可再次操作。",
+      confirmText: "确认为待定",
+      confirmButtonColor: "#e6a23c",
+      successMsg: "已标记待定",
       apiCall: (id) => markCampOfferPending(id),
     },
   }
-  const cfg = actionLabels[action]
-  const candidate = String(row.candidate_no || '').trim() || '该学生'
+  const cfg = actionStyles[action]
+  const candidate = String(row.candidate_no || "").trim() || "该学生"
+  const studentName = String(row.student_name || "").trim() || candidate
+  const score = row.hackathon_score !== null && row.hackathon_score !== undefined ? row.hackathon_score : "-"
+  const comment = String(row.hackathon_comments || "").trim() || "暂无评语"
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+  }
+  const messageHtml = `
+    <div class="camp-offer-confirm">
+      <div class="camp-offer-confirm__header">
+        <span class="camp-offer-confirm__icon" style="background: ${cfg.iconColor}; color: ${cfg.iconTextColor};">${cfg.iconChar}</span>
+        <span class="camp-offer-confirm__heading">${escapeHtml(cfg.title)}</span>
+      </div>
+      <div class="camp-offer-confirm__card">
+        <div class="camp-offer-confirm__name">${escapeHtml(studentName)}</div>
+        <div class="camp-offer-confirm__divider"></div>
+        <div class="camp-offer-confirm__row">
+          <span class="camp-offer-confirm__label">夏令营评分</span>
+          <span class="camp-offer-confirm__score" style="color: ${cfg.scoreColor};">${escapeHtml(String(score))}</span>
+        </div>
+        <div class="camp-offer-confirm__row camp-offer-confirm__row--block">
+          <span class="camp-offer-confirm__label">夏令营评语</span>
+          <span class="camp-offer-confirm__comment">${escapeHtml(comment)}</span>
+        </div>
+      </div>
+      <div class="camp-offer-confirm__tip">⚠  ${escapeHtml(cfg.tipText)}</div>
+    </div>
+  `
   try {
     await ElMessageBox.confirm(
-      `${cfg.title}\n报名号: ${candidate}`,
-      '二次确认',
+      messageHtml,
+      cfg.title,
       {
         confirmButtonText: cfg.confirmText,
-        cancelButtonText: '取消',
-        type: action === 'decline' ? 'warning' : 'info',
-        dangerouslyUseHTMLString: false,
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--custom-" + action,
+        dangerouslyUseHTMLString: true,
+        customClass: "camp-offer-confirm-box camp-offer-confirm-box--" + action,
       },
     )
   } catch {
@@ -2059,5 +2138,9 @@ onMounted(async () => {
   gap: 8px;
   margin-left: auto;
 }
+
+
+
+/* 二次确认对话框样式已迁到全局 src/style.css（ElMessageBox portal 到 body，scoped/:deep 都不生效） */
 
 </style>

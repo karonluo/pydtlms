@@ -799,6 +799,7 @@
 | `hackathon_score` | numeric(5,2) | YES |  |
 | `hackathon_comments` | text | YES |  |
 | `accepted` | character varying(32) | YES |  |
+| `admission_offered_school` | character varying(64) | YES |  |
 
 **主键**: (`id`)
 
