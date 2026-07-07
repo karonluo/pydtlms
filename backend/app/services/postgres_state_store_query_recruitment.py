@@ -851,6 +851,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
         plan_id: int | None,
         is_sent_mail: bool | None,
         is_agree: bool | None,
+        is_in_camp_selection: bool | None,
         first_choice_advisor: str | None,
         first_choice_team: str | None,
         first_choice_score_op: str | None,
@@ -884,6 +885,10 @@ class PostgresStateStoreQueryRecruitmentMixin:
         if is_agree is not None:
             where_clauses.append("offer.is_agree = %s")
             params.append(bool(is_agree))
+        # 2026-07-07: 夏令营选拔筛选 (dtlms_plan_offer.is_in_camp_selection)
+        if is_in_camp_selection is not None:
+            where_clauses.append("COALESCE(offer.is_in_camp_selection, FALSE) = %s")
+            params.append(bool(is_in_camp_selection))
         if first_choice_advisor and str(first_choice_advisor).strip():
             where_clauses.append("app.first_choice ILIKE %s")
             params.append("%" + str(first_choice_advisor).strip() + "%")
@@ -950,6 +955,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
         plan_id: int | None = None,
         is_sent_mail: bool | None = None,
         is_agree: bool | None = None,
+        is_in_camp_selection: bool | None = None,
         first_choice_advisor: str | None = None,
         first_choice_team: str | None = None,
         first_choice_score_op: str | None = None,
@@ -972,6 +978,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
             plan_id=plan_id,
             is_sent_mail=is_sent_mail,
             is_agree=is_agree,
+            is_in_camp_selection=is_in_camp_selection,
             first_choice_advisor=first_choice_advisor,
             first_choice_team=first_choice_team,
             first_choice_score_op=first_choice_score_op,
@@ -1136,6 +1143,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
         plan_id: int | None = None,
         is_sent_mail: bool | None = None,
         is_agree: bool | None = None,
+        is_in_camp_selection: bool | None = None,
         first_choice_advisor: str | None = None,
         first_choice_team: str | None = None,
         first_choice_score_op: str | None = None,
@@ -1156,6 +1164,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
             plan_id=plan_id,
             is_sent_mail=is_sent_mail,
             is_agree=is_agree,
+            is_in_camp_selection=is_in_camp_selection,
             first_choice_advisor=first_choice_advisor,
             first_choice_team=first_choice_team,
             first_choice_score_op=first_choice_score_op,
@@ -1173,7 +1182,9 @@ class PostgresStateStoreQueryRecruitmentMixin:
                     COALESCE(offer.is_sent_mail, FALSE) AS is_sent_mail,
                     offer.is_agree,
                     offer.accepted,
-                    offer.submitted_at AS student_offer_submitted_at
+                    offer.submitted_at AS student_offer_submitted_at,
+                    -- 2026-07-07: 暴露 is_in_camp_selection 给外层 COUNT(*) FILTER 引用
+                    COALESCE(offer.is_in_camp_selection, FALSE) AS is_in_camp_selection
                 FROM dtlms_plan_offer offer
                 LEFT JOIN dtlms_recruitment_applications app
                     ON app.candidate_no = offer.candidate_no AND app.is_deleted = FALSE
@@ -1211,7 +1222,9 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 ) AS pending_count,
                 COUNT(*) FILTER (
                     WHERE accepted IS NULL
-                ) AS pending_send_count
+                ) AS pending_send_count,
+                -- 2026-07-07: 已进入夏令营选拔 (is_in_camp_selection=TRUE) 计数
+                COUNT(*) FILTER (WHERE is_in_camp_selection) AS is_in_camp_selection
             FROM base
         """
 
@@ -1230,6 +1243,7 @@ class PostgresStateStoreQueryRecruitmentMixin:
             "unaccepted_count": int(row.get("unaccepted_count") or 0),
             "pending_count": int(row.get("pending_count") or 0),
             "pending_send_count": int(row.get("pending_send_count") or 0),
+            "is_in_camp_selection": int(row.get("is_in_camp_selection") or 0),
         }
 
     def get_camp_offer_detail(

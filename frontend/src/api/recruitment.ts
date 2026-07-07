@@ -260,6 +260,8 @@ export type CampOfferStats = {
   unaccepted_count: number
   pending_count: number
   pending_send_count: number
+  // 2026-07-07: 已进入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection=TRUE) 计数
+  is_in_camp_selection: number
   total: number
 }
 
@@ -694,6 +696,8 @@ export function listCampOffers(params: {
   plan_id?: number
   is_sent_mail?: boolean
   is_agree?: boolean
+  // 2026-07-07: 是否已进入夏令营选拔
+  is_in_camp_selection?: boolean
   first_choice_advisor?: string
   first_choice_team?: string
   first_choice_score_op?: "eq" | "ne" | "gt" | "ge" | "lt" | "le"
@@ -715,6 +719,8 @@ export function getCampOfferStats(params: {
   plan_id?: number
   is_sent_mail?: boolean
   is_agree?: boolean
+  // 2026-07-07: 是否已进入夏令营选拔
+  is_in_camp_selection?: boolean
   first_choice_advisor?: string
   first_choice_team?: string
   first_choice_score_op?: 'eq' | 'ne' | 'gt' | 'ge' | 'lt' | 'le'
@@ -814,6 +820,8 @@ export function exportCampOffers(params: {
   plan_id?: number
   is_sent_mail?: boolean
   is_agree?: boolean
+  // 2026-07-07: 是否已进入夏令营选拔
+  is_in_camp_selection?: boolean
   first_choice_advisor?: string
   first_choice_team?: string
   first_choice_score_op?: "eq" | "ne" | "gt" | "ge" | "lt" | "le"

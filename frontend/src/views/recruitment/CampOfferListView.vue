@@ -51,6 +51,8 @@ type FilterState = {
   plan_id: number | null
   is_sent_mail: '' | 'true' | 'false'
   is_agree: '' | 'true' | 'false'
+  // 2026-07-07: 是否已进入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection)
+  is_in_camp_selection: '' | 'true' | 'false'
   first_choice_advisor: string
   first_choice_team: string
   first_choice_score_op: '' | ScoreOp
@@ -267,6 +269,7 @@ const filters = reactive<FilterState>({
   plan_id: null,
   is_sent_mail: '',
   is_agree: '',
+  is_in_camp_selection: '',
   first_choice_advisor: '',
   first_choice_team: '',
   first_choice_score_op: '',
@@ -321,6 +324,13 @@ const agreeOptions = [
   { label: '不同意', value: 'false' },
 ]
 
+// 2026-07-07: 夏令营选拔筛选 (是/否)
+const campSelectionOptions = [
+  { label: '全部', value: '' },
+  { label: '是', value: 'true' },
+  { label: '否', value: 'false' },
+]
+
 const mailOptions = [
   { label: '全部', value: '' },
   { label: '已发', value: 'true' },
@@ -335,6 +345,8 @@ type CampOfferKpi = {
     | 'agreed'
     | 'declined'
     | 'unsigned'
+    // 2026-07-07: 已进入夏令营选拔 (dtlms_plan_offer.is_in_camp_selection=TRUE)
+    | 'is_in_camp_selection'
     // 2026-07-06: 入取 / 不入取 / 待定 / 待入取
     | 'accepted_count'
     | 'unaccepted_count'
@@ -350,6 +362,8 @@ const KPI_DEFINITIONS: CampOfferKpi[] = [
   { key: 'agreed', title: '已同意', status: 'healthy', icon: Check },
   { key: 'declined', title: '不同意', status: 'attention', icon: CircleClose },
   { key: 'unsigned', title: '未签署', status: 'warning', icon: EditPen },
+  // 2026-07-07: 已进入夏令营选拔 统计 (在未签署右侧)
+  { key: 'is_in_camp_selection', title: '已入选拔', status: 'healthy', icon: Check },
   // 2026-07-06: 入取 / 不入取 / 待定 / 待入取 统计，在未签署右侧
   { key: 'accepted_count', title: '录取', status: 'healthy', icon: Check },
   { key: 'unaccepted_count', title: '不录取', status: 'attention', icon: CircleClose },
@@ -524,6 +538,7 @@ function buildFilterParams() {
     plan_id: typeof filters.plan_id === 'number' ? filters.plan_id : undefined,
     is_sent_mail: normalizeBooleanFilter(filters.is_sent_mail),
     is_agree: normalizeBooleanFilter(filters.is_agree),
+    is_in_camp_selection: normalizeBooleanFilter(filters.is_in_camp_selection),
     first_choice_advisor: filters.first_choice_advisor || undefined,
     first_choice_team: filters.first_choice_team || undefined,
     first_choice_score_op:
@@ -592,6 +607,7 @@ function handleResetFilters() {
   filters.plan_id = null
   filters.is_sent_mail = ''
   filters.is_agree = ''
+  filters.is_in_camp_selection = ''
   filters.first_choice_advisor = ''
   filters.first_choice_team = ''
   filters.first_choice_score_op = ''
@@ -1191,6 +1207,7 @@ async function handleExportList() {
       plan_id: typeof filters.plan_id === 'number' ? filters.plan_id : undefined,
       is_sent_mail: normalizeBooleanFilterForExport(filters.is_sent_mail),
       is_agree: normalizeBooleanFilterForExport(filters.is_agree),
+      is_in_camp_selection: normalizeBooleanFilterForExport(filters.is_in_camp_selection),
       first_choice_advisor: filters.first_choice_advisor || undefined,
       first_choice_team: filters.first_choice_team || undefined,
       first_choice_score_op:
@@ -1312,6 +1329,12 @@ onMounted(async () => {
           <el-form-item label="是否同意" class="filter-row__item">
             <el-select v-model="filters.is_agree" placeholder="是否同意">
               <el-option v-for="item in agreeOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <!-- 2026-07-07: 夏令营选拔 筛选 (dtlms_plan_offer.is_in_camp_selection) -->
+          <el-form-item label="夏令营选拔" class="filter-row__item">
+            <el-select v-model="filters.is_in_camp_selection" placeholder="夏令营选拔">
+              <el-option v-for="item in campSelectionOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
         </div>
@@ -2116,9 +2139,9 @@ onMounted(async () => {
 }
 
 .camp-offer-kpi-strip {
-  /* 2026-07-06: 8 张卡片固定 4 列 × 2 行 布局 */
+  /* 2026-07-07: 9 张卡片固定 5 列 × 2 行 布局 (最后一格留空) */
   display: grid;
-  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
   gap: 10px 14px;
   align-items: center;
   justify-items: stretch;

@@ -794,6 +794,8 @@ class CampOfferStats(BaseModel):
       marked the row as pending review).
     * ``pending_send_count``: rows whose ``accepted`` is NULL (no
       decision has been made yet).
+    * ``is_in_camp_selection``: rows whose
+      ``dtlms_plan_offer.is_in_camp_selection`` is TRUE.
     * ``total``: total rows considered (after applying the same filters
       as the list endpoint, minus pagination).
     """
