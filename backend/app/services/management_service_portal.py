@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.core.portal_security import create_portal_access_token
+from app.schemas.portal import PortalOfferRecord
 
 from .management_service_shared import *
 
@@ -997,6 +998,49 @@ class RuntimeManagementStorePortalMixin:
             if postgres_item is not None:
                 return self._build_portal_student_record(postgres_item)
             raise
+
+    # 2026-07-07: portal Offer 签署页 (/portal/home/offer) 用
+    # - 仅依赖 portal 学生基本信息 + dtlms_plan_offer, 不复用 get_portal_student 防止字段膨胀.
+    # - candidate_no 来自 portal_students.latest_application (与 get_portal_student 内部逻辑保持一致).
+    def get_portal_offer(self, student_id: int) -> PortalOfferRecord:
+        # 2026-07-07: portal Offer 签签 (/portal/home/offer) 用
+        # - 与 get_portal_student 复用同一条 student_record 构造路径 (_build_portal_student_record),
+        #   这样 candidate_no / selected_plan_id 与 /portal/me 保持完全一致.
+        # - 仅在第二步增加 dtlms_plan_offer 查询, 不引入任何冗余字段.
+        # 1) 复用 get_portal_student bᵏ到 PortalStudentRecord (包含 candidate_no / selected_plan_id)
+        #    失败抛 KeyError -> 让 API 层返回 404
+        student_record = self.get_portal_student(student_id)
+
+        candidate_no = str(student_record.candidate_no or "").strip() or None
+        plan_id = int(student_record.selected_plan_id or 0)
+
+        admission_offered_school: str | None = None
+        accepted_notification_sent_at: str | None = None
+
+        # 2) 若 candidate_no + plan_id 都有效, 查 dtlms_plan_offer
+        if candidate_no and plan_id > 0:
+            try:
+                offer_row = self._postgres_store.find_camp_offer_offer_record(
+                    candidate_no=candidate_no,
+                    plan_id=plan_id,
+                )
+            except Exception:
+                offer_row = None
+            if offer_row:
+                school_value = offer_row.get("admission_offered_school")
+                if school_value is not None:
+                    admission_offered_school = str(school_value).strip() or None
+                sent_at = offer_row.get("accepted_notification_sent_at")
+                if sent_at is not None:
+                    # timestamp -> ISO 字符串 (无 tz)
+                    accepted_notification_sent_at = sent_at.isoformat() if hasattr(sent_at, "isoformat") else str(sent_at)
+
+        return PortalOfferRecord(
+            candidate_no=candidate_no,
+            admission_offered_school=admission_offered_school,
+            accepted_notification_sent_at=accepted_notification_sent_at,
+        )
+
 
     def get_public_recruitment_plans(self) -> PortalPlanListResponse:
         source_items = sorted(self._list("recruitment_plans"), key=self._portal_plan_sort_key, reverse=True)

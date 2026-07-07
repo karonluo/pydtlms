@@ -87,6 +87,9 @@ const sortBy = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 
 const notifyDialogVisible = ref(false)
+
+// 2026-07-07: 发送录取通知 (录取通知书) 弹窗状态
+const acceptNotifyDialogVisible = ref(false)
 const notifySubmitting = ref(false)
 const notifyResult = ref<CampOfferNotificationSendResponse | null>(null)
 
@@ -1019,9 +1022,30 @@ async function submitSelectionImport() {
   }
 }
 
+// 2026-07-07: 发送录取通知 (录取通知书) 入口 - 仅前端, 后续对接后端
+function openAcceptNotifyDialog() {
+  if (!selectedOfferIds.value.length) {
+    ElMessage.warning('请先勾选要发送录取通知的入营名单')
+    return
+  }
+  acceptNotifyDialogVisible.value = true
+}
+
+// 计算属性: 弹窗信息卡片用, 从已勾选行提取学生姓名 / 报名号
+const acceptNotifySelectedRows = computed<CampOfferRecord[]>(() =>
+  offers.value.filter((row) => selectedOfferIds.value.includes(row.id))
+)
+const acceptNotifySelectedCount = computed(() => acceptNotifySelectedRows.value.length)
+const acceptNotifyStudentNames = computed<string>(() =>
+  acceptNotifySelectedRows.value
+    .map((row) => String(row.student_name || row.candidate_no || '').trim())
+    .filter((name) => name.length > 0)
+    .join('、')
+)
+
+// 兼容旧引用: 工具栏按钮 onHackathonSendNotification 直接转 openAcceptNotifyDialog
 function onHackathonSendNotification() {
-  // 占位: 后续将对接 '发送录取通知' 后端端点 (录取通知书发送)
-  ElMessage.info('发送录取通知功能待后续实现')
+  openAcceptNotifyDialog()
 }
 
 
@@ -2035,6 +2059,61 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
+    <!--
+      2026-07-07: 发送录取通知 (录取通知书) 确认弹窗
+      - 仅前端: “确认发送”按钮暂禁用 (后端发送逻辑待后续实现)
+      - 数据源: 当前已勾选入营名单 (selectedOfferIds)
+      - 显示: 已选人数 / 学生姓名列表 / 通知类型 + 24小时确认提示
+    -->
+    <el-dialog
+      v-model="acceptNotifyDialogVisible"
+      title="发送录取通知"
+      width="640px"
+      destroy-on-close
+      :close-on-click-modal="false"
+    >
+      <div class="accept-notify-summary">
+        <div class="accept-notify-summary__row">
+          <span class="accept-notify-summary__label">已选学生</span>
+          <span class="accept-notify-summary__value">{{ acceptNotifySelectedCount }} 人</span>
+        </div>
+        <div class="accept-notify-summary__row">
+          <span class="accept-notify-summary__label">学生名单</span>
+          <span class="accept-notify-summary__value accept-notify-summary__value--multiline">
+            <template v-if="acceptNotifyStudentNames">
+              <el-tag
+                v-for="(name, idx) in acceptNotifySelectedRows.map((r) => String(r.student_name || r.candidate_no || '').trim()).filter((n) => n)"
+                :key="idx"
+                type="info"
+                disable-transitions
+                class="accept-notify-summary__tag"
+              >{{ name }}</el-tag>
+            </template>
+            <span v-else class="text-muted">-</span>
+          </span>
+        </div>
+        <div class="accept-notify-summary__row">
+          <span class="accept-notify-summary__label">通知类型</span>
+          <span class="accept-notify-summary__value accept-notify-summary__value--bold">录取通知书</span>
+        </div>
+      </div>
+      <div class="accept-notify-tip">
+        <span class="accept-notify-tip__icon">⚠</span>
+        <div class="accept-notify-tip__content">
+          <div>确认发送后将不可撤销，录取通知书将发送至以上 {{ acceptNotifySelectedCount }} 位学生的邮箱。</div>
+          <div>学生收到后需在 24 小时内完成确认，请确认学生信息无误。</div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="acceptNotifyDialogVisible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          disabled
+          title="待后续实现"
+        >确认发送</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 学生填报详情弹窗（复用 /recruitment/registered-students 同款组件） -->
     <RecruitmentPortalApplicationDrawer
       v-model="portalApplicationDetailVisible"
@@ -2496,4 +2575,78 @@ onMounted(async () => {
 
 /* 二次确认对话框样式已迁到全局 src/style.css（ElMessageBox portal 到 body，scoped/:deep 都不生效） */
 
+
+
+/* 2026-07-07: 发送录取通知 弹窗 */
+.accept-notify-summary {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #f7f8fa;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.accept-notify-summary__row {
+  display: flex;
+  align-items: flex-start;
+  padding: 6px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.accept-notify-summary__row + .accept-notify-summary__row {
+  border-top: 1px dashed #e4e7ed;
+}
+
+.accept-notify-summary__label {
+  flex: 0 0 96px;
+  color: var(--text-subtle);
+}
+
+.accept-notify-summary__value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-main);
+  text-align: right;
+  word-break: break-all;
+}
+
+.accept-notify-summary__value--bold {
+  font-weight: 600;
+}
+
+.accept-notify-summary__value--multiline {
+  text-align: right;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.accept-notify-summary__tag + .accept-notify-summary__tag {
+  margin-left: 0;
+}
+
+.accept-notify-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid #faecd8;
+  background: #fdf6ec;
+  color: #b88230;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.accept-notify-tip__icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.accept-notify-tip__content > div + div {
+  margin-top: 4px;
+}
 </style>

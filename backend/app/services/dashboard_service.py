@@ -27,6 +27,7 @@ from app.schemas.portal import (
     PortalRegistrationEmailCodeResponse,
     PortalRegistrationResponse,
     PortalSessionResponse,
+    PortalOfferRecord,
     PortalStudentRecord,
     PortalRegistrationRequest,
     PortalTeamListResponse,
@@ -727,6 +728,12 @@ def change_portal_student_password(student_id: int, payload: PortalPasswordChang
 
 def get_portal_student(student_id: int) -> PortalStudentRecord:
     return store.get_portal_student(student_id)
+
+
+# 2026-07-07: portal Offer 签署页 (/portal/home/offer) 用
+def get_portal_offer(student_id: int) -> PortalOfferRecord:
+    """调用 store.get_portal_offer, 返回 PortalOfferRecord."""
+    return store.get_portal_offer(student_id)
 
 
 def get_portal_profile_options() -> PortalProfileOptionsResponse:

@@ -1347,6 +1347,21 @@ class PortalApplicationDraftSaveResponse(BaseModel):
     student: PortalStudentRecord
 
 
+# 2026-07-07: Offer 签署页 portal 端用. 仅返回与"录取通知书"相关的最小字段, 避免与 /portal/me 字段耦合.
+class PortalOfferRecord(BaseModel):
+    """学生进入 /portal/home/offer 时使用.
+
+    - admission_offered_school: 录取学校 (dtlms_plan_offer.admission_offered_school)
+      若为空, 学生还没被分配学校, 前端用占位文案.
+    - accepted_notification_sent_at: 已发送录取通知的时间 (dtlms_plan_offer.accepted_notification_sent_at)
+      ISO 字符串 (无时区), 用于计算剩余确认时间; 为空则按当前时间计算 deadline.
+    - candidate_no: 学生报名号, 便于前端直接渲染; 与 /portal/me 保持一致.
+    """
+    candidate_no: str | None = None
+    admission_offered_school: str | None = None
+    accepted_notification_sent_at: str | None = None
+
+
 class PortalAttachmentUploadResponse(BaseModel):
     category: str
     file_name: str

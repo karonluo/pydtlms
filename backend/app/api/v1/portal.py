@@ -30,6 +30,7 @@ from app.schemas.portal import (
     PortalRegistrationRequest,
     PortalRegistrationResponse,
     PortalSessionResponse,
+    PortalOfferRecord,
     PortalStudentRecord,
     PortalTeamListResponse,
 )
@@ -38,6 +39,7 @@ from app.services.dashboard_service import (
     change_portal_student_password,
     get_news_article_list,
     get_portal_profile_options,
+    get_portal_offer,
     get_portal_student,
     get_public_recruitment_plans,
     get_public_teams,
@@ -430,6 +432,25 @@ def portal_forgot_password(payload: PortalPasswordResetRequest) -> dict[str, str
 def portal_me(student_id: int = Depends(get_current_active_portal_student_id)) -> PortalStudentRecord:
     try:
         return get_portal_student(student_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+
+
+# 2026-07-07: Offer 签署页 (/portal/home/offer) 用
+# 独立端点的原因: 防止后续 Offer 字段增多影响 /portal/me; 当前只返回与"录取通知书"相关的最小字段.
+@router.get("/offer", response_model=PortalOfferRecord)
+def portal_offer(student_id: int = Depends(get_current_active_portal_student_id)) -> PortalOfferRecord:
+    """返回当前 portal 学生在 dtlms_plan_offer 中的录取信息.
+
+    字段:
+      - candidate_no: 报名号
+      - admission_offered_school: 录取学校 (dtlms_plan_offer.admission_offered_school)
+      - accepted_notification_sent_at: 已发送录取通知的时间 (dtlms_plan_offer.accepted_notification_sent_at)
+
+    鉴权: portal bearer (与 /portal/me 一致).
+    """
+    try:
+        return get_portal_offer(student_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
 

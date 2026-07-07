@@ -21,6 +21,8 @@ const WorkflowCenterView = () => import('../views/workflow/WorkflowCenterView.vu
 const LoginView = () => import('../views/auth/LoginView.vue')
 const ProfileView = () => import('../views/profile/ProfileView.vue')
 const PortalHomeView = () => import('../views/home/PortalHomeView.vue')
+// 2026-07-07: Offer 签署副本路由 (功能与 UI 暂与 PortalHomeView 一致, 后续改造)
+const PortalHomeOfferView = () => import('../views/home/PortalHomeOfferView.vue')
 const StudentPortalAuthView = () => import('../views/portal/StudentPortalAuthView.vue')
 const StudentPortalApplicationV2View = () => import('../views/portal/StudentPortalApplicationV2View.vue')
 const OfferConfirmView = () => import('../../offer_page/OfferConfirmView.vue')
@@ -33,6 +35,7 @@ const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true, title: '系统登录' } },
     { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
     { path: '/portal/home', component: PortalHomeView, meta: { public: true, portalProtected: true, title: '门户首页' } },
+    { path: '/portal/home/offer', component: PortalHomeOfferView, meta: { public: true, portalProtected: true, title: 'Offer 签署 (待改造)' } },
     { path: '/portal/application', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
     { path: '/offer/confirm', component: OfferConfirmView, meta: { public: true, title: '入营名单确认' } },
     { path: '/portal/applicationv2', redirect: '/portal/application', meta: { public: true, portalProtected: true } },

@@ -459,6 +459,17 @@ export function getPortalProfile() {
   return portalHttp.get<PortalStudentRecord>('/portal/me')
 }
 
+// 2026-07-07: Offer 签署页 (/portal/home/offer) 用
+export type PortalOfferRecord = {
+  candidate_no?: string | null
+  admission_offered_school?: string | null
+  accepted_notification_sent_at?: string | null
+}
+
+export function fetchPortalOffer() {
+  return portalHttp.get<PortalOfferRecord>('/portal/offer')
+}
+
 export function getPortalProfileOptions() {
   return portalHttp.get<PortalProfileOptionsResponse>('/portal/profile-options')
 }

@@ -1387,6 +1387,42 @@ class PostgresStateStoreQueryRecruitmentMixin:
         return dict(row) if row else None
 
 
+    def find_camp_offer_offer_record(
+        self, *, candidate_no: str, plan_id: int
+    ) -> dict[str, Any] | None:
+        """2026-07-07: portal Offer 签署页 (/portal/home/offer) 用.
+
+        按 candidate_no + plan_id 查 dtlms_plan_offer 的:
+          - admission_offered_school (录取学校)
+          - accepted_notification_sent_at (已发送录取通知时间)
+        返回 dict (可能 None 表示该学生不在入营名单内).
+        """
+        self.ensure_schema()
+        normalized_candidate_no = str(candidate_no or "").strip()
+        if not normalized_candidate_no or int(plan_id or 0) <= 0:
+            return None
+        try:
+            with self._connect(settings.postgres_db) as conn:
+                conn.row_factory = dict_row
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT
+                            candidate_no,
+                            admission_offered_school,
+                            accepted_notification_sent_at
+                        FROM dtlms_plan_offer
+                        WHERE candidate_no = %s AND plan_id = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (normalized_candidate_no, int(plan_id)),
+                    )
+                    row = cur.fetchone()
+        except Exception:
+            return None
+        return dict(row) if row else None
+
     def find_camp_offer_is_in_camp_selection(self, *, candidate_no: str, plan_id: int) -> bool:
         """2026-07-06: portal 进度展示用。
 
