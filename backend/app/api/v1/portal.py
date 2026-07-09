@@ -455,6 +455,46 @@ def portal_offer(student_id: int = Depends(get_current_active_portal_student_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
 
 
+# 2026-07-09: 学生 portal 端点击"接受录取" → 写库 accepted_confirmed + student_submitted_offer_at
+@router.post("/offer/accept", response_model=PortalOfferRecord)
+def portal_offer_accept(student_id: int = Depends(get_current_active_portal_student_id)) -> PortalOfferRecord:
+    """学生点击"接受录取"的后端端点.
+
+    后端校验 (强制):
+      1) dtlms_plan_offer.accepted 必须 === 'accepted_sent' (中间态)
+      2) 未超时: accepted_notification_sent_at + dict.student_signed_offer_timeout_hours 小时 > now()
+    失败时分别抛 403 / 403, 前端弹对应提示.
+    """
+    from app.services.management_service import RuntimeManagementStore
+
+    store = RuntimeManagementStore()
+    try:
+        return store.accept_portal_offer(student_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+# 2026-07-09: 学生 portal 端点击"拒绝录取" → 写库 accepted_rejected + student_submitted_offer_at
+@router.post("/offer/reject", response_model=PortalOfferRecord)
+def portal_offer_reject(student_id: int = Depends(get_current_active_portal_student_id)) -> PortalOfferRecord:
+    """学生点击"拒绝录取"的后端端点. 校验规则与 /offer/accept 相同."""
+    from app.services.management_service import RuntimeManagementStore
+
+    store = RuntimeManagementStore()
+    try:
+        return store.reject_portal_offer(student_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal student not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/profile-options", response_model=PortalProfileOptionsResponse)
 def portal_profile_options(student_id: int = Depends(get_current_active_portal_student_id)) -> PortalProfileOptionsResponse:
     return get_portal_profile_options()

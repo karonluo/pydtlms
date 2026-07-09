@@ -35,7 +35,7 @@ const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true, title: '系统登录' } },
     { path: '/portal', component: StudentPortalAuthView, meta: { public: true, title: '博士生招生门户' } },
     { path: '/portal/home', component: PortalHomeView, meta: { public: true, portalProtected: true, title: '门户首页' } },
-    { path: '/portal/home/offer', component: PortalHomeOfferView, meta: { public: true, portalProtected: true, title: 'Offer 签署 (待改造)' } },
+    { path: '/portal/home/offer', component: PortalHomeOfferView, meta: { public: true, portalProtected: true, title: '录取通知书签署' } },
     { path: '/portal/application', component: StudentPortalApplicationV2View, meta: { public: true, portalProtected: true, title: '博士研究生申请表' } },
     { path: '/offer/confirm', component: OfferConfirmView, meta: { public: true, title: '入营名单确认' } },
     { path: '/portal/applicationv2', redirect: '/portal/application', meta: { public: true, portalProtected: true } },

@@ -86,6 +86,48 @@ class NotificationEmailService:
         )
         self.send_message(to_email=email, subject=subject, text_body=text_body, template_code="portal_admin_password_reset")
 
+    # 2026-07-09: 录取通知书邮件 (与 portal /portal/home/offer 卡片同源 HTML 文案).
+    # 测试期间: 实际收件人统一替换为 lk139@126.com (写死), 不论 student_email 是什么.
+    # 模板变量: student_name / admission_offered_school / accepted_notification_sent_at_ymd /
+    #           offer_timeout_hours / portal_offer_url.
+    def send_admission_offer_letter(
+        self,
+        *,
+        student_name: str,
+        student_email: str,
+        admission_offered_school: str | None,
+        accepted_notification_sent_at_ymd: str,
+        offer_timeout_hours: int,
+        portal_offer_url: str,
+        business_key: str | None = None,
+    ) -> None:
+        # 2026-07-09: 测试期间统一替换收件人, 避免发到学生真邮箱.
+        TEST_OVERRIDE_RECIPIENT = "lk139@126.com"
+        original_email = str(student_email or "").strip()
+        actual_recipient = TEST_OVERRIDE_RECIPIENT if original_email else TEST_OVERRIDE_RECIPIENT
+        school = (admission_offered_school or "").strip() or "上海人工智能实验室"
+        student_name_clean = (student_name or "").strip() or "同学"
+        subject = f"【上海人工智能实验室】录取通知书 - {school}"
+        text_body = (
+            f"{student_name_clean} 同学你好:\n\n"
+            "衷心祝贺你通过上海人工智能实验室招生委员会专家组的综合评审! "
+            f"也成功被 {school} 录取。\n\n"
+            f"请务必在 {offer_timeout_hours} 小时内(逾期未确认将被视为自动放弃入选资格) "
+            f"点击以下链接完成入选意向确认:\n\n{portal_offer_url}\n\n"
+            "其他具体信息请以你收到的通知邮件为准。\n\n"
+            "期待在不久的将来,与你在实验室相聚,携手启程,"
+            "在这人工智能的星辰大海中,探索并定义独属于你的科研疆界。\n\n"
+            "上海人工智能实验室\n"
+            f"{accepted_notification_sent_at_ymd}"
+        )
+        self.send_message(
+            to_email=actual_recipient,
+            subject=subject,
+            text_body=text_body,
+            template_code="admission_offer_letter",
+            business_key=business_key,
+        )
+
     def send_recruitment_status_update(
         self,
         *,

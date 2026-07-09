@@ -25,18 +25,18 @@
 
 ### `dtlms_achievements`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_achievements_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `achievement_type` | character varying(32) | NO |  |
-| `title` | character varying(255) | NO |  |
-| `published_at` | date | YES |  |
-| `publisher_name` | character varying(255) | YES |  |
-| `ranking_text` | character varying(64) | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_achievements_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `achievement_type` | character varying(32) | NO |  |  |
+| `title` | character varying(255) | NO |  |  |
+| `published_at` | date | YES |  |  |
+| `publisher_name` | character varying(255) | YES |  |  |
+| `ranking_text` | character varying(64) | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -53,17 +53,17 @@
 
 ### `dtlms_admission_decisions`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_admission_decisions_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `decision_status` | character varying(32) | NO | 'pending'::character varying |
-| `rank_no` | integer(32,0) | YES |  |
-| `final_score` | numeric(5,2) | YES |  |
-| `transfer_option` | character varying(64) | YES |  |
-| `decision_comment` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_admission_decisions_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `decision_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `rank_no` | integer | YES |  |  |
+| `final_score` | numeric(5,2) | YES |  |  |
+| `transfer_option` | character varying(64) | YES |  |  |
+| `decision_comment` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -81,18 +81,18 @@
 
 ### `dtlms_advisor_screening_batches`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_advisor_screening_batches_id_seq'::regclass) |
-| `advisor_user_id` | bigint(64,0) | YES |  |
-| `advisor_username` | character varying(64) | NO |  |
-| `advisor_name` | character varying(128) | YES |  |
-| `advisor_role_code` | character varying(64) | NO | 'advisor'::character varying |
-| `screening_round` | character varying(32) | NO |  |
-| `signature_base64` | text | NO |  |
-| `submitted_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_advisor_screening_batches_id_seq'::regclass) |  |
+| `advisor_user_id` | bigint | YES |  |  |
+| `advisor_username` | character varying(64) | NO |  |  |
+| `advisor_name` | character varying(128) | YES |  |  |
+| `advisor_role_code` | character varying(64) | NO | 'advisor'::character varying |  |
+| `screening_round` | character varying(32) | NO |  |  |
+| `signature_base64` | text | NO |  |  |
+| `submitted_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -110,19 +110,19 @@
 
 ### `dtlms_advisor_screening_items`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_advisor_screening_items_id_seq'::regclass) |
-| `batch_id` | bigint(64,0) | NO |  |
-| `application_id` | bigint(64,0) | NO |  |
-| `business_key` | character varying(64) | NO |  |
-| `candidate_no` | character varying(64) | NO |  |
-| `screening_round` | character varying(32) | NO |  |
-| `advisor_score` | numeric(5,2) | NO |  |
-| `is_passed` | boolean | NO |  |
-| `screening_status` | character varying(32) | NO | 'submitted'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_advisor_screening_items_id_seq'::regclass) |  |
+| `batch_id` | bigint | NO |  |  |
+| `application_id` | bigint | NO |  |  |
+| `business_key` | character varying(64) | NO |  |  |
+| `candidate_no` | character varying(64) | NO |  |  |
+| `screening_round` | character varying(32) | NO |  |  |
+| `advisor_score` | numeric(5,2) | NO |  |  |
+| `is_passed` | boolean | NO |  |  |
+| `screening_status` | character varying(32) | NO | 'submitted'::character varying |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -149,19 +149,19 @@
 
 ### `dtlms_advisors`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_advisors_id_seq'::regclass) |
-| `advisor_no` | character varying(32) | NO |  |
-| `full_name` | character varying(128) | NO |  |
-| `title` | character varying(64) | NO |  |
-| `organization_name` | character varying(128) | NO |  |
-| `research_direction` | character varying(255) | NO |  |
-| `annual_quota` | integer(32,0) | NO | 0 |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `user_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_advisors_id_seq'::regclass) |  |
+| `advisor_no` | character varying(32) | NO |  |  |
+| `full_name` | character varying(128) | NO |  |  |
+| `title` | character varying(64) | NO |  |  |
+| `organization_name` | character varying(128) | NO |  |  |
+| `research_direction` | character varying(255) | NO |  |  |
+| `annual_quota` | integer | NO | 0 |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `user_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -181,16 +181,16 @@
 
 ### `dtlms_application_materials`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_application_materials_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `material_type` | character varying(64) | NO |  |
-| `material_status` | character varying(32) | NO | 'pending'::character varying |
-| `file_url` | character varying(255) | NO |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_application_materials_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `material_type` | character varying(64) | NO |  |  |
+| `material_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `file_url` | character varying(255) | NO |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -207,15 +207,15 @@
 
 ### `dtlms_audit_policies`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO |  |
-| `item` | character varying(128) | NO |  |
-| `policy` | text | NO |  |
-| `status` | character varying(32) | NO | '启用'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `is_deleted` | boolean | NO | false |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO |  |  |
+| `item` | character varying(128) | NO |  |  |
+| `policy` | text | NO |  |  |
+| `status` | character varying(32) | NO | '启用'::character varying |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `is_deleted` | boolean | NO | false |  |
 
 **主键**: (`id`)
 
@@ -231,19 +231,19 @@
 
 ### `dtlms_background_assessments`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_background_assessments_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `evaluator_user_id` | bigint(64,0) | YES |  |
-| `evaluator_username` | character varying(64) | NO |  |
-| `evaluator_name` | character varying(128) | YES |  |
-| `evaluator_role_code` | character varying(64) | NO |  |
-| `assessment_result` | character varying(32) | NO |  |
-| `assessment_comment` | text | YES |  |
-| `assessed_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_background_assessments_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `evaluator_user_id` | bigint | YES |  |  |
+| `evaluator_username` | character varying(64) | NO |  |  |
+| `evaluator_name` | character varying(128) | YES |  |  |
+| `evaluator_role_code` | character varying(64) | NO |  |  |
+| `assessment_result` | character varying(32) | NO |  |  |
+| `assessment_comment` | text | YES |  |  |
+| `assessed_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -264,16 +264,16 @@
 
 ### `dtlms_data_sync_logs`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_data_sync_logs_id_seq'::regclass) |
-| `source_system` | character varying(64) | NO |  |
-| `target_system` | character varying(64) | NO |  |
-| `sync_status` | character varying(32) | NO |  |
-| `record_count` | integer(32,0) | NO | 0 |
-| `failure_reason` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_data_sync_logs_id_seq'::regclass) |  |
+| `source_system` | character varying(64) | NO |  |  |
+| `target_system` | character varying(64) | NO |  |  |
+| `sync_status` | character varying(32) | NO |  |  |
+| `record_count` | integer | NO | 0 |  |
+| `failure_reason` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -290,21 +290,21 @@
 
 ### `dtlms_dict_data`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_dict_data_id_seq'::regclass) |
-| `dict_type_id` | bigint(64,0) | NO |  |
-| `dict_type` | character varying(100) | NO |  |
-| `label` | character varying(100) | NO |  |
-| `value` | character varying(100) | NO |  |
-| `sort_order` | integer(32,0) | NO | 0 |
-| `status` | character varying(32) | NO | '启用'::character varying |
-| `color_type` | character varying(32) | YES |  |
-| `css_class` | character varying(128) | YES |  |
-| `remark` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_dict_data_id_seq'::regclass) |  |
+| `dict_type_id` | bigint | NO |  |  |
+| `dict_type` | character varying(100) | NO |  |  |
+| `label` | character varying(100) | NO |  |  |
+| `value` | character varying(100) | NO |  |  |
+| `sort_order` | integer | NO | 0 |  |
+| `status` | character varying(32) | NO | '启用'::character varying |  |
+| `color_type` | character varying(32) | YES |  |  |
+| `css_class` | character varying(128) | YES |  |  |
+| `remark` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -325,16 +325,16 @@
 
 ### `dtlms_dict_types`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_dict_types_id_seq'::regclass) |
-| `dict_name` | character varying(100) | NO |  |
-| `dict_type` | character varying(100) | NO |  |
-| `status` | character varying(32) | NO | '启用'::character varying |
-| `remark` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_dict_types_id_seq'::regclass) |  |
+| `dict_name` | character varying(100) | NO |  |  |
+| `dict_type` | character varying(100) | NO |  |  |
+| `status` | character varying(32) | NO | '启用'::character varying |  |
+| `remark` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -353,21 +353,21 @@
 
 ### `dtlms_initial_screening_confirmations`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_initial_screening_confirmations_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `business_key` | character varying(64) | NO |  |
-| `candidate_no` | character varying(64) | NO |  |
-| `confirmer_user_id` | bigint(64,0) | YES |  |
-| `confirmer_username` | character varying(64) | NO |  |
-| `confirmer_name` | character varying(128) | YES |  |
-| `confirmer_role_code` | character varying(64) | NO |  |
-| `confirmation_result` | character varying(32) | NO |  |
-| `confirmation_comment` | text | YES |  |
-| `confirmed_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_initial_screening_confirmations_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `business_key` | character varying(64) | NO |  |  |
+| `candidate_no` | character varying(64) | NO |  |  |
+| `confirmer_user_id` | bigint | YES |  |  |
+| `confirmer_username` | character varying(64) | NO |  |  |
+| `confirmer_name` | character varying(128) | YES |  |  |
+| `confirmer_role_code` | character varying(64) | NO |  |  |
+| `confirmation_result` | character varying(32) | NO |  |  |
+| `confirmation_comment` | text | YES |  |  |
+| `confirmed_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -388,21 +388,21 @@
 
 ### `dtlms_initial_screening_notifications`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_initial_screening_notifications_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `business_key` | character varying(64) | NO |  |
-| `notification_channel` | character varying(32) | NO |  |
-| `notification_event` | character varying(64) | NO |  |
-| `notification_status` | character varying(32) | NO | 'pending'::character varying |
-| `recipient_address` | character varying(255) | YES |  |
-| `recipient_user_id` | bigint(64,0) | YES |  |
-| `recipient_username` | character varying(64) | YES |  |
-| `payload_json` | jsonb | YES |  |
-| `sent_at` | timestamp with time zone | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_initial_screening_notifications_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `business_key` | character varying(64) | NO |  |  |
+| `notification_channel` | character varying(32) | NO |  |  |
+| `notification_event` | character varying(64) | NO |  |  |
+| `notification_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `recipient_address` | character varying(255) | YES |  |  |
+| `recipient_user_id` | bigint | YES |  |  |
+| `recipient_username` | character varying(64) | YES |  |  |
+| `payload_json` | jsonb | YES |  |  |
+| `sent_at` | timestamp with time zone | YES |  |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -423,17 +423,17 @@
 
 ### `dtlms_integrations`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO |  |
-| `name` | character varying(128) | NO |  |
-| `direction` | character varying(64) | NO |  |
-| `cadence` | character varying(64) | NO |  |
-| `status` | character varying(32) | NO | '正常'::character varying |
-| `owner` | character varying(128) | NO | ''::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `is_deleted` | boolean | NO | false |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO |  |  |
+| `name` | character varying(128) | NO |  |  |
+| `direction` | character varying(64) | NO |  |  |
+| `cadence` | character varying(64) | NO |  |  |
+| `status` | character varying(32) | NO | '正常'::character varying |  |
+| `owner` | character varying(128) | NO | ''::character varying |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `is_deleted` | boolean | NO | false |  |
 
 **主键**: (`id`)
 
@@ -449,16 +449,16 @@
 
 ### `dtlms_interview_groups`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_interview_groups_id_seq'::regclass) |
-| `plan_id` | bigint(64,0) | NO |  |
-| `group_code` | character varying(64) | NO |  |
-| `group_name` | character varying(128) | NO |  |
-| `interview_mode` | character varying(32) | NO | 'offline'::character varying |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_interview_groups_id_seq'::regclass) |  |
+| `plan_id` | bigint | NO |  |  |
+| `group_code` | character varying(64) | NO |  |  |
+| `group_name` | character varying(128) | NO |  |  |
+| `interview_mode` | character varying(32) | NO | 'offline'::character varying |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -477,17 +477,17 @@
 
 ### `dtlms_interview_schedules`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_interview_schedules_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `interview_group_id` | bigint(64,0) | NO |  |
-| `admission_ticket_no` | character varying(64) | NO |  |
-| `starts_at` | timestamp with time zone | NO |  |
-| `ends_at` | timestamp with time zone | NO |  |
-| `schedule_status` | character varying(32) | NO | 'scheduled'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_interview_schedules_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `interview_group_id` | bigint | NO |  |  |
+| `admission_ticket_no` | character varying(64) | NO |  |  |
+| `starts_at` | timestamp(6) with time zone | NO |  |  |
+| `ends_at` | timestamp(6) with time zone | NO |  |  |
+| `schedule_status` | character varying(32) | NO | 'scheduled'::character varying |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -509,18 +509,18 @@
 
 ### `dtlms_interview_scores`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_interview_scores_id_seq'::regclass) |
-| `schedule_id` | bigint(64,0) | NO |  |
-| `evaluator_username` | character varying(64) | NO |  |
-| `single_choice_score` | numeric(5,2) | YES |  |
-| `fill_blank_score` | numeric(5,2) | YES |  |
-| `coding_score` | numeric(5,2) | YES |  |
-| `interview_score` | numeric(5,2) | YES |  |
-| `ideological_score` | numeric(5,2) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_interview_scores_id_seq'::regclass) |  |
+| `schedule_id` | bigint | NO |  |  |
+| `evaluator_username` | character varying(64) | NO |  |  |
+| `single_choice_score` | numeric(5,2) | YES |  |  |
+| `fill_blank_score` | numeric(5,2) | YES |  |  |
+| `coding_score` | numeric(5,2) | YES |  |  |
+| `interview_score` | numeric(5,2) | YES |  |  |
+| `ideological_score` | numeric(5,2) | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -537,15 +537,15 @@
 
 ### `dtlms_login_logs`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_login_logs_id_seq'::regclass) |
-| `username` | character varying(64) | NO |  |
-| `login_status` | character varying(32) | NO |  |
-| `login_ip` | character varying(64) | YES |  |
-| `user_agent` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_login_logs_id_seq'::regclass) |  |
+| `username` | character varying(64) | NO |  |  |
+| `login_status` | character varying(32) | NO |  |  |
+| `login_ip` | character varying(64) | YES |  |  |
+| `user_agent` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -561,15 +561,15 @@
 
 ### `dtlms_material_scores`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_material_scores_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `reviewer_assignment_id` | bigint(64,0) | NO |  |
-| `material_score` | numeric(5,2) | YES |  |
-| `recommendation_text` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_material_scores_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `reviewer_assignment_id` | bigint | NO |  |  |
+| `material_score` | numeric(5,2) | YES |  |  |
+| `recommendation_text` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -587,26 +587,26 @@
 
 ### `dtlms_news_articles`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_news_articles_id_seq'::regclass) |
-| `news_code` | character varying(64) | NO |  |
-| `news_title` | character varying(255) | NO |  |
-| `news_content` | text | NO |  |
-| `news_type` | character varying(100) | NO |  |
-| `publisher_user_id` | bigint(64,0) | YES |  |
-| `publisher_username` | character varying(64) | YES |  |
-| `publisher_name` | character varying(128) | YES |  |
-| `reviewer_user_id` | bigint(64,0) | YES |  |
-| `reviewer_username` | character varying(64) | YES |  |
-| `reviewer_name` | character varying(128) | YES |  |
-| `published_at` | timestamp with time zone | YES |  |
-| `status` | character varying(32) | NO | '草稿'::character varying |
-| `is_pinned` | boolean | NO | false |
-| `display_order` | integer(32,0) | NO | 0 |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_news_articles_id_seq'::regclass) |  |
+| `news_code` | character varying(64) | NO |  |  |
+| `news_title` | character varying(255) | NO |  |  |
+| `news_content` | text | NO |  |  |
+| `news_type` | character varying(100) | NO |  |  |
+| `publisher_user_id` | bigint | YES |  |  |
+| `publisher_username` | character varying(64) | YES |  |  |
+| `publisher_name` | character varying(128) | YES |  |  |
+| `reviewer_user_id` | bigint | YES |  |  |
+| `reviewer_username` | character varying(64) | YES |  |  |
+| `reviewer_name` | character varying(128) | YES |  |  |
+| `published_at` | timestamp with time zone | YES |  |  |
+| `status` | character varying(32) | NO | '草稿'::character varying |  |
+| `is_pinned` | boolean | NO | false |  |
+| `display_order` | integer | NO | 0 |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -629,19 +629,19 @@
 
 ### `dtlms_notification_delivery_logs`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_notification_delivery_logs_id_seq'::regclass) |
-| `channel` | character varying(32) | NO |  |
-| `template_code` | character varying(64) | YES |  |
-| `recipient` | character varying(255) | NO |  |
-| `subject` | character varying(255) | NO |  |
-| `send_status` | character varying(32) | NO |  |
-| `failure_reason` | text | YES |  |
-| `business_key` | character varying(64) | YES |  |
-| `triggered_by` | character varying(64) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_notification_delivery_logs_id_seq'::regclass) |  |
+| `channel` | character varying(32) | NO |  |  |
+| `template_code` | character varying(64) | YES |  |  |
+| `recipient` | character varying(255) | NO |  |  |
+| `subject` | character varying(255) | NO |  |  |
+| `send_status` | character varying(32) | NO |  |  |
+| `failure_reason` | text | YES |  |  |
+| `business_key` | character varying(64) | YES |  |  |
+| `triggered_by` | character varying(64) | YES |  |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -660,17 +660,17 @@
 
 ### `dtlms_notification_templates`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_notification_templates_id_seq'::regclass) |
-| `template_code` | character varying(64) | NO |  |
-| `channel` | character varying(32) | NO |  |
-| `title` | character varying(128) | NO |  |
-| `content_template` | text | NO |  |
-| `variables_schema` | jsonb | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_notification_templates_id_seq'::regclass) |  |
+| `template_code` | character varying(64) | NO |  |  |
+| `channel` | character varying(32) | NO |  |  |
+| `title` | character varying(128) | NO |  |  |
+| `content_template` | text | NO |  |  |
+| `variables_schema` | jsonb | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -688,21 +688,21 @@
 
 ### `dtlms_operation_logs`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_operation_logs_id_seq'::regclass) |
-| `operator_username` | character varying(64) | NO |  |
-| `operator_role` | character varying(64) | NO |  |
-| `module_name` | character varying(64) | NO |  |
-| `entity_name` | character varying(64) | NO |  |
-| `entity_id` | character varying(64) | NO |  |
-| `action` | character varying(32) | NO |  |
-| `old_value` | jsonb | YES |  |
-| `new_value` | jsonb | YES |  |
-| `request_ip` | character varying(64) | YES |  |
-| `result` | character varying(32) | NO | 'success'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_operation_logs_id_seq'::regclass) |  |
+| `operator_username` | character varying(64) | NO |  |  |
+| `operator_role` | character varying(64) | NO |  |  |
+| `module_name` | character varying(64) | NO |  |  |
+| `entity_name` | character varying(64) | NO |  |  |
+| `entity_id` | character varying(64) | NO |  |  |
+| `action` | character varying(32) | NO |  |  |
+| `old_value` | jsonb | YES |  |  |
+| `new_value` | jsonb | YES |  |  |
+| `request_ip` | character varying(64) | YES |  |  |
+| `result` | character varying(32) | NO | 'success'::character varying |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -720,21 +720,21 @@
 
 ### `dtlms_outbound_studies`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_outbound_studies_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `advisor_id` | bigint(64,0) | NO |  |
-| `study_type` | character varying(64) | NO |  |
-| `destination` | character varying(128) | NO |  |
-| `start_date` | date | NO |  |
-| `end_date` | date | NO |  |
-| `approval_status` | character varying(32) | NO | 'submitted'::character varying |
-| `expected_outcome` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `business_key` | character varying(64) | NO |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_outbound_studies_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `advisor_id` | bigint | NO |  |  |
+| `study_type` | character varying(64) | NO |  |  |
+| `destination` | character varying(128) | NO |  |  |
+| `start_date` | date | NO |  |  |
+| `end_date` | date | NO |  |  |
+| `approval_status` | character varying(32) | NO | 'submitted'::character varying |  |
+| `expected_outcome` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `business_key` | character varying(64) | NO |  |  |
 
 **主键**: (`id`)
 
@@ -755,15 +755,15 @@
 
 ### `dtlms_permissions`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_permissions_id_seq'::regclass) |
-| `permission_code` | character varying(128) | NO |  |
-| `permission_name` | character varying(128) | NO |  |
-| `module_name` | character varying(64) | NO |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_permissions_id_seq'::regclass) |  |
+| `permission_code` | character varying(128) | NO |  |  |
+| `permission_name` | character varying(128) | NO |  |  |
+| `module_name` | character varying(64) | NO |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -781,27 +781,28 @@
 
 ### `dtlms_plan_offer`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO |  |
-| `candidate_no` | character varying(32) | YES |  |
-| `is_agree` | boolean | YES |  |
-| `timeout_datetime` | timestamp with time zone | YES |  |
-| `portal_student_id` | bigint(64,0) | YES |  |
-| `reson` | text | YES |  |
-| `offer_url` | character varying(255) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `plan_id` | bigint(64,0) | YES |  |
-| `is_sent_mail` | boolean | YES | false |
-| `submitted_at` | timestamp with time zone | YES |  |
-| `sent_mail_at` | timestamp with time zone | YES |  |
-| `hackathon_score` | numeric(5,2) | YES |  |
-| `hackathon_comments` | text | YES |  |
-| `accepted` | character varying(32) | YES |  |
-| `admission_offered_school` | character varying(64) | YES |  |
-| `is_in_camp_selection` | boolean | NO | false |
-| `accepted_notification_sent_at` | timestamp with time zone | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO |  | 自增唯一编号 |
+| `candidate_no` | character varying(32) | YES |  | 报名号 |
+| `is_agree` | boolean | YES |  | 是否同意 |
+| `timeout_datetime` | timestamp(6) with time zone | YES |  | 超时日期时间 |
+| `portal_student_id` | bigint | YES |  | 门户学生唯一编号 |
+| `reson` | text | YES |  | 原因 |
+| `offer_url` | character varying(255) | YES |  | 生成的OFFER URL地址 |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP | 数据创建日期时间 |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP | 数据更新日期时间 |
+| `plan_id` | bigint | YES |  | 招生计划唯一编号 |
+| `is_sent_mail` | boolean | YES | false | 邮件是否已发送 |
+| `submitted_at` | timestamp(6) with time zone | YES |  | 学生提交日期时间 |
+| `sent_mail_at` | timestamp with time zone | YES |  |  |
+| `hackathon_score` | numeric(5,2) | YES |  | 夏令营评分(0~100)，与现有评分字段保持 numeric(5,2) 精度 |
+| `hackathon_comments` | text | YES |  | 夏令营评语，文本类型，无长度限制 |
+| `accepted` | character varying(32) | YES |  | 黑客松入取状态: NULL=待录取 / declined=未录取 / pending=待定 / accepted_pending_send=录取未发送 / accepted_sent=录取已发送 / accepted_confirmed=录取已确认 / accepted_rejected=录取已拒绝 |
+| `admission_offered_school` | character varying(64) | YES |  | 入取学校(字典 admission_offered_school 的 value,通常与 label 一致) |
+| `is_in_camp_selection` | boolean | NO | false | 是否已进入夏令营选拔环节 |
+| `accepted_notification_sent_at` | timestamp with time zone | YES |  | 发送录取通知日期时间; NULL 表示未发送, 非空表示已发送 (与 sent_mail_at 语义不同) |
+| `student_submitted_offer_at` | timestamp with time zone | YES |  | 学生提交offer日期时间, NULL 表示学生尚未在 portal 提交过 offer 决定, 非空表示已提交. 与 accepted 字段联动: 当 accepted 进入终态 (accepted_confirmed / accepted_rejected) 时, 本字段由后端写入; accepted 停留在中间态 (accepted_pending_send / accepted_sent) 时为 NULL. |
 
 **主键**: (`id`)
 
@@ -818,26 +819,26 @@
 
 ### `dtlms_portal_application_achievement_records`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_achievement_records_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `achievement_type` | character varying(32) | NO |  |
-| `paper_title` | character varying(255) | YES |  |
-| `author_order` | character varying(32) | YES |  |
-| `journal_or_conference` | character varying(255) | YES |  |
-| `publish_or_index_month` | character varying(16) | YES |  |
-| `award_name` | character varying(255) | YES |  |
-| `awarding_organization` | character varying(255) | YES |  |
-| `award_level` | character varying(128) | YES |  |
-| `award_year` | character varying(16) | YES |  |
-| `responsibility_text` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `achievement_month` | character varying(16) | YES |  |
-| `award_rank` | character varying(64) | YES |  |
-| `award_certificate_attachment_url` | character varying(512) | YES |  |
-| `description_text` | text | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_achievement_records_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `achievement_type` | character varying(32) | NO |  |  |
+| `paper_title` | character varying(255) | YES |  |  |
+| `author_order` | character varying(32) | YES |  |  |
+| `journal_or_conference` | character varying(255) | YES |  |  |
+| `publish_or_index_month` | character varying(16) | YES |  |  |
+| `award_name` | character varying(255) | YES |  |  |
+| `awarding_organization` | character varying(255) | YES |  |  |
+| `award_level` | character varying(128) | YES |  |  |
+| `award_year` | character varying(16) | YES |  |  |
+| `responsibility_text` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `achievement_month` | character varying(16) | YES |  |  |
+| `award_rank` | character varying(64) | YES |  |  |
+| `award_certificate_attachment_url` | character varying(512) | YES |  |  |
+| `description_text` | text | YES |  |  |
 
 **主键**: (`id`)
 
@@ -855,20 +856,20 @@
 
 ### `dtlms_portal_application_attachments`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_attachments_id_seq'::regclass) |
-| `portal_student_id` | bigint(64,0) | YES |  |
-| `application_id` | bigint(64,0) | YES |  |
-| `owner_type` | character varying(64) | NO |  |
-| `owner_id` | bigint(64,0) | YES |  |
-| `attachment_category` | character varying(64) | NO |  |
-| `file_name` | character varying(255) | NO |  |
-| `file_url` | text | NO |  |
-| `file_type` | character varying(32) | YES |  |
-| `file_size` | bigint(64,0) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_attachments_id_seq'::regclass) |  |
+| `portal_student_id` | bigint | YES |  |  |
+| `application_id` | bigint | YES |  |  |
+| `owner_type` | character varying(64) | NO |  |  |
+| `owner_id` | bigint | YES |  |  |
+| `attachment_category` | character varying(64) | NO |  |  |
+| `file_name` | character varying(255) | NO |  |  |
+| `file_url` | text | NO |  |  |
+| `file_type` | character varying(32) | YES |  |  |
+| `file_size` | bigint | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -887,14 +888,14 @@
 
 ### `dtlms_portal_application_declarations`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `application_id` | bigint(64,0) | NO |  |
-| `has_read_declaration` | boolean | NO | false |
-| `declaration_text` | text | YES |  |
-| `progress_snapshot` | jsonb | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `application_id` | bigint | NO |  |  |
+| `has_read_declaration` | boolean | NO | false |  |
+| `declaration_text` | text | YES |  |  |
+| `progress_snapshot` | jsonb | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`application_id`)
 
@@ -911,26 +912,26 @@
 
 ### `dtlms_portal_application_education_experiences`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_education_experiences_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `sort_order` | integer(32,0) | NO | 1 |
-| `education_stage` | character varying(64) | NO |  |
-| `start_month` | character varying(16) | YES |  |
-| `end_month` | character varying(16) | YES |  |
-| `school_name` | character varying(255) | NO |  |
-| `major_name` | character varying(255) | YES |  |
-| `average_score` | character varying(64) | YES |  |
-| `gpa` | character varying(32) | YES |  |
-| `ranking` | character varying(64) | YES |  |
-| `verifier_name` | character varying(128) | YES |  |
-| `verifier_phone` | character varying(32) | YES |  |
-| `transcript_attachment_url` | text | YES |  |
-| `degree_certificate_attachment_url` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `graduation_certificate_attachment_url` | text | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_education_experiences_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `sort_order` | integer | NO | 1 |  |
+| `education_stage` | character varying(64) | NO |  |  |
+| `start_month` | character varying(16) | YES |  |  |
+| `end_month` | character varying(16) | YES |  |  |
+| `school_name` | character varying(255) | NO |  |  |
+| `major_name` | character varying(255) | YES |  |  |
+| `average_score` | character varying(64) | YES |  |  |
+| `gpa` | character varying(32) | YES |  |  |
+| `ranking` | character varying(64) | YES |  |  |
+| `verifier_name` | character varying(128) | YES |  |  |
+| `verifier_phone` | character varying(32) | YES |  |  |
+| `transcript_attachment_url` | text | YES |  |  |
+| `degree_certificate_attachment_url` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `graduation_certificate_attachment_url` | text | YES |  |  |
 
 **主键**: (`id`)
 
@@ -949,15 +950,15 @@
 
 ### `dtlms_portal_application_english_proficiencies`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_english_proficiencies_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `exam_name` | character varying(32) | NO |  |
-| `score_text` | character varying(64) | NO |  |
-| `certificate_attachment_url` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_english_proficiencies_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `exam_name` | character varying(32) | NO |  |  |
+| `score_text` | character varying(64) | NO |  |  |
+| `certificate_attachment_url` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -975,17 +976,17 @@
 
 ### `dtlms_portal_application_family_members`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_family_members_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `member_name` | character varying(64) | NO |  |
-| `relation_type` | character varying(16) | NO |  |
-| `employer_name` | character varying(255) | YES |  |
-| `job_title` | character varying(128) | YES |  |
-| `contact_phone` | character varying(32) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_family_members_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `member_name` | character varying(64) | NO |  |  |
+| `relation_type` | character varying(16) | NO |  |  |
+| `employer_name` | character varying(255) | YES |  |  |
+| `job_title` | character varying(128) | YES |  |  |
+| `contact_phone` | character varying(32) | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1004,19 +1005,19 @@
 
 ### `dtlms_portal_application_personal_statements`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `application_id` | bigint(64,0) | NO |  |
-| `personal_statement_text` | text | YES |  |
-| `ai_problem_statement` | text | YES |  |
-| `ai_industry_opinion` | text | YES |  |
-| `resume_attachment_url` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `growth_experience_text` | text | YES |  |
-| `program_application_reason_text` | text | YES |  |
-| `career_plan_text` | text | YES |  |
-| `supporting_material_attachment_url` | text | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `application_id` | bigint | NO |  |  |
+| `personal_statement_text` | text | YES |  |  |
+| `ai_problem_statement` | text | YES |  |  |
+| `ai_industry_opinion` | text | YES |  |  |
+| `resume_attachment_url` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `growth_experience_text` | text | YES |  |  |
+| `program_application_reason_text` | text | YES |  |  |
+| `career_plan_text` | text | YES |  |  |
+| `supporting_material_attachment_url` | text | YES |  |  |
 
 **主键**: (`application_id`)
 
@@ -1033,19 +1034,19 @@
 
 ### `dtlms_portal_application_practice_experiences`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_practice_experiences_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `start_month` | character varying(16) | YES |  |
-| `end_month` | character varying(16) | YES |  |
-| `organization_name` | character varying(255) | NO |  |
-| `position_name` | character varying(128) | YES |  |
-| `responsibility_text` | text | YES |  |
-| `verifier_name` | character varying(128) | YES |  |
-| `verifier_phone` | character varying(32) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_practice_experiences_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `start_month` | character varying(16) | YES |  |  |
+| `end_month` | character varying(16) | YES |  |  |
+| `organization_name` | character varying(255) | NO |  |  |
+| `position_name` | character varying(128) | YES |  |  |
+| `responsibility_text` | text | YES |  |  |
+| `verifier_name` | character varying(128) | YES |  |  |
+| `verifier_phone` | character varying(32) | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1063,16 +1064,16 @@
 
 ### `dtlms_portal_application_preferences`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_application_preferences_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `preference_order` | integer(32,0) | NO |  |
-| `advisor_name` | character varying(128) | YES |  |
-| `is_optional` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `advisor_user_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_application_preferences_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `preference_order` | integer | NO |  |  |
+| `advisor_name` | character varying(128) | YES |  |  |
+| `is_optional` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `advisor_user_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1094,25 +1095,25 @@
 
 ### `dtlms_portal_student_profiles`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `portal_student_id` | bigint(64,0) | NO |  |
-| `full_name_pinyin` | character varying(128) | YES |  |
-| `gender` | character varying(16) | YES |  |
-| `birth_date` | character varying(32) | YES |  |
-| `ethnic_group` | character varying(64) | YES |  |
-| `native_place` | character varying(128) | YES |  |
-| `political_status` | character varying(64) | YES |  |
-| `marital_status` | character varying(32) | YES |  |
-| `religious_belief` | character varying(128) | YES |  |
-| `id_type` | character varying(64) | YES |  |
-| `mailing_address` | text | YES |  |
-| `emergency_contact_name` | character varying(128) | YES |  |
-| `emergency_contact_phone` | character varying(32) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `profile_photo_url` | character varying(255) | YES |  |
-| `id_card_collage_url` | character varying(255) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `portal_student_id` | bigint | NO |  |  |
+| `full_name_pinyin` | character varying(128) | YES |  |  |
+| `gender` | character varying(16) | YES |  |  |
+| `birth_date` | character varying(32) | YES |  |  |
+| `ethnic_group` | character varying(64) | YES |  |  |
+| `native_place` | character varying(128) | YES |  |  |
+| `political_status` | character varying(64) | YES |  |  |
+| `marital_status` | character varying(32) | YES |  |  |
+| `religious_belief` | character varying(128) | YES |  |  |
+| `id_type` | character varying(64) | YES |  |  |
+| `mailing_address` | text | YES |  |  |
+| `emergency_contact_name` | character varying(128) | YES |  |  |
+| `emergency_contact_phone` | character varying(32) | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `profile_photo_url` | character varying(255) | YES |  |  |
+| `id_card_collage_url` | character varying(255) | YES |  |  |
 
 **主键**: (`portal_student_id`)
 
@@ -1129,45 +1130,45 @@
 
 ### `dtlms_portal_students`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_portal_students_id_seq'::regclass) |
-| `full_name` | character varying(128) | NO |  |
-| `phone_number` | character varying(32) | NO |  |
-| `email` | character varying(128) | NO |  |
-| `id_number` | character varying(64) | NO |  |
-| `graduation_school` | character varying(255) | YES |  |
-| `highest_degree` | character varying(64) | YES |  |
-| `intended_field` | character varying(128) | YES |  |
-| `political_status` | character varying(64) | YES |  |
-| `selected_plan_id` | bigint(64,0) | YES |  |
-| `selected_team_name` | character varying(128) | YES |  |
-| `selected_advisor_name` | character varying(128) | YES |  |
-| `self_evaluation` | text | YES |  |
-| `submitted_at` | timestamp with time zone | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `password_hash` | character varying(255) | YES |  |
-| `gender` | character varying(16) | YES |  |
-| `birth_date` | character varying(32) | YES |  |
-| `ethnic_group` | character varying(64) | YES |  |
-| `native_place` | character varying(128) | YES |  |
-| `marital_status` | character varying(32) | YES |  |
-| `religious_belief` | character varying(128) | YES |  |
-| `id_type` | character varying(64) | YES |  |
-| `mailing_address` | text | YES |  |
-| `english_level` | character varying(128) | YES |  |
-| `family_info` | text | YES |  |
-| `education_experience` | text | YES |  |
-| `practice_experience` | text | YES |  |
-| `personal_profile` | text | YES |  |
-| `recommendation_notes` | text | YES |  |
-| `personal_statement_text` | text | YES |  |
-| `signed_agreement` | boolean | NO | false |
-| `account_status` | character varying(32) | NO | '启用'::character varying |
-| `application_draft` | jsonb | YES |  |
-| `selected_team_id` | bigint(64,0) | YES |  |
-| `selected_advisor_user_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_portal_students_id_seq'::regclass) |  |
+| `full_name` | character varying(128) | NO |  |  |
+| `phone_number` | character varying(32) | NO |  |  |
+| `email` | character varying(128) | NO |  |  |
+| `id_number` | character varying(64) | NO |  |  |
+| `graduation_school` | character varying(255) | YES |  |  |
+| `highest_degree` | character varying(64) | YES |  |  |
+| `intended_field` | character varying(128) | YES |  |  |
+| `political_status` | character varying(64) | YES |  |  |
+| `selected_plan_id` | bigint | YES |  |  |
+| `selected_team_name` | character varying(128) | YES |  |  |
+| `selected_advisor_name` | character varying(128) | YES |  |  |
+| `self_evaluation` | text | YES |  |  |
+| `submitted_at` | timestamp(6) with time zone | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `password_hash` | character varying(255) | YES |  |  |
+| `gender` | character varying(16) | YES |  |  |
+| `birth_date` | character varying(32) | YES |  |  |
+| `ethnic_group` | character varying(64) | YES |  |  |
+| `native_place` | character varying(128) | YES |  |  |
+| `marital_status` | character varying(32) | YES |  |  |
+| `religious_belief` | character varying(128) | YES |  |  |
+| `id_type` | character varying(64) | YES |  |  |
+| `mailing_address` | text | YES |  |  |
+| `english_level` | character varying(128) | YES |  |  |
+| `family_info` | text | YES |  |  |
+| `education_experience` | text | YES |  |  |
+| `practice_experience` | text | YES |  |  |
+| `personal_profile` | text | YES |  |  |
+| `recommendation_notes` | text | YES |  |  |
+| `personal_statement_text` | text | YES |  |  |
+| `signed_agreement` | boolean | NO | false |  |
+| `account_status` | character varying(32) | NO | '启用'::character varying |  |
+| `application_draft` | jsonb | YES |  |  |
+| `selected_team_id` | bigint | YES |  |  |
+| `selected_advisor_user_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1193,20 +1194,20 @@
 
 ### `dtlms_qualification_review_logs`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_qualification_review_logs_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `reviewer_user_id` | bigint(64,0) | YES |  |
-| `reviewer_username` | character varying(64) | NO |  |
-| `reviewer_name` | character varying(128) | YES |  |
-| `reviewer_role_code` | character varying(64) | YES |  |
-| `action` | character varying(32) | NO |  |
-| `action_label` | character varying(64) | NO |  |
-| `review_comment` | text | YES |  |
-| `reviewed_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_qualification_review_logs_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `reviewer_user_id` | bigint | YES |  |  |
+| `reviewer_username` | character varying(64) | NO |  |  |
+| `reviewer_name` | character varying(128) | YES |  |  |
+| `reviewer_role_code` | character varying(64) | YES |  |  |
+| `action` | character varying(32) | NO |  |  |
+| `action_label` | character varying(64) | NO |  |  |
+| `review_comment` | text | YES |  |  |
+| `reviewed_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1225,15 +1226,15 @@
 
 ### `dtlms_qualification_reviews`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_qualification_reviews_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `reviewer_username` | character varying(64) | NO |  |
-| `review_status` | character varying(32) | NO | 'pending'::character varying |
-| `review_comment` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_qualification_reviews_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `reviewer_username` | character varying(64) | NO |  |  |
+| `review_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `review_comment` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1250,87 +1251,87 @@
 
 ### `dtlms_recruitment_applications`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_recruitment_applications_id_seq'::regclass) |
-| `plan_id` | bigint(64,0) | NO |  |
-| `student_name` | character varying(128) | NO |  |
-| `candidate_no` | character varying(64) | NO |  |
-| `gender` | character varying(16) | NO |  |
-| `graduation_school` | character varying(255) | YES |  |
-| `highest_degree` | character varying(64) | YES |  |
-| `intended_field_id` | bigint(64,0) | YES |  |
-| `application_status` | character varying(32) | NO | 'submitted'::character varying |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `business_key` | character varying(64) | NO |  |
-| `review_round` | character varying(64) | YES |  |
-| `first_choice` | character varying(255) | YES |  |
-| `second_choice` | character varying(255) | YES |  |
-| `political_status` | character varying(64) | YES |  |
-| `marital_status` | character varying(32) | YES |  |
-| `religious_belief` | character varying(128) | YES |  |
-| `native_place` | character varying(128) | YES |  |
-| `phone_number` | character varying(64) | YES |  |
-| `email` | character varying(255) | YES |  |
-| `mailing_address` | text | YES |  |
-| `id_type` | character varying(64) | YES |  |
-| `id_number` | character varying(128) | YES |  |
-| `undergraduate_school` | character varying(255) | YES |  |
-| `accept_adjustment` | character varying(16) | YES |  |
-| `undergraduate_average_score` | character varying(64) | YES |  |
-| `undergraduate_gpa` | character varying(64) | YES |  |
-| `undergraduate_rank` | character varying(64) | YES |  |
-| `undergraduate_major` | character varying(255) | YES |  |
-| `graduate_average_score` | character varying(64) | YES |  |
-| `graduate_gpa` | character varying(64) | YES |  |
-| `graduate_rank` | character varying(64) | YES |  |
-| `graduate_major` | character varying(255) | YES |  |
-| `intended_advisor_name` | character varying(128) | YES |  |
-| `discovery_channel` | text | YES |  |
-| `graduate_school` | character varying(255) | YES |  |
-| `overseas_university_name` | character varying(255) | YES |  |
-| `overseas_master_university_name` | character varying(255) | YES |  |
-| `self_evaluation` | text | YES |  |
-| `applied_at` | timestamp with time zone | YES |  |
-| `research_problem` | text | YES |  |
-| `research_status_analysis` | text | YES |  |
-| `research_impact` | text | YES |  |
-| `ai_society_impact` | text | YES |  |
-| `dissenting_view` | text | YES |  |
-| `family_info` | text | YES |  |
-| `education_experience` | text | YES |  |
-| `practice_experience` | text | YES |  |
-| `personal_statement_text` | text | YES |  |
-| `student_activity_experience` | text | YES |  |
-| `personal_statement_attachment` | text | YES |  |
-| `material_list_attachment` | text | YES |  |
-| `supplementary_profile` | text | YES |  |
-| `portal_student_id` | bigint(64,0) | YES |  |
-| `source_channel` | character varying(64) | YES |  |
-| `source_channel_other` | character varying(255) | YES |  |
-| `first_choice_team_id` | bigint(64,0) | YES |  |
-| `second_choice_team_id` | bigint(64,0) | YES |  |
-| `intended_advisor_user_id` | bigint(64,0) | YES |  |
-| `advisor_screening_status` | character varying(32) | YES | 'pending'::character varying |
-| `advisor_screening_round` | character varying(32) | YES | 'first_choice'::character varying |
-| `first_choice_screening_batch_id` | bigint(64,0) | YES |  |
-| `second_choice_screening_batch_id` | bigint(64,0) | YES |  |
-| `first_choice_screening_submitted_at` | timestamp with time zone | YES |  |
-| `second_choice_screening_submitted_at` | timestamp with time zone | YES |  |
-| `first_choice_screening_score` | numeric(5,2) | YES |  |
-| `second_choice_screening_score` | numeric(5,2) | YES |  |
-| `initial_screening_status` | character varying(32) | YES | 'pending'::character varying |
-| `initial_screening_result` | character varying(32) | YES |  |
-| `initial_screening_confirmed_at` | timestamp with time zone | YES |  |
-| `initial_screening_confirmer_username` | character varying(64) | YES |  |
-| `initial_screening_confirmer_name` | character varying(128) | YES |  |
-| `initial_screening_notification_status` | character varying(32) | YES | 'pending'::character varying |
-| `initial_screening_notification_sent_at` | timestamp with time zone | YES |  |
-| `next_stage_name` | character varying(64) | YES |  |
-| `first_choice_id` | bigint(64,0) | YES |  |
-| `second_choice_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_recruitment_applications_id_seq'::regclass) |  |
+| `plan_id` | bigint | NO |  |  |
+| `student_name` | character varying(128) | NO |  |  |
+| `candidate_no` | character varying(64) | NO |  |  |
+| `gender` | character varying(16) | NO |  |  |
+| `graduation_school` | character varying(255) | YES |  |  |
+| `highest_degree` | character varying(64) | YES |  |  |
+| `intended_field_id` | bigint | YES |  |  |
+| `application_status` | character varying(32) | NO | 'submitted'::character varying |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `business_key` | character varying(64) | NO |  |  |
+| `review_round` | character varying(64) | YES |  |  |
+| `first_choice` | character varying(255) | YES |  |  |
+| `second_choice` | character varying(255) | YES |  |  |
+| `political_status` | character varying(64) | YES |  |  |
+| `marital_status` | character varying(32) | YES |  |  |
+| `religious_belief` | character varying(128) | YES |  |  |
+| `native_place` | character varying(128) | YES |  |  |
+| `phone_number` | character varying(64) | YES |  |  |
+| `email` | character varying(255) | YES |  |  |
+| `mailing_address` | text | YES |  |  |
+| `id_type` | character varying(64) | YES |  |  |
+| `id_number` | character varying(128) | YES |  |  |
+| `undergraduate_school` | character varying(255) | YES |  |  |
+| `accept_adjustment` | character varying(16) | YES |  |  |
+| `undergraduate_average_score` | character varying(64) | YES |  |  |
+| `undergraduate_gpa` | character varying(64) | YES |  |  |
+| `undergraduate_rank` | character varying(64) | YES |  |  |
+| `undergraduate_major` | character varying(255) | YES |  |  |
+| `graduate_average_score` | character varying(64) | YES |  |  |
+| `graduate_gpa` | character varying(64) | YES |  |  |
+| `graduate_rank` | character varying(64) | YES |  |  |
+| `graduate_major` | character varying(255) | YES |  |  |
+| `intended_advisor_name` | character varying(128) | YES |  |  |
+| `discovery_channel` | text | YES |  |  |
+| `graduate_school` | character varying(255) | YES |  |  |
+| `overseas_university_name` | character varying(255) | YES |  |  |
+| `overseas_master_university_name` | character varying(255) | YES |  |  |
+| `self_evaluation` | text | YES |  |  |
+| `applied_at` | timestamp(6) with time zone | YES |  |  |
+| `research_problem` | text | YES |  |  |
+| `research_status_analysis` | text | YES |  |  |
+| `research_impact` | text | YES |  |  |
+| `ai_society_impact` | text | YES |  |  |
+| `dissenting_view` | text | YES |  |  |
+| `family_info` | text | YES |  |  |
+| `education_experience` | text | YES |  |  |
+| `practice_experience` | text | YES |  |  |
+| `personal_statement_text` | text | YES |  |  |
+| `student_activity_experience` | text | YES |  |  |
+| `personal_statement_attachment` | text | YES |  |  |
+| `material_list_attachment` | text | YES |  |  |
+| `supplementary_profile` | text | YES |  |  |
+| `portal_student_id` | bigint | YES |  |  |
+| `source_channel` | character varying(64) | YES |  |  |
+| `source_channel_other` | character varying(255) | YES |  |  |
+| `first_choice_team_id` | bigint | YES |  |  |
+| `second_choice_team_id` | bigint | YES |  |  |
+| `intended_advisor_user_id` | bigint | YES |  |  |
+| `advisor_screening_status` | character varying(32) | YES | 'pending'::character varying |  |
+| `advisor_screening_round` | character varying(32) | YES | 'first_choice'::character varying |  |
+| `first_choice_screening_batch_id` | bigint | YES |  |  |
+| `second_choice_screening_batch_id` | bigint | YES |  |  |
+| `first_choice_screening_submitted_at` | timestamp with time zone | YES |  |  |
+| `second_choice_screening_submitted_at` | timestamp with time zone | YES |  |  |
+| `first_choice_screening_score` | numeric(5,2) | YES |  |  |
+| `second_choice_screening_score` | numeric(5,2) | YES |  |  |
+| `initial_screening_status` | character varying(32) | YES | 'pending'::character varying |  |
+| `initial_screening_result` | character varying(32) | YES |  |  |
+| `initial_screening_confirmed_at` | timestamp with time zone | YES |  |  |
+| `initial_screening_confirmer_username` | character varying(64) | YES |  |  |
+| `initial_screening_confirmer_name` | character varying(128) | YES |  |  |
+| `initial_screening_notification_status` | character varying(32) | YES | 'pending'::character varying |  |
+| `initial_screening_notification_sent_at` | timestamp with time zone | YES |  |  |
+| `next_stage_name` | character varying(64) | YES |  |  |
+| `first_choice_id` | bigint | YES |  |  |
+| `second_choice_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1364,22 +1365,22 @@
 
 ### `dtlms_recruitment_plans`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_recruitment_plans_id_seq'::regclass) |
-| `plan_code` | character varying(64) | NO |  |
-| `plan_name` | character varying(255) | NO |  |
-| `academic_year` | character varying(16) | NO |  |
-| `semester` | character varying(16) | NO |  |
-| `start_date` | timestamp with time zone | NO |  |
-| `end_date` | timestamp with time zone | NO |  |
-| `target_quota` | integer(32,0) | NO | 0 |
-| `plan_status` | character varying(32) | NO | 'draft'::character varying |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `brochure_image_url` | character varying(255) | YES |  |
-| `plan_description` | text | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_recruitment_plans_id_seq'::regclass) |  |
+| `plan_code` | character varying(64) | NO |  |  |
+| `plan_name` | character varying(255) | NO |  |  |
+| `academic_year` | character varying(16) | NO |  |  |
+| `semester` | character varying(16) | NO |  |  |
+| `start_date` | timestamp(6) with time zone | NO |  |  |
+| `end_date` | timestamp(6) with time zone | NO |  |  |
+| `target_quota` | integer | NO | 0 |  |
+| `plan_status` | character varying(32) | NO | 'draft'::character varying |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `brochure_image_url` | character varying(255) | YES |  |  |
+| `plan_description` | text | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1398,15 +1399,15 @@
 
 ### `dtlms_research_fields`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_research_fields_id_seq'::regclass) |
-| `field_code` | character varying(64) | NO |  |
-| `field_name` | character varying(128) | NO |  |
-| `description` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_research_fields_id_seq'::regclass) |  |
+| `field_code` | character varying(64) | NO |  |  |
+| `field_name` | character varying(128) | NO |  |  |
+| `description` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1424,16 +1425,16 @@
 
 ### `dtlms_research_projects`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_research_projects_id_seq'::regclass) |
-| `project_code` | character varying(64) | NO |  |
-| `project_name` | character varying(255) | NO |  |
-| `principal_advisor_id` | bigint(64,0) | YES |  |
-| `funding_amount` | numeric(12,2) | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_research_projects_id_seq'::regclass) |  |
+| `project_code` | character varying(64) | NO |  |  |
+| `project_name` | character varying(255) | NO |  |  |
+| `principal_advisor_id` | bigint | YES |  |  |
+| `funding_amount` | numeric(12,2) | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1452,15 +1453,15 @@
 
 ### `dtlms_reviewer_assignments`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_reviewer_assignments_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `reviewer_username` | character varying(64) | NO |  |
-| `reviewer_role` | character varying(32) | NO |  |
-| `assignment_status` | character varying(32) | NO | 'assigned'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_reviewer_assignments_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `reviewer_username` | character varying(64) | NO |  |  |
+| `reviewer_role` | character varying(32) | NO |  |  |
+| `assignment_status` | character varying(32) | NO | 'assigned'::character varying |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1477,13 +1478,13 @@
 
 ### `dtlms_role_permissions`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_role_permissions_id_seq'::regclass) |
-| `role_id` | bigint(64,0) | NO |  |
-| `permission_id` | bigint(64,0) | NO |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_role_permissions_id_seq'::regclass) |  |
+| `role_id` | bigint | NO |  |  |
+| `permission_id` | bigint | NO |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1503,16 +1504,16 @@
 
 ### `dtlms_roles`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_roles_id_seq'::regclass) |
-| `role_code` | character varying(64) | NO |  |
-| `role_name` | character varying(128) | NO |  |
-| `description` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `scope_name` | character varying(128) | NO | '系统管理'::character varying |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_roles_id_seq'::regclass) |  |
+| `role_code` | character varying(64) | NO |  |  |
+| `role_name` | character varying(128) | NO |  |  |
+| `description` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `scope_name` | character varying(128) | NO | '系统管理'::character varying |  |
 
 **主键**: (`id`)
 
@@ -1530,10 +1531,10 @@
 
 ### `dtlms_schema_migrations`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `file_name` | character varying(255) | NO |  |
-| `applied_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `file_name` | character varying(255) | NO |  |  |
+| `applied_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`file_name`)
 
@@ -1549,22 +1550,22 @@
 
 ### `dtlms_scientific_reports`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_scientific_reports_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `training_plan_id` | bigint(64,0) | NO |  |
-| `period_label` | character varying(32) | NO |  |
-| `report_status` | character varying(32) | NO | 'pending'::character varying |
-| `summary` | text | NO |  |
-| `attachment_url` | character varying(255) | YES |  |
-| `reviewer_advisor_id` | bigint(64,0) | YES |  |
-| `review_score` | numeric(5,2) | YES |  |
-| `review_comment` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `business_key` | character varying(64) | NO |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_scientific_reports_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `training_plan_id` | bigint | NO |  |  |
+| `period_label` | character varying(32) | NO |  |  |
+| `report_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `summary` | text | NO |  |  |
+| `attachment_url` | character varying(255) | YES |  |  |
+| `reviewer_advisor_id` | bigint | YES |  |  |
+| `review_score` | numeric(5,2) | YES |  |  |
+| `review_comment` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `business_key` | character varying(64) | NO |  |  |
 
 **主键**: (`id`)
 
@@ -1586,17 +1587,17 @@
 
 ### `dtlms_student_advisor_history`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_student_advisor_history_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `advisor_id` | bigint(64,0) | NO |  |
-| `relation_type` | character varying(32) | NO | 'primary'::character varying |
-| `start_date` | date | NO |  |
-| `end_date` | date | YES |  |
-| `change_reason` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_student_advisor_history_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `advisor_id` | bigint | NO |  |  |
+| `relation_type` | character varying(32) | NO | 'primary'::character varying |  |
+| `start_date` | date | NO |  |  |
+| `end_date` | date | YES |  |  |
+| `change_reason` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1614,16 +1615,16 @@
 
 ### `dtlms_student_team_history`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_student_team_history_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `team_id` | bigint(64,0) | NO |  |
-| `start_date` | date | NO |  |
-| `end_date` | date | YES |  |
-| `change_reason` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_student_team_history_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `team_id` | bigint | NO |  |  |
+| `start_date` | date | NO |  |  |
+| `end_date` | date | YES |  |  |
+| `change_reason` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1642,25 +1643,25 @@
 
 ### `dtlms_students`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_students_id_seq'::regclass) |
-| `student_no` | character varying(32) | NO |  |
-| `full_name` | character varying(128) | NO |  |
-| `gender` | character varying(16) | NO |  |
-| `political_status` | character varying(32) | YES |  |
-| `phone_number` | character varying(32) | YES |  |
-| `identity_no` | character varying(64) | YES |  |
-| `enrollment_year` | integer(32,0) | NO |  |
-| `degree_type` | character varying(32) | NO |  |
-| `team_name` | character varying(128) | YES |  |
-| `current_status` | character varying(32) | NO | 'enrolled'::character varying |
-| `primary_advisor_id` | bigint(64,0) | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `team_id` | bigint(64,0) | YES |  |
-| `portal_student_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_students_id_seq'::regclass) |  |
+| `student_no` | character varying(32) | NO |  |  |
+| `full_name` | character varying(128) | NO |  |  |
+| `gender` | character varying(16) | NO |  |  |
+| `political_status` | character varying(32) | YES |  |  |
+| `phone_number` | character varying(32) | YES |  |  |
+| `identity_no` | character varying(64) | YES |  |  |
+| `enrollment_year` | integer | NO |  |  |
+| `degree_type` | character varying(32) | NO |  |  |
+| `team_name` | character varying(128) | YES |  |  |
+| `current_status` | character varying(32) | NO | 'enrolled'::character varying |  |
+| `primary_advisor_id` | bigint | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `team_id` | bigint | YES |  |  |
+| `portal_student_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1684,14 +1685,14 @@
 
 ### `dtlms_system_configs`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_system_configs_id_seq'::regclass) |
-| `config_key` | character varying(128) | NO |  |
-| `config_value` | text | NO |  |
-| `description` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_system_configs_id_seq'::regclass) |  |
+| `config_key` | character varying(128) | NO |  |  |
+| `config_value` | text | NO |  |  |
+| `description` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1709,14 +1710,14 @@
 
 ### `dtlms_team_advisors`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_team_advisors_id_seq'::regclass) |
-| `team_id` | bigint(64,0) | NO |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `advisor_user_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_team_advisors_id_seq'::regclass) |  |
+| `team_id` | bigint | NO |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `advisor_user_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1735,13 +1736,13 @@
 
 ### `dtlms_team_leaders`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO |  |
-| `team_id` | bigint(64,0) | NO |  |
-| `user_id` | bigint(64,0) | NO |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO |  |  |
+| `team_id` | bigint | NO |  |  |
+| `user_id` | bigint | NO |  |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1763,21 +1764,21 @@
 
 ### `dtlms_teams`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_teams_id_seq'::regclass) |
-| `team_code` | character varying(32) | NO |  |
-| `team_name` | character varying(128) | NO |  |
-| `department_name` | character varying(128) | NO |  |
-| `discipline_name` | character varying(128) | YES |  |
-| `research_directions` | text | YES |  |
-| `team_status` | character varying(32) | NO | 'active'::character varying |
-| `established_on` | date | YES |  |
-| `description` | text | YES |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `lead_user_id` | bigint(64,0) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_teams_id_seq'::regclass) |  |
+| `team_code` | character varying(32) | NO |  |  |
+| `team_name` | character varying(128) | NO |  |  |
+| `department_name` | character varying(128) | NO |  |  |
+| `discipline_name` | character varying(128) | YES |  |  |
+| `research_directions` | text | YES |  |  |
+| `team_status` | character varying(32) | NO | 'active'::character varying |  |
+| `established_on` | date | YES |  |  |
+| `description` | text | YES |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `lead_user_id` | bigint | YES |  |  |
 
 **主键**: (`id`)
 
@@ -1800,21 +1801,21 @@
 
 ### `dtlms_theses`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_theses_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `advisor_id` | bigint(64,0) | NO |  |
-| `title` | character varying(255) | NO |  |
-| `plagiarism_rate` | numeric(5,2) | YES |  |
-| `thesis_status` | character varying(32) | NO | 'draft'::character varying |
-| `blind_review_status` | character varying(32) | NO | 'pending'::character varying |
-| `defense_date` | date | YES |  |
-| `degree_granted` | character varying(32) | NO | 'pending'::character varying |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `business_key` | character varying(64) | NO |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_theses_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `advisor_id` | bigint | NO |  |  |
+| `title` | character varying(255) | NO |  |  |
+| `plagiarism_rate` | numeric(5,2) | YES |  |  |
+| `thesis_status` | character varying(32) | NO | 'draft'::character varying |  |
+| `blind_review_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `defense_date` | date | YES |  |  |
+| `degree_granted` | character varying(32) | NO | 'pending'::character varying |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `business_key` | character varying(64) | NO |  |  |
 
 **主键**: (`id`)
 
@@ -1835,16 +1836,16 @@
 
 ### `dtlms_thesis_reviews`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_thesis_reviews_id_seq'::regclass) |
-| `thesis_id` | bigint(64,0) | NO |  |
-| `expert_name` | character varying(128) | NO |  |
-| `review_score` | numeric(5,2) | YES |  |
-| `review_status` | character varying(32) | NO | 'pending'::character varying |
-| `review_comment` | text | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_thesis_reviews_id_seq'::regclass) |  |
+| `thesis_id` | bigint | NO |  |  |
+| `expert_name` | character varying(128) | NO |  |  |
+| `review_score` | numeric(5,2) | YES |  |  |
+| `review_status` | character varying(32) | NO | 'pending'::character varying |  |
+| `review_comment` | text | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1861,15 +1862,15 @@
 
 ### `dtlms_training_plan_versions`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_training_plan_versions_id_seq'::regclass) |
-| `training_plan_id` | bigint(64,0) | NO |  |
-| `version_no` | character varying(16) | NO |  |
-| `change_reason` | text | YES |  |
-| `plan_snapshot` | text | NO |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_training_plan_versions_id_seq'::regclass) |  |
+| `training_plan_id` | bigint | NO |  |  |
+| `version_no` | character varying(16) | NO |  |  |
+| `change_reason` | text | YES |  |  |
+| `plan_snapshot` | text | NO |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1886,19 +1887,19 @@
 
 ### `dtlms_training_plans`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_training_plans_id_seq'::regclass) |
-| `student_id` | bigint(64,0) | NO |  |
-| `advisor_id` | bigint(64,0) | NO |  |
-| `version_no` | character varying(16) | NO | 'v1.0'::character varying |
-| `report_cycle` | character varying(32) | NO |  |
-| `plan_status` | character varying(32) | NO | 'draft'::character varying |
-| `scientific_goal` | text | NO |  |
-| `assessment_rule` | text | NO |  |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_training_plans_id_seq'::regclass) |  |
+| `student_id` | bigint | NO |  |  |
+| `advisor_id` | bigint | NO |  |  |
+| `version_no` | character varying(16) | NO | 'v1.0'::character varying |  |
+| `report_cycle` | character varying(32) | NO |  |  |
+| `plan_status` | character varying(32) | NO | 'draft'::character varying |  |
+| `scientific_goal` | text | NO |  |  |
+| `assessment_rule` | text | NO |  |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1919,18 +1920,18 @@
 
 ### `dtlms_user_profiles`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `username` | character varying(64) | NO |  |
-| `full_name` | character varying(128) | NO |  |
-| `role_name` | character varying(128) | NO |  |
-| `department_name` | character varying(128) | NO |  |
-| `phone_number` | character varying(32) | YES |  |
-| `email` | character varying(128) | YES |  |
-| `theme_color` | character varying(32) | NO | '#0f4cbd'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `introduction` | text | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `username` | character varying(64) | NO |  |  |
+| `full_name` | character varying(128) | NO |  |  |
+| `role_name` | character varying(128) | NO |  |  |
+| `department_name` | character varying(128) | NO |  |  |
+| `phone_number` | character varying(32) | YES |  |  |
+| `email` | character varying(128) | YES |  |  |
+| `theme_color` | character varying(32) | NO | '#0f4cbd'::character varying |  |
+| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |  |
+| `introduction` | text | YES |  |  |
 
 **主键**: (`username`)
 
@@ -1947,14 +1948,14 @@
 
 ### `dtlms_user_roles`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_user_roles_id_seq'::regclass) |
-| `user_id` | bigint(64,0) | NO |  |
-| `role_id` | bigint(64,0) | NO |  |
-| `grant_source` | character varying(64) | NO | 'bootstrap'::character varying |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_user_roles_id_seq'::regclass) |  |
+| `user_id` | bigint | NO |  |  |
+| `role_id` | bigint | NO |  |  |
+| `grant_source` | character varying(64) | NO | 'bootstrap'::character varying |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 
@@ -1974,20 +1975,20 @@
 
 ### `dtlms_users`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_users_id_seq'::regclass) |
-| `username` | character varying(64) | NO |  |
-| `full_name` | character varying(128) | NO |  |
-| `email` | character varying(128) | YES |  |
-| `password_hash` | character varying(255) | NO |  |
-| `is_active` | boolean | NO | true |
-| `is_deleted` | boolean | NO | false |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `department_name` | character varying(128) | NO | ''::character varying |
-| `phone_number` | character varying(32) | YES |  |
-| `last_login_at` | timestamp with time zone | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_users_id_seq'::regclass) |  |
+| `username` | character varying(64) | NO |  |  |
+| `full_name` | character varying(128) | NO |  |  |
+| `email` | character varying(128) | YES |  |  |
+| `password_hash` | character varying(255) | NO |  |  |
+| `is_active` | boolean | NO | true |  |
+| `is_deleted` | boolean | NO | false |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `department_name` | character varying(128) | NO | ''::character varying |  |
+| `phone_number` | character varying(32) | YES |  |  |
+| `last_login_at` | timestamp with time zone | YES |  |  |
 
 **主键**: (`id`)
 
@@ -2005,23 +2006,23 @@
 
 ### `dtlms_wf_de_model`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `name_` | character varying(255) | NO |  |
-| `key_` | character varying(128) | NO |  |
-| `category_` | character varying(128) | YES |  |
-| `version_` | integer(32,0) | NO | 1 |
-| `model_type_` | integer(32,0) | NO | 0 |
-| `description_` | text | YES |  |
-| `meta_info_` | jsonb | YES |  |
-| `created_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `last_updated_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `tenant_id_` | character varying(64) | YES |  |
-| `deployment_id_` | character varying(64) | YES |  |
-| `resource_name_` | character varying(255) | YES |  |
-| `editor_source_value_` | text | YES |  |
-| `editor_source_extra_value_` | jsonb | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `name_` | character varying(255) | NO |  |  |
+| `key_` | character varying(128) | NO |  |  |
+| `category_` | character varying(128) | YES |  |  |
+| `version_` | integer | NO | 1 |  |
+| `model_type_` | integer | NO | 0 |  |
+| `description_` | text | YES |  |  |
+| `meta_info_` | jsonb | YES |  |  |
+| `created_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `last_updated_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `tenant_id_` | character varying(64) | YES |  |  |
+| `deployment_id_` | character varying(64) | YES |  |  |
+| `resource_name_` | character varying(255) | YES |  |  |
+| `editor_source_value_` | text | YES |  |  |
+| `editor_source_extra_value_` | jsonb | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2037,20 +2038,20 @@
 
 ### `dtlms_wf_hi_actinst`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `proc_def_id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `exec_id_` | character varying(64) | YES |  |
-| `act_id_` | character varying(128) | NO |  |
-| `act_name_` | character varying(255) | YES |  |
-| `act_type_` | character varying(64) | NO |  |
-| `assignee_` | character varying(64) | YES |  |
-| `start_time_` | timestamp with time zone | NO |  |
-| `end_time_` | timestamp with time zone | YES |  |
-| `duration_ms_` | bigint(64,0) | YES |  |
-| `business_key_` | character varying(64) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `proc_def_id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `exec_id_` | character varying(64) | YES |  |  |
+| `act_id_` | character varying(128) | NO |  |  |
+| `act_name_` | character varying(255) | YES |  |  |
+| `act_type_` | character varying(64) | NO |  |  |
+| `assignee_` | character varying(64) | YES |  |  |
+| `start_time_` | timestamp(6) with time zone | NO |  |  |
+| `end_time_` | timestamp(6) with time zone | YES |  |  |
+| `duration_ms_` | bigint | YES |  |  |
+| `business_key_` | character varying(64) | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2068,20 +2069,20 @@
 
 ### `dtlms_wf_hi_procinst`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `business_key_` | character varying(64) | YES |  |
-| `proc_def_id_` | character varying(64) | NO |  |
-| `start_time_` | timestamp with time zone | NO |  |
-| `end_time_` | timestamp with time zone | YES |  |
-| `duration_ms_` | bigint(64,0) | YES |  |
-| `start_user_id_` | character varying(64) | YES |  |
-| `end_act_id_` | character varying(128) | YES |  |
-| `delete_reason_` | character varying(255) | YES |  |
-| `start_act_id_` | character varying(128) | YES |  |
-| `state_` | character varying(32) | NO | 'ACTIVE'::character varying |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `business_key_` | character varying(64) | YES |  |  |
+| `proc_def_id_` | character varying(64) | NO |  |  |
+| `start_time_` | timestamp(6) with time zone | NO |  |  |
+| `end_time_` | timestamp(6) with time zone | YES |  |  |
+| `duration_ms_` | bigint | YES |  |  |
+| `start_user_id_` | character varying(64) | YES |  |  |
+| `end_act_id_` | character varying(128) | YES |  |  |
+| `delete_reason_` | character varying(255) | YES |  |  |
+| `start_act_id_` | character varying(128) | YES |  |  |
+| `state_` | character varying(32) | NO | 'ACTIVE'::character varying |  |
 
 **主键**: (`id_`)
 
@@ -2101,25 +2102,25 @@
 
 ### `dtlms_wf_hi_taskinst`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `task_def_key_` | character varying(128) | YES |  |
-| `proc_def_id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `exec_id_` | character varying(64) | YES |  |
-| `name_` | character varying(255) | NO |  |
-| `business_key_` | character varying(64) | YES |  |
-| `assignee_` | character varying(64) | YES |  |
-| `owner_` | character varying(64) | YES |  |
-| `start_time_` | timestamp with time zone | NO |  |
-| `claim_time_` | timestamp with time zone | YES |  |
-| `end_time_` | timestamp with time zone | YES |  |
-| `duration_ms_` | bigint(64,0) | YES |  |
-| `due_date_` | timestamp with time zone | YES |  |
-| `delete_reason_` | character varying(255) | YES |  |
-| `priority_` | integer(32,0) | NO | 50 |
-| `category_` | character varying(128) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `task_def_key_` | character varying(128) | YES |  |  |
+| `proc_def_id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `exec_id_` | character varying(64) | YES |  |  |
+| `name_` | character varying(255) | NO |  |  |
+| `business_key_` | character varying(64) | YES |  |  |
+| `assignee_` | character varying(64) | YES |  |  |
+| `owner_` | character varying(64) | YES |  |  |
+| `start_time_` | timestamp(6) with time zone | NO |  |  |
+| `claim_time_` | timestamp(6) with time zone | YES |  |  |
+| `end_time_` | timestamp(6) with time zone | YES |  |  |
+| `duration_ms_` | bigint | YES |  |  |
+| `due_date_` | timestamp(6) with time zone | YES |  |  |
+| `delete_reason_` | character varying(255) | YES |  |  |
+| `priority_` | integer | NO | 50 |  |
+| `category_` | character varying(128) | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2137,19 +2138,19 @@
 
 ### `dtlms_wf_hi_varinst`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(128) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `exec_id_` | character varying(64) | YES |  |
-| `task_id_` | character varying(64) | YES |  |
-| `name_` | character varying(128) | NO |  |
-| `var_type_` | character varying(32) | NO |  |
-| `text_value_` | text | YES |  |
-| `number_value_` | bigint(64,0) | YES |  |
-| `json_value_` | jsonb | YES |  |
-| `create_time_` | timestamp with time zone | NO |  |
-| `last_updated_time_` | timestamp with time zone | NO |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(128) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `exec_id_` | character varying(64) | YES |  |  |
+| `task_id_` | character varying(64) | YES |  |  |
+| `name_` | character varying(128) | NO |  |  |
+| `var_type_` | character varying(32) | NO |  |  |
+| `text_value_` | text | YES |  |  |
+| `number_value_` | bigint | YES |  |  |
+| `json_value_` | jsonb | YES |  |  |
+| `create_time_` | timestamp(6) with time zone | NO |  |  |
+| `last_updated_time_` | timestamp(6) with time zone | NO |  |  |
 
 **主键**: (`id_`)
 
@@ -2166,14 +2167,14 @@
 
 ### `dtlms_wf_re_deployment`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `name_` | character varying(255) | NO |  |
-| `category_` | character varying(128) | YES |  |
-| `key_` | character varying(128) | YES |  |
-| `deploy_time_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `tenant_id_` | character varying(64) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `name_` | character varying(255) | NO |  |  |
+| `category_` | character varying(128) | YES |  |  |
+| `key_` | character varying(128) | YES |  |  |
+| `deploy_time_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `tenant_id_` | character varying(64) | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2189,19 +2190,19 @@
 
 ### `dtlms_wf_re_procdef`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `key_` | character varying(128) | NO |  |
-| `version_` | integer(32,0) | NO | 1 |
-| `deployment_id_` | character varying(64) | YES |  |
-| `resource_name_` | character varying(255) | YES |  |
-| `diagram_resource_name_` | character varying(255) | YES |  |
-| `name_` | character varying(255) | NO |  |
-| `category_` | character varying(128) | YES |  |
-| `description_` | text | YES |  |
-| `suspension_state_` | integer(32,0) | NO | 1 |
-| `tenant_id_` | character varying(64) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `key_` | character varying(128) | NO |  |  |
+| `version_` | integer | NO | 1 |  |
+| `deployment_id_` | character varying(64) | YES |  |  |
+| `resource_name_` | character varying(255) | YES |  |  |
+| `diagram_resource_name_` | character varying(255) | YES |  |  |
+| `name_` | character varying(255) | NO |  |  |
+| `category_` | character varying(128) | YES |  |  |
+| `description_` | text | YES |  |  |
+| `suspension_state_` | integer | NO | 1 |  |
+| `tenant_id_` | character varying(64) | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2219,21 +2220,21 @@
 
 ### `dtlms_wf_ru_execution`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `proc_def_id_` | character varying(64) | NO |  |
-| `business_key_` | character varying(64) | YES |  |
-| `parent_id_` | character varying(64) | YES |  |
-| `act_id_` | character varying(128) | YES |  |
-| `is_active_` | boolean | NO | true |
-| `is_concurrent_` | boolean | NO | false |
-| `is_scope_` | boolean | NO | true |
-| `start_time_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `start_user_id_` | character varying(64) | YES |  |
-| `super_exec_` | character varying(64) | YES |  |
-| `tenant_id_` | character varying(64) | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `proc_def_id_` | character varying(64) | NO |  |  |
+| `business_key_` | character varying(64) | YES |  |  |
+| `parent_id_` | character varying(64) | YES |  |  |
+| `act_id_` | character varying(128) | YES |  |  |
+| `is_active_` | boolean | NO | true |  |
+| `is_concurrent_` | boolean | NO | false |  |
+| `is_scope_` | boolean | NO | true |  |
+| `start_time_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `start_user_id_` | character varying(64) | YES |  |  |
+| `super_exec_` | character varying(64) | YES |  |  |
+| `tenant_id_` | character varying(64) | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2251,15 +2252,15 @@
 
 ### `dtlms_wf_ru_identitylink`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | bigint(64,0) | NO | nextval('dtlms_wf_ru_identitylink_id__seq'::regclass) |
-| `task_id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | YES |  |
-| `user_id_` | character varying(64) | YES |  |
-| `group_id_` | character varying(64) | YES |  |
-| `link_type_` | character varying(32) | NO |  |
-| `created_at_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | bigint | NO | nextval('dtlms_wf_ru_identitylink_id__seq'::regclass) |  |
+| `task_id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | YES |  |  |
+| `user_id_` | character varying(64) | YES |  |  |
+| `group_id_` | character varying(64) | YES |  |  |
+| `link_type_` | character varying(32) | NO |  |  |
+| `created_at_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id_`)
 
@@ -2275,25 +2276,25 @@
 
 ### `dtlms_wf_ru_task`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(64) | NO |  |
-| `exec_id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `proc_def_id_` | character varying(64) | NO |  |
-| `task_def_key_` | character varying(128) | YES |  |
-| `name_` | character varying(255) | NO |  |
-| `business_key_` | character varying(64) | YES |  |
-| `assignee_` | character varying(64) | YES |  |
-| `owner_` | character varying(64) | YES |  |
-| `create_time_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `due_date_` | timestamp with time zone | YES |  |
-| `claim_time_` | timestamp with time zone | YES |  |
-| `priority_` | integer(32,0) | NO | 50 |
-| `suspension_state_` | integer(32,0) | NO | 1 |
-| `tenant_id_` | character varying(64) | YES |  |
-| `form_key_` | character varying(255) | YES |  |
-| `description_` | text | YES |  |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(64) | NO |  |  |
+| `exec_id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `proc_def_id_` | character varying(64) | NO |  |  |
+| `task_def_key_` | character varying(128) | YES |  |  |
+| `name_` | character varying(255) | NO |  |  |
+| `business_key_` | character varying(64) | YES |  |  |
+| `assignee_` | character varying(64) | YES |  |  |
+| `owner_` | character varying(64) | YES |  |  |
+| `create_time_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `due_date_` | timestamp(6) with time zone | YES |  |  |
+| `claim_time_` | timestamp(6) with time zone | YES |  |  |
+| `priority_` | integer | NO | 50 |  |
+| `suspension_state_` | integer | NO | 1 |  |
+| `tenant_id_` | character varying(64) | YES |  |  |
+| `form_key_` | character varying(255) | YES |  |  |
+| `description_` | text | YES |  |  |
 
 **主键**: (`id_`)
 
@@ -2313,18 +2314,18 @@
 
 ### `dtlms_wf_ru_variable`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id_` | character varying(128) | NO |  |
-| `exec_id_` | character varying(64) | NO |  |
-| `proc_inst_id_` | character varying(64) | NO |  |
-| `task_id_` | character varying(64) | YES |  |
-| `name_` | character varying(128) | NO |  |
-| `var_type_` | character varying(32) | NO |  |
-| `text_value_` | text | YES |  |
-| `number_value_` | bigint(64,0) | YES |  |
-| `json_value_` | jsonb | YES |  |
-| `create_time_` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id_` | character varying(128) | NO |  |  |
+| `exec_id_` | character varying(64) | NO |  |  |
+| `proc_inst_id_` | character varying(64) | NO |  |  |
+| `task_id_` | character varying(64) | YES |  |  |
+| `name_` | character varying(128) | NO |  |  |
+| `var_type_` | character varying(32) | NO |  |  |
+| `text_value_` | text | YES |  |  |
+| `number_value_` | bigint | YES |  |  |
+| `json_value_` | jsonb | YES |  |  |
+| `create_time_` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id_`)
 
@@ -2341,15 +2342,15 @@
 
 ### `dtlms_written_exam_scores`
 
-| 列名 | 数据类型 | 可空 | 默认值 |
-|------|----------|------|--------|
-| `id` | bigint(64,0) | NO | nextval('dtlms_written_exam_scores_id_seq'::regclass) |
-| `application_id` | bigint(64,0) | NO |  |
-| `exam_date` | date | YES |  |
-| `exam_score` | numeric(5,2) | YES |  |
-| `import_batch_no` | character varying(64) | YES |  |
-| `created_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
-| `updated_at` | timestamp with time zone | NO | CURRENT_TIMESTAMP |
+| 列名 | 数据类型 | 可空 | 默认值 | 说明 |
+|------|----------|------|--------|------|
+| `id` | bigint | NO | nextval('dtlms_written_exam_scores_id_seq'::regclass) |  |
+| `application_id` | bigint | NO |  |  |
+| `exam_date` | date | YES |  |  |
+| `exam_score` | numeric(5,2) | YES |  |  |
+| `import_batch_no` | character varying(64) | YES |  |  |
+| `created_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
+| `updated_at` | timestamp(6) with time zone | NO | CURRENT_TIMESTAMP |  |
 
 **主键**: (`id`)
 

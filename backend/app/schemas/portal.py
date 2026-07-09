@@ -1360,6 +1360,9 @@ class PortalOfferRecord(BaseModel):
     candidate_no: str | None = None
     admission_offered_school: str | None = None
     accepted_notification_sent_at: str | None = None
+    # 2026-07-09: 当前 accepted 状态 (NULL / declined / pending / accepted_pending_send / accepted_sent /
+    #              accepted_confirmed / accepted_rejected). 供 /portal/home 登录后判断是否跳转 /portal/home/offer.
+    accepted: str | None = None
 
 
 class PortalAttachmentUploadResponse(BaseModel):

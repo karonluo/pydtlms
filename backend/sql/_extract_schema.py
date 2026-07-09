@@ -177,26 +177,32 @@ def main():
                     L.append("")
                 cur.execute(
                     """
-                    SELECT column_name, data_type, is_nullable,
-                           column_default, character_maximum_length, numeric_precision, numeric_scale
-                    FROM information_schema.columns
-                    WHERE table_schema = %s AND table_name = %s
-                    ORDER BY ordinal_position
+                    SELECT a.attname,
+                           pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+                           (NOT a.attnotnull) AS is_nullable,
+                           pg_get_expr(d.adbin, d.adrelid) AS column_default,
+                           col_description(a.attrelid, a.attnum) AS column_comment
+                    FROM pg_attribute a
+                    LEFT JOIN pg_attrdef d
+                      ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                    WHERE a.attrelid = (pg_catalog.quote_ident(%s) || '.' || pg_catalog.quote_ident(%s))::regclass
+                      AND a.attnum > 0
+                      AND NOT a.attisdropped
+                    ORDER BY a.attnum
                     """,
                     (schema, tname),
                 )
                 cols = cur.fetchall()
-                L.append("| 列名 | 数据类型 | 可空 | 默认值 |")
-                L.append("|------|----------|------|--------|")
-                for cname, ctype, nullable, cdef, maxlen, prec, scale in cols:
-                    dt = ctype
-                    if maxlen:
-                        dt = f"{ctype}({maxlen})"
-                    elif prec is not None and scale is not None:
-                        dt = f"{ctype}({prec},{scale})"
-                    elif prec is not None:
-                        dt = f"{ctype}({prec})"
-                    L.append(f"| `{cname}` | {dt} | {'YES' if nullable=='YES' else 'NO'} | {cdef or ''} |")
+                L.append("| 列名 | 数据类型 | 可空 | 默认值 | 说明 |")
+                L.append("|------|----------|------|--------|------|")
+                for cname, ctype, nullable, cdef, ccomment in cols:
+                    # pg_format_type 已带 (length)/(precision,scale), 无需二次加工
+                    dt = ctype or ''
+                    nullable_mark = 'YES' if nullable else 'NO'
+                    # Markdown 表格里换行 / 竖线 / 反引号要转义, 避免破表
+                    safe_comment = (ccomment or '').replace('|', '\\|').replace(chr(13), ' ').replace(chr(10), ' ')
+                    safe_default = (cdef or '').replace('|', '\\|').replace(chr(13), ' ').replace(chr(10), ' ')
+                    L.append(f"| `{cname}` | {dt} | {nullable_mark} | {safe_default} | {safe_comment} |")
                 L.append("")
                 cur.execute(
                     """

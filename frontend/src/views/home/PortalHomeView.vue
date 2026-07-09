@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { Message, Phone, Tickets, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
-import { changePortalStudentPassword, clearPortalToken, getPortalProfile, getPortalPublicConfig, listPortalNewsArticles, listPortalPlans, type PortalNewsArticleRecord, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
+import { changePortalStudentPassword, clearPortalToken, fetchPortalOffer, getPortalProfile, getPortalPublicConfig, listPortalNewsArticles, listPortalPlans, type PortalNewsArticleRecord, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
 type ProgressCard = {
@@ -365,8 +365,23 @@ function closePortalNewsDialog() {
   activePortalNews.value = null
 }
 
+// 2026-07-09: 学生登录门户后, 若 dtlms_plan_offer.accepted 处于 [accepted_sent, accepted_confirmed, accepted_rejected]
+//   任一状态, 自动跳到 /portal/home/offer 让学生看到录取通知书 / 已签状态.
+async function tryRedirectToOfferIfNeeded() {
+  try {
+    const resp = await fetchPortalOffer()
+    const accepted = (resp.data && resp.data.accepted) ? String(resp.data.accepted).trim() : ''
+    if (['accepted_sent', 'accepted_confirmed', 'accepted_rejected'].includes(accepted)) {
+      router.replace('/portal/home/offer')
+    }
+  } catch (e) {
+    // 没数据 / 接口失败 -> 不跳转, 留在 /portal/home
+  }
+}
+
 onMounted(() => {
   void loadPortalHome()
+  void tryRedirectToOfferIfNeeded()
 })
 </script>
 

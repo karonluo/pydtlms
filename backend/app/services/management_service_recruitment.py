@@ -1651,3 +1651,136 @@ class RuntimeManagementStoreRecruitmentMixin:
             pending_review_total=len([item for item in applications if item["application_status"] in {"报名已提交", "资格审核通过", "材料评分中", "面试待安排"}]),
             pre_admit_total=len([item for item in applications if item["application_status"] in {"预录取", "同意录取"}]),
         )
+
+
+    # 2026-07-09: 书院管理员在 /recruitment/camp-offers 选中学生 → 发送"录取通知书"邮件.
+    # 业务规则:
+    #   1) 每个 candidate 必须存在 dtlms_plan_offer 行 (同 plan_id);
+    #   2) 当前 accepted 必须在 [accepted_pending_send, accepted_confirmed, accepted_rejected] 中 (允许重发, 不允许 declined/pending 状态发);
+    #   3) 写库: accepted = 'accepted_sent' + accepted_notification_sent_at = now() + 清空 student_submitted_offer_at;
+    #   4) 发邮件: 实际收件人统一写死 lk139@126.com (测试期); 文案 = portal 卡片同源.
+    # 返回: dict { sent: int, failed: list[{candidate_no, reason}], skipped: list[{candidate_no, reason}] }
+    def send_offer_notifications(
+        self,
+        *,
+        candidate_nos: list[str],
+        principal: Any | None = None,
+    ) -> dict[str, Any]:
+        from datetime import datetime
+
+        from app.services.email_service import NotificationEmailService
+
+        normalized = [str(c or "").strip() for c in (candidate_nos or []) if str(c or "").strip()]
+        if not normalized:
+            return {"sent": 0, "failed": [], "skipped": []}
+
+        # 1) 查这些 candidate 当前 accepted 状态
+        with self._connect(settings.postgres_db) as conn:
+            conn.row_factory = dict_row
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT candidate_no, plan_id, accepted, accepted_notification_sent_at,
+                           student_submitted_offer_at
+                    FROM dtlms_plan_offer
+                    WHERE candidate_no = ANY(%s)
+                    """,
+                    (normalized,),
+                )
+                rows = cur.fetchall()
+        row_map = {str(r.get("candidate_no") or "").strip(): r for r in rows}
+
+        valid_statuses = {"accepted_pending_send", "accepted_confirmed", "accepted_rejected"}
+        sent = 0
+        failed: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        now_iso = datetime.now().strftime("%Y 年 %-m 月 %-d 日") if hasattr(datetime, "now") else ""
+
+        email_service = NotificationEmailService()
+
+        for cno in normalized:
+            row = row_map.get(cno)
+            if not row:
+                skipped.append({"candidate_no": cno, "reason": "未找到该学生的入营记录"})
+                continue
+            current = row.get("accepted")
+            if current not in valid_statuses:
+                skipped.append({"candidate_no": cno, "reason": f"当前状态 {current} 不允许发送录取通知 (应处于 录取未发送/录取已确认/录取已拒绝)"})
+                continue
+
+            plan_id = int(row.get("plan_id") or 0)
+            if plan_id <= 0:
+                failed.append({"candidate_no": cno, "reason": "plan_id 缺失"})
+                continue
+
+            # 2) 写库: 状态置 accepted_sent + accepted_notification_sent_at = now + 清空 student_submitted_offer_at
+            try:
+                with self._connect(settings.postgres_db) as conn:
+                    conn.row_factory = dict_row
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE dtlms_plan_offer
+                            SET accepted = 'accepted_sent',
+                                accepted_notification_sent_at = now(),
+                                student_submitted_offer_at = NULL,
+                                updated_at = now()
+                            WHERE candidate_no = %s AND plan_id = %s
+                              AND accepted = %s
+                            RETURNING candidate_no, admission_offered_school, accepted_notification_sent_at
+                            """,
+                            (cno, plan_id, current),
+                        )
+                        upd = cur.fetchone()
+            except Exception as exc:
+                failed.append({"candidate_no": cno, "reason": f"DB update failed: {exc}"})
+                continue
+            if not upd:
+                failed.append({"candidate_no": cno, "reason": "状态已变更, 操作被拒绝"})
+                continue
+
+            # 3) 发邮件
+            try:
+                school = (upd.get("admission_offered_school") or "").strip() or "上海人工智能实验室"
+                sent_at = upd.get("accepted_notification_sent_at")
+                if sent_at is None:
+                    sent_at_dt = datetime.now()
+                elif hasattr(sent_at, "strftime"):
+                    sent_at_dt = sent_at
+                else:
+                    from datetime import datetime as _dt
+                    sent_at_dt = _dt.now()
+                ymd = sent_at_dt.strftime("%Y 年 %-m 月 %-d 日") if hasattr(sent_at_dt, "strftime") else str(sent_at_dt)
+                email_service.send_admission_offer_letter(
+                    student_name=cno,  # 暂用报名号作为称呼 (后续可改为从 portal_student 取 full_name)
+                    student_email="",  # 写空, 由 email_service 内部替换为 lk139@126.com
+                    admission_offered_school=school,
+                    accepted_notification_sent_at_ymd=ymd,
+                    offer_timeout_hours=self._resolve_offer_timeout_hours() if hasattr(self, "_resolve_offer_timeout_hours") else 24,
+                    portal_offer_url="/portal/home/offer",
+                    business_key=cno,
+                )
+                sent += 1
+            except Exception as exc:
+                failed.append({"candidate_no": cno, "reason": f"send mail failed: {exc}"})
+                continue
+
+        return {"sent": sent, "failed": failed, "skipped": skipped}
+
+    def _resolve_offer_timeout_hours(self) -> int:
+        """2026-07-09: 从字典 student_signed_offer_timeout_hours 读超时阈值; fallback 24."""
+        try:
+            items = self._postgres_store.list_dict_data(dict_type="student_signed_offer_timeout_hours", status="启用") or []
+        except Exception:
+            items = []
+        for it in items:
+            v = it.get("value") if isinstance(it, dict) else None
+            if v is None:
+                continue
+            try:
+                n = int(str(v).strip())
+                if n > 0:
+                    return n
+            except (TypeError, ValueError):
+                continue
+        return 24

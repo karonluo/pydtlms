@@ -5,7 +5,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { MoreFilled, Promotion, Check, CircleClose, EditPen, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { getRecruitmentOptions, getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail, type RecruitmentOptions } from '../../api/recruitment'
+import { getRecruitmentOptions, getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail, type RecruitmentOptions ,
+  sendAdmissionOfferNotifications,
+  type SendAdmissionOfferNotificationResponse,
+} from '../../api/recruitment'
 import { useServerPagination } from '../../composables/useServerPagination'
 import {
   createCampOffer,
@@ -1046,6 +1049,41 @@ const acceptNotifyStudentNames = computed<string>(() =>
 // 兼容旧引用: 工具栏按钮 onHackathonSendNotification 直接转 openAcceptNotifyDialog
 function onHackathonSendNotification() {
   openAcceptNotifyDialog()
+}
+
+// 2026-07-09: 发送录取通知书 (录取通知书邮件) 实际提交
+const acceptNotifySubmitting = ref(false)
+const acceptNotifyResult = ref<SendAdmissionOfferNotificationResponse | null>(null)
+async function submitAcceptNotifyDialog() {
+  const candidateNos = acceptNotifySelectedRows.value
+    .map((row) => String(row.candidate_no || '').trim())
+    .filter((value) => value)
+  if (!candidateNos.length) {
+    ElMessage.warning('所选行没有有效的报名号')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认向 ${candidateNos.length} 位学生发送录取通知书? 此操作将改写录取状态为「录取已发送」并发送邮件。`,
+      '发送录取通知书',
+      { confirmButtonText: '确认发送', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  acceptNotifySubmitting.value = true
+  acceptNotifyResult.value = null
+  try {
+    const resp = await sendAdmissionOfferNotifications({ candidate_nos: candidateNos })
+    acceptNotifyResult.value = resp.data
+    ElMessage.success(`已发送 ${resp.data.sent} 封录取通知书; 失败 ${resp.data.failed.length}, 跳过 ${resp.data.skipped.length}`)
+    void fetchOffers()  // 刷新列表
+  } catch (error: any) {
+    const msg = (error && (error.response?.data?.detail || error.message)) || '发送失败'
+    ElMessage.error(String(msg))
+  } finally {
+    acceptNotifySubmitting.value = false
+  }
 }
 
 
@@ -2108,8 +2146,9 @@ onMounted(async () => {
         <el-button @click="acceptNotifyDialogVisible = false">关闭</el-button>
         <el-button
           type="primary"
-          disabled
-          title="待后续实现"
+          :loading="acceptNotifySubmitting"
+          :disabled="!acceptNotifySelectedCount"
+          @click="submitAcceptNotifyDialog"
         >确认发送</el-button>
       </template>
     </el-dialog>

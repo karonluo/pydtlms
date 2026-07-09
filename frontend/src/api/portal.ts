@@ -464,10 +464,25 @@ export type PortalOfferRecord = {
   candidate_no?: string | null
   admission_offered_school?: string | null
   accepted_notification_sent_at?: string | null
+  // 2026-07-09: 当前 accepted 状态 (NULL / declined / pending / accepted_pending_send / accepted_sent /
+  //              accepted_confirmed / accepted_rejected)
+  accepted?: string | null
+  // 2026-07-09: 学生签署时间 (接受/拒绝时由后端写入)
+  student_submitted_offer_at?: string | null
 }
 
 export function fetchPortalOffer() {
   return portalHttp.get<PortalOfferRecord>('/portal/offer')
+}
+
+// 2026-07-09: 学生 portal 端"接受录取"按钮 → POST /portal/offer/accept
+export function acceptPortalOffer() {
+  return portalHttp.post<PortalOfferRecord>('/portal/offer/accept')
+}
+
+// 2026-07-09: 学生 portal 端"拒绝录取"按钮 → POST /portal/offer/reject
+export function rejectPortalOffer() {
+  return portalHttp.post<PortalOfferRecord>('/portal/offer/reject')
 }
 
 export function getPortalProfileOptions() {

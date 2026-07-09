@@ -1060,24 +1060,12 @@ class PostgresStateStoreQueryRecruitmentMixin:
                         -- 权限收紧 (2026-07-03 二次确认): 书院/平台放行; 普通 advisor 即使命中
                         --   first/second_choice 分数规则也不能改; 仅「研究中心负责人」在
                         --   first/second_choice 命中时才能改。
-                        -- 5 个 placeholder: is_unrestricted, is_center_leader, ANY(first_choice names),
-                        --                  is_center_leader(再次), ANY(second_choice names)
+                        -- 2026-07-09: 权限收紧 —— 「录取/不录取/待定」仅研究中心负责人/书院管理员/平台管理员可改.
+                        -- 取消之前 (2026-07-03) 叠加在 is_center_leader 之上的「我必须是学生第一/二志愿导师 + 分数≥80」条件.
+                        -- 2 个 placeholder: is_unrestricted, is_center_leader
                         (CASE
                             WHEN %s::BOOLEAN THEN TRUE
-                            WHEN %s::BOOLEAN AND
-                                 NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)
-                                 AND app.first_choice_screening_score >= 80 THEN TRUE
-                            WHEN %s::BOOLEAN AND
-                                 NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s)
-                                 AND app.second_choice_screening_score >= 80
-                                 AND (
-                                   NULLIF(BTRIM(COALESCE(app.first_choice, '')), '')
-                                     = NULLIF(BTRIM(COALESCE(app.second_choice, '')), '')
-                                   OR (
-                                     app.second_choice_screening_submitted_at IS NOT NULL
-                                     AND app.second_choice_screening_score >= 80
-                                   )
-                                 ) THEN TRUE
+                            WHEN %s::BOOLEAN THEN TRUE
                             ELSE FALSE
                           END) AS can_change_accepted
                     FROM dtlms_plan_offer offer
@@ -1116,21 +1104,14 @@ class PostgresStateStoreQueryRecruitmentMixin:
                     {order_sql}
                     LIMIT %s OFFSET %s
                 """
-                # 2026-07-03: 追加 can_change_accepted 计算所需参数
-                # SQL 中有 5 个 %s (2026-07-03 权限收紧后):
-                #   1. is_unrestricted     (True=书院/平台)
-                #   2. is_center_leader    (True=当前用户是任一中心 lead)
-                #   3. ANY(first_choice)   -- first_choice 命中
-                #   4. is_center_leader(再次)
-                #   5. ANY(second_choice)
+                # 2026-07-09: can_change_accepted 简化为 2 条件 (is_unrestricted + is_center_leader).
+                # 之前 (2026-07-03) 还要叠加「我必须是学生第一/二志愿导师 + 分数≥80」, 已取消.
                 is_unrestricted = visible_advisor_names is None
+                # 仍保留 advisor_names_list 以便其他 SQL 引用 (按需); 当前 can_change_accepted 不再使用
                 advisor_names_list = list(visible_advisor_names or [])
                 can_change_params = [
                     bool(is_unrestricted),
                     bool(is_center_leader),
-                    advisor_names_list,
-                    bool(is_center_leader),
-                    advisor_names_list,
                 ]
                 self._execute_dynamic(cur, page_sql, [*can_change_params, *params, page_size, offset])
                 rows = [self._normalize_camp_offer_row(dict(row)) for row in cur.fetchall()]
@@ -1282,24 +1263,12 @@ class PostgresStateStoreQueryRecruitmentMixin:
                 -- 2026-07-06: 录取学校 (来自 dtlms_plan_offer.admission_offered_school)
                 offer.admission_offered_school,
                 -- 2026-07-03: 当前用户能否对该行执行入取操作 (录取/不录取/待定)
-                -- 5 个 placeholder: is_unrestricted, is_center_leader, ANY(first_choice names),
-                --                  is_center_leader(再次), ANY(second_choice names)
+                -- 2026-07-09: 权限收紧 —— 「录取/不录取/待定」仅研究中心负责人/书院管理员/平台管理员可改.
+                -- 取消之前 (2026-07-03) 叠加在 is_center_leader 之上的「我必须是学生第一/二志愿导师 + 分数≥80」条件.
+                -- 2 个 placeholder: is_unrestricted, is_center_leader
                 (CASE
                     WHEN %s::BOOLEAN THEN TRUE
-                    WHEN %s::BOOLEAN AND
-                         NULLIF(BTRIM(COALESCE(app.first_choice, '')), '') = ANY(%s)
-                         AND app.first_choice_screening_score >= 80 THEN TRUE
-                    WHEN %s::BOOLEAN AND
-                         NULLIF(BTRIM(COALESCE(app.second_choice, '')), '') = ANY(%s)
-                         AND app.second_choice_screening_score >= 80
-                         AND (
-                           NULLIF(BTRIM(COALESCE(app.first_choice, '')), '')
-                             = NULLIF(BTRIM(COALESCE(app.second_choice, '')), '')
-                           OR (
-                             app.second_choice_screening_submitted_at IS NOT NULL
-                             AND app.second_choice_screening_score >= 80
-                           )
-                         ) THEN TRUE
+                    WHEN %s::BOOLEAN THEN TRUE
                     ELSE FALSE
                   END) AS can_change_accepted
             FROM dtlms_plan_offer offer
@@ -1342,11 +1311,8 @@ class PostgresStateStoreQueryRecruitmentMixin:
         can_change_params = [
             bool(is_unrestricted),
             bool(is_center_leader),
-            advisor_names_list,
-            bool(is_center_leader),
-            advisor_names_list,
         ]
-        # detail_params 顺序: can_change_5 个, then offer_id, then 可见性 2 个 (如果有)
+        # detail_params 顺序: can_change_2 个, then offer_id, then 可见性 2 个 (如果有)
         detail_params: list[Any] = [*can_change_params, int(offer_id)]
         if visible_advisor_names:
             detail_sql += (
@@ -1390,11 +1356,13 @@ class PostgresStateStoreQueryRecruitmentMixin:
     def find_camp_offer_offer_record(
         self, *, candidate_no: str, plan_id: int
     ) -> dict[str, Any] | None:
-        """2026-07-07: portal Offer 签署页 (/portal/home/offer) 用.
+        """2026-07-07: portal Offer 签署页 (/portal/home/offer) 用. 2026-07-09 扩展.
 
         按 candidate_no + plan_id 查 dtlms_plan_offer 的:
           - admission_offered_school (录取学校)
           - accepted_notification_sent_at (已发送录取通知时间)
+          - accepted (当前状态, 供 /portal/home 跳转判断)
+          - student_submitted_offer_at (学生签署时间, 供 /portal/home/offer 显示"您已于...")
         返回 dict (可能 None 表示该学生不在入营名单内).
         """
         self.ensure_schema()
@@ -1410,7 +1378,9 @@ class PostgresStateStoreQueryRecruitmentMixin:
                         SELECT
                             candidate_no,
                             admission_offered_school,
-                            accepted_notification_sent_at
+                            accepted_notification_sent_at,
+                            accepted,
+                            student_submitted_offer_at
                         FROM dtlms_plan_offer
                         WHERE candidate_no = %s AND plan_id = %s
                         ORDER BY id DESC
@@ -1422,6 +1392,50 @@ class PostgresStateStoreQueryRecruitmentMixin:
         except Exception:
             return None
         return dict(row) if row else None
+
+    def update_camp_offer_accepted_by_student(
+        self,
+        *,
+        candidate_no: str,
+        plan_id: int,
+        target_accepted: str,
+        expected_current_accepted: str,
+    ) -> bool:
+        """2026-07-09: 学生 portal 端接受/拒绝 offer 的写库方法.
+
+        守门条件 WHERE expected_current_accepted: 防止并发场景下把已签/已拒/超时的状态覆盖.
+        同时只更新 student_submitted_offer_at + updated_at, 其它字段不动.
+        成功返回 True, WHERE 条件不满足 (无行受影响) 返回 False.
+        """
+        normalized_candidate_no = str(candidate_no or "").strip()
+        if not normalized_candidate_no or int(plan_id or 0) <= 0:
+            return False
+        if target_accepted not in {"accepted_confirmed", "accepted_rejected"}:
+            return False
+        try:
+            with self._connect(settings.postgres_db) as conn:
+                conn.row_factory = dict_row
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE dtlms_plan_offer
+                        SET accepted = %s,
+                            student_submitted_offer_at = now(),
+                            updated_at = now()
+                        WHERE candidate_no = %s
+                          AND plan_id = %s
+                          AND accepted = %s
+                        """,
+                        (
+                            target_accepted,
+                            normalized_candidate_no,
+                            int(plan_id),
+                            expected_current_accepted,
+                        ),
+                    )
+                    return cur.rowcount > 0
+        except Exception:
+            return False
 
     def find_camp_offer_is_in_camp_selection(self, *, candidate_no: str, plan_id: int) -> bool:
         """2026-07-06: portal 进度展示用。

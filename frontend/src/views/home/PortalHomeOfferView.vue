@@ -2,10 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message, Phone, Tickets, User } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { changePortalStudentPassword, clearPortalToken, getPortalProfile, getPortalPublicConfig, listPortalNewsArticles, listPortalPlans, type PortalNewsArticleRecord, type PortalPlanRecord, type PortalStudentRecord } from '../../api/portal'
-import { fetchPortalOffer, type PortalOfferRecord } from '../../api/portal'
+import {
+  acceptPortalOffer,
+  fetchPortalOffer,
+  rejectPortalOffer,
+  type PortalOfferRecord,
+} from '../../api/portal'
 import { listDictData, type DictDataRecord } from '../../api/system'
 import { resolveRequestError, showPortalAlert } from '../../utils/portalAlerts'
 
@@ -461,6 +466,22 @@ const isOfferExpired = computed<boolean>(() => {
   return offerRemainingMs.value <= 0
 })
 
+// 2026-07-09: 学生已签署状态判断 (接受/拒绝后, 按钮置灰 + 显示"您已于... 接受/拒绝")
+const currentAccepted = computed<string | null>(() => {
+  const v = portalOffer.value?.accepted
+  return v ? String(v).trim() || null : null
+})
+const isOfferConfirmed = computed<boolean>(() => currentAccepted.value === 'accepted_confirmed')
+const isOfferRejected = computed<boolean>(() => currentAccepted.value === 'accepted_rejected')
+const isOfferSigned = computed<boolean>(() => isOfferConfirmed.value || isOfferRejected.value)
+const canChangeOffer = computed<boolean>(() => currentAccepted.value === 'accepted_sent' && !isOfferExpired.value)
+const offerSignedAtText = computed<string>(() => {
+  const raw = portalOffer.value?.student_submitted_offer_at
+  const d = parseOfferDate(raw)
+  if (!d) return ''
+  return formatYmd(d) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+})
+
 function startOfferCountdown() {
   if (offerCountdownTimer !== null) {
     window.clearInterval(offerCountdownTimer)
@@ -477,11 +498,61 @@ function stopOfferCountdown() {
   }
 }
 
-function onAcceptOffer() {
-  ElMessage.info('接受录取功能待后续实现')
+// 2026-07-09: 接受/拒绝按钮真实调用 (二次确认 + 后端校验 + 刷新卡片)
+const offerActionLoading = ref<{ accept: boolean; reject: boolean }>({ accept: false, reject: false })
+
+async function onAcceptOffer() {
+  if (isOfferExpired.value) {
+    ElMessage.warning('录取通知已超时, 无法完成签署')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '确认接受录取吗? 此操作不可撤销, 提交后将无法再修改。',
+      '接受录取',
+      { confirmButtonText: '确认接受', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  offerActionLoading.value.accept = true
+  try {
+    const resp = await acceptPortalOffer()
+    portalOffer.value = resp.data
+    ElMessage.success('已接受录取')
+  } catch (error: any) {
+    const msg = (error && (error.response?.data?.detail || error.message)) || '操作失败'
+    ElMessage.error(String(msg))
+  } finally {
+    offerActionLoading.value.accept = false
+  }
 }
-function onDeclineOffer() {
-  ElMessage.info('拒绝录取功能待后续实现')
+
+async function onDeclineOffer() {
+  if (isOfferExpired.value) {
+    ElMessage.warning('录取通知已超时, 无法完成签署')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '确认拒绝录取吗? 此操作不可撤销, 提交后将无法再修改。',
+      '拒绝录取',
+      { confirmButtonText: '确认拒绝', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  offerActionLoading.value.reject = true
+  try {
+    const resp = await rejectPortalOffer()
+    portalOffer.value = resp.data
+    ElMessage.success('已拒绝录取')
+  } catch (error: any) {
+    const msg = (error && (error.response?.data?.detail || error.message)) || '操作失败'
+    ElMessage.error(String(msg))
+  } finally {
+    offerActionLoading.value.reject = false
+  }
 }
 
 onMounted(() => {
@@ -638,9 +709,23 @@ onBeforeUnmount(() => {
           <span v-if="isOfferExpired">通知书已超时失效，请联系招生委员会。</span>
           <span v-else>请在 {{ offerTimeoutHours }} 小时之内确认，如未确认，通知书将在超时后失效。</span>
         </div>
+        <div v-if="isOfferSigned" class="portal-offer-card__signed-tip">
+          您已于 {{ offerSignedAtText }} {{ isOfferRejected ? '拒绝' : '接受' }}录取
+        </div>
         <div class="portal-offer-card__actions">
-          <el-button type="primary" :disabled="true" title="待后续实现" @click="onAcceptOffer">接受录取</el-button>
-          <el-button :disabled="true" title="待后续实现" @click="onDeclineOffer">拒绝录取</el-button>
+          <el-button
+            type="primary"
+            :disabled="!canChangeOffer"
+            :loading="offerActionLoading.accept"
+            :title="canChangeOffer ? '' : '当前状态不允许签署'"
+            @click="onAcceptOffer"
+          >接受录取</el-button>
+          <el-button
+            :disabled="!canChangeOffer"
+            :loading="offerActionLoading.reject"
+            :title="canChangeOffer ? '' : '当前状态不允许签署'"
+            @click="onDeclineOffer"
+          >拒绝录取</el-button>
         </div>
       </section>
 
@@ -2031,6 +2116,17 @@ onBeforeUnmount(() => {
 .portal-offer-card__tip-icon {
   font-size: 14px;
   flex: 0 0 auto;
+}
+
+.portal-offer-card__signed-tip {
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  color: #67c23a;
+  font-size: 13px;
+  padding: 10px 24px;
+  margin: 0 24px 12px;
+  border-radius: 6px;
+  text-align: center;
 }
 
 .portal-offer-card__actions {

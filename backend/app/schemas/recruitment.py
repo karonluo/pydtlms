@@ -1014,6 +1014,22 @@ class CampOfferNotificationSendResponse(BaseModel):
     message: str
     choice: str
     simulate: bool
+
+
+# 2026-07-09: 录取通知书邮件发送请求 (链 B 步骤 4 - 书院管理员重新发邮件给进入终态/中间态的学生)
+class SendAdmissionOfferNotificationRequest(BaseModel):
+    candidate_nos: list[str] = Field(default_factory=list)
+
+
+class SendAdmissionOfferNotificationItem(BaseModel):
+    candidate_no: str
+    reason: str
+
+
+class SendAdmissionOfferNotificationResponse(BaseModel):
+    sent: int = 0
+    failed: list[SendAdmissionOfferNotificationItem] = Field(default_factory=list)
+    skipped: list[SendAdmissionOfferNotificationItem] = Field(default_factory=list)
     simulate_recipient: str | None = None
     template_path: str | None = None
     success_count: int = 0

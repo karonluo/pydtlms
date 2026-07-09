@@ -1016,6 +1016,9 @@ class RuntimeManagementStorePortalMixin:
 
         admission_offered_school: str | None = None
         accepted_notification_sent_at: str | None = None
+        # 2026-07-09: 暴露 accepted / student_submitted_offer_at 给 /portal/home 跳转判断 + 卡片状态显示
+        accepted: str | None = None
+        student_submitted_offer_at: str | None = None
 
         # 2) 若 candidate_no + plan_id 都有效, 查 dtlms_plan_offer
         if candidate_no and plan_id > 0:
@@ -1034,12 +1037,110 @@ class RuntimeManagementStorePortalMixin:
                 if sent_at is not None:
                     # timestamp -> ISO 字符串 (无 tz)
                     accepted_notification_sent_at = sent_at.isoformat() if hasattr(sent_at, "isoformat") else str(sent_at)
+                accepted = offer_row.get("accepted")
+                if accepted is not None:
+                    accepted = str(accepted).strip() or None
+                sub_at = offer_row.get("student_submitted_offer_at")
+                if sub_at is not None:
+                    student_submitted_offer_at = sub_at.isoformat() if hasattr(sub_at, "isoformat") else str(sub_at)
 
         return PortalOfferRecord(
             candidate_no=candidate_no,
             admission_offered_school=admission_offered_school,
             accepted_notification_sent_at=accepted_notification_sent_at,
+            accepted=accepted,
+            student_submitted_offer_at=student_submitted_offer_at,
         )
+
+
+    # 2026-07-09: 学生 portal 端"接受/拒绝录取"核心业务方法.
+    # 校验规则 (后端强制, 与前端提示一致):
+    #   1) dtlms_plan_offer.accepted 必须 === 'accepted_sent' (中间态)
+    #   2) 未超时: accepted_notification_sent_at + dict.value 小时 > now()
+    #   3) 写库: accepted = 'accepted_confirmed' / 'accepted_rejected'
+    #           + student_submitted_offer_at = now()
+    #           + updated_at = now()  (表无 trigger, 必须显式)
+    # 字典: student_signed_offer_timeout_hours (与 portal 卡片共用), 缺字典 fallback 24.
+    def _resolve_offer_timeout_hours(self) -> int:
+        """从字典 student_signed_offer_timeout_hours 读超时阈值; fallback 24."""
+        try:
+            items = self._postgres_store.list_dict_data(dict_type="student_signed_offer_timeout_hours", status="启用") or []
+        except Exception:
+            items = []
+        for it in items:
+            v = it.get("value") if isinstance(it, dict) else None
+            if v is None:
+                continue
+            try:
+                n = int(str(v).strip())
+                if n > 0:
+                    return n
+            except (TypeError, ValueError):
+                continue
+        return 24
+
+    def accept_portal_offer(self, student_id: int) -> PortalOfferRecord:
+        """学生在 portal 端点击"接受录取"后的业务方法. 写 dtlms_plan_offer.accepted = 'accepted_confirmed' + student_submitted_offer_at = now()."""
+        return self._change_portal_offer(student_id=student_id, target_accepted="accepted_confirmed")
+
+    def reject_portal_offer(self, student_id: int) -> PortalOfferRecord:
+        """学生在 portal 端点击"拒绝录取"后的业务方法. 写 dtlms_plan_offer.accepted = 'accepted_rejected' + student_submitted_offer_at = now()."""
+        return self._change_portal_offer(student_id=student_id, target_accepted="accepted_rejected")
+
+    def _change_portal_offer(self, *, student_id: int, target_accepted: str) -> PortalOfferRecord:
+        if target_accepted not in {"accepted_confirmed", "accepted_rejected"}:
+            raise ValueError("target_accepted must be 'accepted_confirmed' or 'accepted_rejected'")
+        # 1) 复用 get_portal_student 拿 candidate_no / selected_plan_id
+        student_record = self.get_portal_student(student_id)
+        candidate_no = str(student_record.candidate_no or "").strip()
+        plan_id = int(student_record.selected_plan_id or 0)
+        if not candidate_no or plan_id <= 0:
+            raise ValueError("学生不在入营名单, 无可操作的 offer 记录")
+
+        # 2) 查当前 offer 行, 校验状态
+        offer_row = self._postgres_store.find_camp_offer_offer_record(
+            candidate_no=candidate_no, plan_id=plan_id
+        ) or {}
+        current_accepted = offer_row.get("accepted")
+        if current_accepted != "accepted_sent":
+            raise PermissionError("当前状态不允许该操作 (应处于「录取已发送」状态)")
+        sent_at = offer_row.get("accepted_notification_sent_at")
+        if sent_at is None:
+            raise PermissionError("录取通知邮件尚未发送, 无法完成签署")
+
+        # 3) 校验超时 (以 accepted_notification_sent_at 为起点, +字典小时)
+        timeout_hours = self._resolve_offer_timeout_hours()
+        # sent_at 可能是 datetime 或 str; 统一为 datetime
+        from datetime import datetime, timezone
+        if isinstance(sent_at, str):
+            try:
+                sent_at_dt = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+            except ValueError:
+                sent_at_dt = None
+        else:
+            sent_at_dt = sent_at
+        if sent_at_dt is None:
+            raise PermissionError("录取通知邮件时间无法解析, 无法判断超时")
+        # 统一为带 tz 的 datetime (PG timestamptz 返回 aware datetime)
+        if sent_at_dt.tzinfo is None:
+            sent_at_dt = sent_at_dt.replace(tzinfo=timezone.utc)
+        deadline = sent_at_dt.timestamp() + timeout_hours * 3600
+        if deadline <= datetime.now(timezone.utc).timestamp():
+            raise PermissionError("录取通知已超时, 无法完成签署")
+
+        # 4) 写库 (单条 UPDATE, 守门条件 WHERE 防止并发覆盖)
+        from datetime import datetime as _dt
+        updated = self._postgres_store.update_camp_offer_accepted_by_student(
+            candidate_no=candidate_no,
+            plan_id=plan_id,
+            target_accepted=target_accepted,
+            expected_current_accepted="accepted_sent",
+        )
+        if not updated:
+            raise PermissionError("状态已变更, 操作被拒绝, 请刷新后重试")
+
+        # 5) 返回最新 PortalOfferRecord
+        return self.get_portal_offer(student_id)
 
 
     def get_public_recruitment_plans(self) -> PortalPlanListResponse:

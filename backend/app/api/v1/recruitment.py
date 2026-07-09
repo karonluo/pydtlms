@@ -21,6 +21,9 @@ from app.schemas.recruitment import (
     CampOfferListResponse,
     CampOfferStats,
     CampOfferNotificationSendRequest,
+    SendAdmissionOfferNotificationItem,
+    SendAdmissionOfferNotificationRequest,
+    SendAdmissionOfferNotificationResponse,
     CampOfferNotificationSendResponse,
     CampOfferRecord,
     CampOfferUpsert,
@@ -1015,6 +1018,38 @@ def send_camp_offer_notification_records(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+# 2026-07-09: 书院管理员 → 发送"录取通知书"邮件 (与 /camp-offers/notify 区分, 后者发送 offer 通知邮件 sent_mail_at)
+@router.post(
+    "/camp-offers/send-offer-notification",
+    response_model=SendAdmissionOfferNotificationResponse,
+)
+def send_admission_offer_notification_records(
+    payload: SendAdmissionOfferNotificationRequest,
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:write")),
+) -> SendAdmissionOfferNotificationResponse:
+    """2026-07-09: 录取通知书邮件发送 (链 B 步骤 4).
+
+    业务规则:
+      1) 每个 candidate 必须存在 dtlms_plan_offer 行
+      2) 当前 accepted 必须在 [accepted_pending_send, accepted_confirmed, accepted_rejected] 中
+         (允许重发; 不允许 declined/pending 状态发)
+      3) 写库: accepted = 'accepted_sent' + accepted_notification_sent_at = now() + 清空 student_submitted_offer_at
+      4) 发邮件: 收件人统一写死 lk139@126.com (测试期)
+    """
+    from app.services.management_service import RuntimeManagementStore
+
+    store = RuntimeManagementStore()
+    result = store.send_offer_notifications(
+        candidate_nos=payload.candidate_nos,
+        principal=principal,
+    )
+    return SendAdmissionOfferNotificationResponse(
+        sent=int(result.get("sent") or 0),
+        failed=[SendAdmissionOfferNotificationItem(candidate_no=x.get("candidate_no"), reason=x.get("reason")) for x in result.get("failed", [])],
+        skipped=[SendAdmissionOfferNotificationItem(candidate_no=x.get("candidate_no"), reason=x.get("reason")) for x in result.get("skipped", [])],
+    )
 
 
 @router.post("/camp-offers/confirm")

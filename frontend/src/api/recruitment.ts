@@ -785,6 +785,25 @@ export function sendCampOfferNotification(payload: CampOfferNotificationSendRequ
   return http.post<CampOfferNotificationSendResponse>('/recruitment/camp-offers/notify', payload)
 }
 
+// 2026-07-09: 书院管理员发送"录取通知书"邮件 (与 notify 区分, notify 是 offer 通知邮件 sent_mail_at)
+export type SendAdmissionOfferNotificationItem = {
+  candidate_no: string
+  reason: string
+}
+
+export type SendAdmissionOfferNotificationResponse = {
+  sent: number
+  failed: SendAdmissionOfferNotificationItem[]
+  skipped: SendAdmissionOfferNotificationItem[]
+}
+
+export function sendAdmissionOfferNotifications(payload: { candidate_nos: string[] }) {
+  return http.post<SendAdmissionOfferNotificationResponse>(
+    '/recruitment/camp-offers/send-offer-notification',
+    payload,
+  )
+}
+
 export function listOfferTemplates() {
   return http.get<OfferTemplateListResponse>(`/recruitment/camp-offers/templates`)
 }
