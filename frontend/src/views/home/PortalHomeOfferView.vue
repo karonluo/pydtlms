@@ -733,14 +733,14 @@ onBeforeUnmount(() => {
           <div class="portal-offer-card__actions">
             <el-button
               type="primary"
-              :disabled="!canChangeOffer"
-              :loading="offerActionLoading.accept"
+              :disabled="!canChangeOffer || offerActionLoading.accept || offerActionLoading.reject"
+              :loading="offerActionLoading.accept || offerActionLoading.reject"
               :title="canChangeOffer ? '' : '当前状态不允许签署'"
               @click="onAcceptOffer"
             >接受录取</el-button>
             <el-button
-              :disabled="!canChangeOffer"
-              :loading="offerActionLoading.reject"
+              :disabled="!canChangeOffer || offerActionLoading.accept || offerActionLoading.reject"
+              :loading="offerActionLoading.accept || offerActionLoading.reject"
               :title="canChangeOffer ? '' : '当前状态不允许签署'"
               @click="onDeclineOffer"
             >拒绝录取</el-button>
