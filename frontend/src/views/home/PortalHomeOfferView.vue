@@ -693,12 +693,12 @@ onBeforeUnmount(() => {
             <h3 class="portal-offer-card__result-title">{{ isOfferConfirmed ? '恭喜！录取确认成功' : '你已拒绝本次录取' }}</h3>
             <template v-if="isOfferConfirmed">
               <p class="portal-offer-card__result-line">你已成功确认接受上海人工智能实验室的录取资格。</p>
-              <p class="portal-offer-card__result-line">后续人普通知及具体安排将通过邮件发送至 your 的邮箱，请保持关注。</p>
+              <p class="portal-offer-card__result-line">后续人普通知及具体安排将通过邮件发送至你的邮箱，请保持关注。</p>
               <p class="portal-offer-card__result-line portal-offer-card__result-line--accent">欢迎加入 AI Lab !</p>
             </template>
             <template v-else>
               <p class="portal-offer-card__result-line">我们理解你的选择，感谢你参与本次夏令营选拔。</p>
-              <p class="portal-offer-card__result-line">拒绝后本录取名额将不再保留，请确认你的决定。</p>
+              <p class="portal-offer-card__result-line">拒绝后本录取名额将不再保留。</p>
               <p class="portal-offer-card__result-line portal-offer-card__result-line--accent">祝你未来学业顺利，前程似锦。</p>
             </template>
             <p v-if="offerSignedAtText" class="portal-offer-card__result-time">您已于 {{ offerSignedAtText }} {{ isOfferRejected ? '拒绝' : '接受' }}录取</p>
