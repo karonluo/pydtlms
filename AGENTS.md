@@ -1087,16 +1087,23 @@ dtlms_users (viewer) → dtlms_team_leaders (找 viewer 任 lead 的 team_id)
 - 学生 accept/reject 端点: `WHERE candidate_no = ? AND plan_id = ? AND accepted = 'accepted_sent'` 防止并发覆盖
 - 书院管理员发邮件: `WHERE candidate_no = ? AND plan_id = ? AND accepted = ?` (expected_current_accepted) 同样防并发
 
-### 5.3 录取通知邮件测试邮箱 (2026-07-09)
+### 5.3 录取通知邮件测试邮箱 + SMTP_SEND_MODE (2026-07-09 二次扩展)
 
-`/recruitment/camp-offers` "发送录取通知" 弹窗发邮件时, 实际收件人**统一替换为 `lk139@126.com`** (写死, 不论学生原本邮箱是啥), 写在 `backend/app/services/email_service.py` 的 `send_admission_offer_letter` 内部 `TEST_OVERRIDE_RECIPIENT` 常量.
+`/recruitment/camp-offers` "发送录取通知" 弹窗发邮件时, 收件人由 `.env` 中 `SMTP_SEND_MODE` 决定:
 
-**目的**: 测试期间避免真发邮件到学生真实邮箱, 等客户正式文案定稿 + SMTP 配置改 `real` 模式后, 把这个常量改成读 `student_email` 即可.
+- `SMTP_SEND_MODE=mock` -> 实际收件人替换为 `lk139@126.com` (不论 student_email 是啥). 写在 `email_service.send_admission_offer_letter` 内部 `TEST_OVERRIDE_RECIPIENT` 常量.
+- `SMTP_SEND_MODE=real` (默认) -> 用 `dtlms_portal_students.email` (学生真实邮箱); 若为空 fallback `lk139@126.com`.
+- 未配置 / 配置为其它值 -> 走 real 分支.
+
+**配置位置**: `backend/app/core/config.py` 的 `smtp_send_mode: str = "real"` 字段 (env 变量名 `SMTP_SEND_MODE`); `smtp_send_mode_normalized` property 负责归一化 (大小写不敏感).
 
 **Email 主题**: `【上海人工智能实验室】录取通知书 - {admission_offered_school}`
 
-**Email 模板变量** (与 portal /portal/home/offer 卡片同源):
-- `student_name` (暂用报名号占位, 后续从 portal_student 取 full_name)
+**Email 模板**: multipart/alternative (text/plain + text/html). HTML 与 portal /portal/home/offer 卡片同源 (Shanghai AI Lab 品牌徽 + ADMISSION LETTER + 录取学校 + 落款日期 + 立即确认按钮).
+
+**Email 模板变量**:
+- `student_name` 真实取值: `dtlms_plan_offer.portal_student_id` 关联 `dtlms_portal_students.full_name` (LEFT JOIN + `ps.account_status = '启用'`); 拿不到时 fallback `candidate_no`.
+- `student_email` 真实取值: `dtlms_portal_students.email` (LEFT JOIN 同上); 由 SMTP_SEND_MODE 决定是否替换.
 - `admission_offered_school`
 - `accepted_notification_sent_at_ymd`
 - `offer_timeout_hours` (从字典 `student_signed_offer_timeout_hours` 读, fallback 24)
@@ -1122,35 +1129,18 @@ dtlms_users (viewer) → dtlms_team_leaders (找 viewer 任 lead 的 team_id)
 
 后续若再有备份, 用 `Copy-Item` 显式列表 (本轮末尾已用此方式补建前端 + xlsx 备份).
 
-## 6. 每周工作回顾 / 周报起草
+### 5.6 service / store 分层约定 (2026-07-10 经验)
 
 
 
+### 5.7 发送录取通知邮件的进度条约定 (2026-07-10)
 
-
-本仓库内置每周自动起草周报的工具链，配套文档见 `tools\WEEKLY_REVIEW.md`。
-
-
-
-
-
-- 脚本：`tools\weekly_review.py`（Python 3.10+ 标准库）。从 `git log` 抽取上周提交，按 feat/fix/docs/test/chore 自动分类，输出 Markdown。
-
-
-- 包装：`tools\weekly_review.cmd`（已设 `PYTHONIOENCODING=utf-8`，可被任务计划程序直接调用）。
-
-
-- 任务定义：`tools\weekly_review.task.xml`（每周一 09:00，本机需管理员权限用 `schtasks /Create` 导入）。
-
-
-- 存档目录：`documents\周报\周报_YYYY-MM-DD_WNN.md`，每次追加一份。
-
-
-- 日志：`documents\周报\weekly_review.log`。
-
-
-
-
+- 不再让前端一次性等后端批处理返回后再刷新；改为逐条调用 POST /api/v1/recruitment/camp-offers/send-offer-notification/one，每条携带 candidate_no，后端返回 {ok, reason, actual_recipient, actual_smtp_send_mode}，前端用 el-progress 显示 已处理 N / 总数、当前 candidate_no、实际模式 (mock/real)、实际收件人。
+- 这样可以即时反映收件人安全护栏（mock 模式强制 lk139@126.com），避免一次失败要全部回滚；同时方便中途取消。
+- 写库与原批处理保持一致：accepted=accepted_sent、accepted_notification_sent_at=now()、清空 student_submitted_offer_at。
+- API：backend/app/api/v1/recruitment.py::send_one_admission_offer_notification，service 层在 RuntimeManagementStore 实现 send_one_offer_notification + 私有 _smtp_mode()，避免重复读取 settings。
+- 前端：frontend/src/views/recruitment/CampOfferListView.vue 用 acceptNotifyProgress/acceptNotifyCurrentCandidate 维护进度，sendOneAdmissionOfferNotification 在 frontend/src/api/recruitment.ts。
+- 后续若要把批处理能力开放给非录取通知路径，请保留 /camp-offers/send-offer-notification 旧端点，仅将进度条逻辑套到 one 端点外层循环即可。
 
 ### 6.1 注册方式（管理员 PowerShell）
 

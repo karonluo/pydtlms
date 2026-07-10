@@ -679,54 +679,73 @@ onBeforeUnmount(() => {
         - 字典: student_signed_offer_timeout_hours (默认 24)
         - 剩余确认时间按分钟滚动, 超时后右侧警告 + 按钮禁用
       -->
-      <section class="portal-offer-card" aria-label="录取通知书">
-        <div class="portal-offer-card__top">
-          <span class="portal-offer-card__badge">新</span>
-          <span class="portal-offer-card__title">录取通知书</span>
-          <span class="portal-offer-card__remaining">剩余确认时间：<strong>{{ offerRemainingText }}</strong></span>
-        </div>
-        <div class="portal-offer-card__body">
-          <div class="portal-offer-card__brand">Shanghai AI Lab</div>
-          <div class="portal-offer-card__heading">录取通知书</div>
-          <div class="portal-offer-card__heading-en">ADMISSION LETTER</div>
-          <hr class="portal-offer-card__rule" />
-          <p class="portal-offer-card__greeting">同学你好：</p>
-          <p class="portal-offer-card__paragraph">
-            衷心祝贺你通过上海人工智能实验室招生委员会专家组的综合评审！也成功被<span class="portal-offer-card__school">{{ offerSchoolName }}</span>录取。你在学术潜力、科研素养等方面的优异表现给招生委员会留下了深刻印象。我们诚挚地邀请你加入上海人工智能实验室，共同探索人工智能领域的前沿发展。
-          </p>
-          <p class="portal-offer-card__paragraph">
-            请务必在 <strong class="portal-offer-card__hours">{{ offerTimeoutHours }}</strong> 小时内（剩余 {{ offerRemainingText }}）在系统完成入选意向确认（逾期未确认将被视为自动放弃入选资格）。
-          </p>
-          <p class="portal-offer-card__paragraph">其他具体信息请以你收到的通知邮件为准。</p>
-          <p class="portal-offer-card__paragraph">期待在不久的将来，与你在实验室相聚，携手启程，在这人工智能的星辰大海中，探索并定义独属于你的科研疆界。</p>
-          <div class="portal-offer-card__signature">
-            <div class="portal-offer-card__signature-name">上海人工智能实验室</div>
-            <div class="portal-offer-card__signature-date">{{ offerSignedDateText }}</div>
+            <section class="portal-offer-card" aria-label="录取通知书">
+        <template v-if="isOfferSigned">
+          <div class="portal-offer-card__result" :class="{ 'portal-offer-card__result--accepted': isOfferConfirmed, 'portal-offer-card__result--rejected': isOfferRejected }">
+            <div class="portal-offer-card__result-icon" aria-hidden="true">
+              <span v-if="isOfferConfirmed">✓</span>
+              <span v-else>×</span>
+            </div>
+            <h3 class="portal-offer-card__result-title">{{ isOfferConfirmed ? '恭喜！录取确认成功' : '你已拒绝本次录取' }}</h3>
+            <template v-if="isOfferConfirmed">
+              <p class="portal-offer-card__result-line">你已成功确认接受上海人工智能实验室的录取资格。</p>
+              <p class="portal-offer-card__result-line">后续人普通知及具体安排将通过邮件发送至 your 的邮箱，请保持关注。</p>
+              <p class="portal-offer-card__result-line portal-offer-card__result-line--accent">欢迎加入 AI Lab !</p>
+            </template>
+            <template v-else>
+              <p class="portal-offer-card__result-line">我们理解你的选择，感谢你参与本次夏令营选拔。</p>
+              <p class="portal-offer-card__result-line">拒绝后本录取名额将不再保留，请确认你的决定。</p>
+              <p class="portal-offer-card__result-line portal-offer-card__result-line--accent">祝你未来学业顺利，前程似锦。</p>
+            </template>
+            <p v-if="offerSignedAtText" class="portal-offer-card__result-time">您已于 {{ offerSignedAtText }} {{ isOfferRejected ? '拒绝' : '接受' }}录取</p>
           </div>
-        </div>
-        <div class="portal-offer-card__tip" :class="{ 'portal-offer-card__tip--danger': isOfferExpired }">
-          <span class="portal-offer-card__tip-icon">⚠</span>
-          <span v-if="isOfferExpired">通知书已超时失效，请联系招生委员会。</span>
-          <span v-else>请在 {{ offerTimeoutHours }} 小时之内确认，如未确认，通知书将在超时后失效。</span>
-        </div>
-        <div v-if="isOfferSigned" class="portal-offer-card__signed-tip">
-          您已于 {{ offerSignedAtText }} {{ isOfferRejected ? '拒绝' : '接受' }}录取
-        </div>
-        <div class="portal-offer-card__actions">
-          <el-button
-            type="primary"
-            :disabled="!canChangeOffer"
-            :loading="offerActionLoading.accept"
-            :title="canChangeOffer ? '' : '当前状态不允许签署'"
-            @click="onAcceptOffer"
-          >接受录取</el-button>
-          <el-button
-            :disabled="!canChangeOffer"
-            :loading="offerActionLoading.reject"
-            :title="canChangeOffer ? '' : '当前状态不允许签署'"
-            @click="onDeclineOffer"
-          >拒绝录取</el-button>
-        </div>
+        </template>
+        <template v-else>
+          <div class="portal-offer-card__top">
+            <span class="portal-offer-card__badge">新</span>
+            <span class="portal-offer-card__title">录取通知书</span>
+            <span class="portal-offer-card__remaining">剩余确认时间：<strong>{{ offerRemainingText }}</strong></span>
+          </div>
+          <div class="portal-offer-card__body">
+            <div class="portal-offer-card__brand">Shanghai AI Lab</div>
+            <div class="portal-offer-card__heading">录取通知书</div>
+            <div class="portal-offer-card__heading-en">ADMISSION LETTER</div>
+            <hr class="portal-offer-card__rule" />
+            <p class="portal-offer-card__greeting">同学你好：</p>
+            <p class="portal-offer-card__paragraph">
+              衷心祝贺你通过上海人工智能实验室招生委员会专家组的综合评审！也成功被<span class="portal-offer-card__school">{{ offerSchoolName }}</span>录取。你在学术潜力、科研素养等方面的优异表现给招生委员会留下了深刻印象。我们诚挚地邀请你加入上海人工智能实验室，共同探索人工智能领域的前沿发展。
+            </p>
+            <p class="portal-offer-card__paragraph">
+              请务必在 <strong class="portal-offer-card__hours">{{ offerTimeoutHours }}</strong> 小时内（剩余 {{ offerRemainingText }}）在系统完成入选意向确认（逾期未确认将被视为自动放弃入选资格）。
+            </p>
+            <p class="portal-offer-card__paragraph">其他具体信息请以你收到的通知邮件为准。</p>
+            <p class="portal-offer-card__paragraph">期待在不久的将来，与你在实验室相聚，携手启程，在这人工智能的星辰大海中，探索并定义独属于你的科研疆界。</p>
+            <div class="portal-offer-card__signature">
+              <div class="portal-offer-card__signature-name">上海人工智能实验室</div>
+              <div class="portal-offer-card__signature-date">{{ offerSignedDateText }}</div>
+            </div>
+          </div>
+          <div class="portal-offer-card__tip" :class="{ 'portal-offer-card__tip--danger': isOfferExpired }">
+            <span class="portal-offer-card__tip-icon">⚠</span>
+            <span v-if="isOfferExpired">通知书已超时失效，请联系招生委员会。</span>
+            <span v-else>请在 {{ offerTimeoutHours }} 小时之内确认，如未确认，通知书将在超时后失效。</span>
+          </div>
+          <div class="portal-offer-card__actions">
+            <el-button
+              type="primary"
+              :disabled="!canChangeOffer"
+              :loading="offerActionLoading.accept"
+              :title="canChangeOffer ? '' : '当前状态不允许签署'"
+              @click="onAcceptOffer"
+            >接受录取</el-button>
+            <el-button
+              :disabled="!canChangeOffer"
+              :loading="offerActionLoading.reject"
+              :title="canChangeOffer ? '' : '当前状态不允许签署'"
+              @click="onDeclineOffer"
+            >拒绝录取</el-button>
+          </div>
+        </template>
       </section>
 
       <section id="portal-progress" class="portal-home-progress">
@@ -2134,6 +2153,61 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 12px;
   padding: 20px 24px 28px;
+}
+
+
+/* 2026-07-10: 录取通知书 / 已签署结果卡片 (接受 or 拒绝) */
+.portal-offer-card__result {
+  padding: 56px 32px 40px;
+  text-align: center;
+  background: #ffffff;
+}
+.portal-offer-card__result--accepted .portal-offer-card__result-icon {
+  background: #e1f3d8;
+  color: #67c23a;
+}
+.portal-offer-card__result--rejected .portal-offer-card__result-icon {
+  background: #fde2e2;
+  color: #f56c6c;
+}
+.portal-offer-card__result-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+}
+.portal-offer-card__result-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #303133;
+  margin: 0 0 18px;
+  letter-spacing: 1px;
+}
+.portal-offer-card__result-line {
+  font-size: 14px;
+  color: #606266;
+  line-height: 1.9;
+  margin: 0 0 6px;
+}
+.portal-offer-card__result-line--accent {
+  color: #67c23a;
+  font-weight: 600;
+  margin-top: 8px;
+}
+.portal-offer-card__result--rejected .portal-offer-card__result-line--accent {
+  color: #f56c6c;
+}
+.portal-offer-card__result-time {
+  margin-top: 22px;
+  font-size: 12px;
+  color: #909399;
+  letter-spacing: 0.5px;
 }
 
 </style>

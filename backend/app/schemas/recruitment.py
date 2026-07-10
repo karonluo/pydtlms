@@ -1030,6 +1030,19 @@ class SendAdmissionOfferNotificationResponse(BaseModel):
     sent: int = 0
     failed: list[SendAdmissionOfferNotificationItem] = Field(default_factory=list)
     skipped: list[SendAdmissionOfferNotificationItem] = Field(default_factory=list)
+
+
+# 2026-07-10: 单封发送 (供前端进度条逐封调)
+class SendOneAdmissionOfferNotificationRequest(BaseModel):
+    candidate_no: str
+
+
+class SendOneAdmissionOfferNotificationResponse(BaseModel):
+    ok: bool
+    reason: str = ""
+    # 2026-07-10: 实际写入的收件人 (mock 模式下永远是 lk139@126.com, 方便用户验证)
+    actual_recipient: str = ""
+    actual_smtp_send_mode: str = ""
     simulate_recipient: str | None = None
     template_path: str | None = None
     success_count: int = 0

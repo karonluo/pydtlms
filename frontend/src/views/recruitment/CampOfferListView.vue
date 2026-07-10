@@ -6,7 +6,8 @@ import { MoreFilled, Promotion, Check, CircleClose, EditPen, ArrowDown, ArrowUp 
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { getRecruitmentOptions, getRecruitmentPortalApplicationDetail, type RecruitPortalApplicationDetail, type RecruitmentOptions ,
-  sendAdmissionOfferNotifications,
+  sendOneAdmissionOfferNotification,
+  type SendOneAdmissionOfferNotificationResponse,
   type SendAdmissionOfferNotificationResponse,
 } from '../../api/recruitment'
 import { useServerPagination } from '../../composables/useServerPagination'
@@ -1051,9 +1052,15 @@ function onHackathonSendNotification() {
   openAcceptNotifyDialog()
 }
 
-// 2026-07-09: 发送录取通知书 (录取通知书邮件) 实际提交
+// 2026-07-10: 发送录取通知书 + 进度条 + 单封串行 + 安全保护
 const acceptNotifySubmitting = ref(false)
 const acceptNotifyResult = ref<SendAdmissionOfferNotificationResponse | null>(null)
+// 进度条: 当前处理 / 总数
+const acceptNotifyProgress = ref({ current: 0, total: 0, lastRecipient: '', lastMode: '' })
+// 当前正在处理的 candidate_no (用于弹窗内显示)
+const acceptNotifyCurrentCandidate = ref('')
+// 累加结果 (与批量端点返回结构一致)
+const acceptNotifyAccum = ref({ sent: 0, failed: [] as Array<{ candidate_no: string; reason: string }>, skipped: [] as Array<{ candidate_no: string; reason: string }> })
 async function submitAcceptNotifyDialog() {
   const candidateNos = acceptNotifySelectedRows.value
     .map((row) => String(row.candidate_no || '').trim())
@@ -1071,19 +1078,42 @@ async function submitAcceptNotifyDialog() {
   } catch {
     return
   }
+  // 2026-07-10: 进度条 + 累加器初始化
   acceptNotifySubmitting.value = true
   acceptNotifyResult.value = null
-  try {
-    const resp = await sendAdmissionOfferNotifications({ candidate_nos: candidateNos })
-    acceptNotifyResult.value = resp.data
-    ElMessage.success(`已发送 ${resp.data.sent} 封录取通知书; 失败 ${resp.data.failed.length}, 跳过 ${resp.data.skipped.length}`)
-    void fetchOffers()  // 刷新列表
-  } catch (error: any) {
-    const msg = (error && (error.response?.data?.detail || error.message)) || '发送失败'
-    ElMessage.error(String(msg))
-  } finally {
-    acceptNotifySubmitting.value = false
+  acceptNotifyProgress.value = { current: 0, total: candidateNos.length, lastRecipient: '', lastMode: '' }
+  acceptNotifyCurrentCandidate.value = ''
+  acceptNotifyAccum.value = { sent: 0, failed: [], skipped: [] }
+
+  let aborted = false
+  for (let i = 0; i < candidateNos.length; i++) {
+    if (aborted) break
+    const cno = candidateNos[i]
+    acceptNotifyCurrentCandidate.value = cno
+    try {
+      const resp = await sendOneAdmissionOfferNotification({ candidate_no: cno })
+      const data: SendOneAdmissionOfferNotificationResponse = resp.data
+      acceptNotifyProgress.value.lastRecipient = data.actual_recipient || ''
+      acceptNotifyProgress.value.lastMode = data.actual_smtp_send_mode || ''
+      if (data.ok) {
+        acceptNotifyAccum.value.sent++
+      } else {
+        acceptNotifyAccum.value.failed.push({ candidate_no: cno, reason: data.reason })
+      }
+    } catch (error: any) {
+      const msg = (error && (error.response?.data?.detail || error.message)) || '发送失败'
+      acceptNotifyAccum.value.failed.push({ candidate_no: cno, reason: String(msg) })
+    } finally {
+      acceptNotifyProgress.value.current = i + 1
+    }
   }
+  acceptNotifyResult.value = acceptNotifyAccum.value as SendAdmissionOfferNotificationResponse
+  acceptNotifySubmitting.value = false
+  acceptNotifyCurrentCandidate.value = ''
+  ElMessage.success(
+    `已发送 ${acceptNotifyAccum.value.sent} 封; 失败 ${acceptNotifyAccum.value.failed.length}; 跳过 0`
+  )
+  void fetchOffers()  // 刷新列表
 }
 
 
@@ -2134,6 +2164,21 @@ onMounted(async () => {
           <span class="accept-notify-summary__label">通知类型</span>
           <span class="accept-notify-summary__value accept-notify-summary__value--bold">录取通知书</span>
         </div>
+        <!-- 2026-07-10: 进度条 + SMTP 模式 + 实际收件人 (测试期校验) -->
+        <div v-if="acceptNotifySubmitting || acceptNotifyProgress.current > 0" class="accept-notify-progress">
+          <el-progress
+            :percentage="acceptNotifyProgress.total > 0 ? Math.round((acceptNotifyProgress.current / acceptNotifyProgress.total) * 100) : 0"
+            :status="acceptNotifyProgress.current >= acceptNotifyProgress.total ? 'success' : ''"
+            :stroke-width="14"
+            text-inside
+          />
+          <div class="accept-notify-progress__detail">
+            <span>已处理 {{ acceptNotifyProgress.current }} / {{ acceptNotifyProgress.total }}</span>
+            <span v-if="acceptNotifyCurrentCandidate">  · 当前: {{ acceptNotifyCurrentCandidate }}</span>
+            <span v-if="acceptNotifyProgress.lastMode">  · 模式: {{ acceptNotifyProgress.lastMode }}</span>
+            <span v-if="acceptNotifyProgress.lastRecipient">  · 实际收件人: {{ acceptNotifyProgress.lastRecipient }}</span>
+          </div>
+        </div>
       </div>
       <div class="accept-notify-tip">
         <span class="accept-notify-tip__icon">⚠</span>
@@ -2143,11 +2188,11 @@ onMounted(async () => {
         </div>
       </div>
       <template #footer>
-        <el-button @click="acceptNotifyDialogVisible = false">关闭</el-button>
+        <el-button :disabled="acceptNotifySubmitting" @click="acceptNotifyDialogVisible = false">关闭</el-button>
         <el-button
           type="primary"
           :loading="acceptNotifySubmitting"
-          :disabled="!acceptNotifySelectedCount"
+          :disabled="!acceptNotifySelectedCount || acceptNotifySubmitting"
           @click="submitAcceptNotifyDialog"
         >确认发送</el-button>
       </template>
@@ -2664,6 +2709,18 @@ onMounted(async () => {
 
 .accept-notify-summary__tag + .accept-notify-summary__tag {
   margin-left: 0;
+}
+
+/* 2026-07-10: 发送录取通知进度条 */
+.accept-notify-progress {
+  margin: 12px 0 4px;
+}
+.accept-notify-progress__detail {
+  font-size: 12px;
+  color: #606266;
+  margin-top: 6px;
+  line-height: 1.6;
+  word-break: break-all;
 }
 
 .accept-notify-tip {

@@ -1437,6 +1437,88 @@ class PostgresStateStoreQueryRecruitmentMixin:
         except Exception:
             return False
 
+    def find_camp_offers_for_notification(
+        self,
+        *,
+        candidate_nos: list[str],
+    ) -> list[dict[str, Any]]:
+        """2026-07-10: 书院管理员发送录取通知书前的关联查询 (offer + portal_student).
+
+        返回每条记录的:
+          - candidate_no / plan_id / accepted (当前状态)
+          - student_full_name (从 dtlms_portal_students.full_name 取, 拿不到为空)
+          - student_email (从 dtlms_portal_students.email 取, 拿不到为空)
+        candidate 不存在返回空 (不抛错, 让 service 层报 skipped).
+        """
+        normalized = [str(c or "").strip() for c in (candidate_nos or []) if str(c or "").strip()]
+        if not normalized:
+            return []
+        try:
+            with self._connect(settings.postgres_db) as conn:
+                conn.row_factory = dict_row
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT offer.candidate_no, offer.plan_id, offer.accepted,
+                               offer.accepted_notification_sent_at, offer.student_submitted_offer_at,
+                               ps.full_name AS student_full_name,
+                               ps.email AS student_email
+                        FROM dtlms_plan_offer offer
+                        LEFT JOIN dtlms_portal_students ps
+                            ON ps.id = offer.portal_student_id AND ps.account_status = '启用'
+                        WHERE offer.candidate_no = ANY(%s)
+                        """,
+                        (normalized,),
+                    )
+                    return [dict(r) for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def mark_camp_offer_as_notification_sent(
+        self,
+        *,
+        candidate_no: str,
+        plan_id: int,
+        expected_current_accepted: str,
+    ) -> dict[str, Any] | None:
+        """2026-07-10: 书院管理员发送录取通知书 → 写库.
+
+        守门条件: WHERE accepted = expected_current_accepted (防并发覆盖).
+        写入: accepted = 'accepted_sent' + accepted_notification_sent_at = now()
+              + student_submitted_offer_at = NULL (清空, 让学生能重新签)
+              + updated_at = now() (表无 trigger, 显式写)
+        成功返回 dict {candidate_no, admission_offered_school, accepted_notification_sent_at},
+        失败 / 行不存在 返回 None.
+        """
+        normalized_candidate_no = str(candidate_no or "").strip()
+        if not normalized_candidate_no or int(plan_id or 0) <= 0:
+            return None
+        try:
+            with self._connect(settings.postgres_db) as conn:
+                conn.row_factory = dict_row
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE dtlms_plan_offer
+                        SET accepted = 'accepted_sent',
+                            accepted_notification_sent_at = now(),
+                            student_submitted_offer_at = NULL,
+                            updated_at = now()
+                        WHERE candidate_no = %s AND plan_id = %s
+                          AND accepted = %s
+                        RETURNING candidate_no, admission_offered_school, accepted_notification_sent_at
+                        """,
+                        (
+                            normalized_candidate_no,
+                            int(plan_id),
+                            expected_current_accepted,
+                        ),
+                    )
+                    row = cur.fetchone()
+                    return dict(row) if row else None
+        except Exception:
+            return None
+
     def find_camp_offer_is_in_camp_selection(self, *, candidate_no: str, plan_id: int) -> bool:
         """2026-07-06: portal 进度展示用。
 

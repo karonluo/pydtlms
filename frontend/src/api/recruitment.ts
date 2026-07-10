@@ -804,6 +804,22 @@ export function sendAdmissionOfferNotifications(payload: { candidate_nos: string
   )
 }
 
+// 2026-07-10: 单封发送 (供前端进度条逐封调). 返回 {ok, reason, actual_recipient, actual_smtp_send_mode}.
+// 实际收件人字段暴露, 方便测试时验证 SMTP_SEND_MODE=mock 生效 (始终是 lk139@126.com).
+export type SendOneAdmissionOfferNotificationResponse = {
+  ok: boolean
+  reason: string
+  actual_recipient: string
+  actual_smtp_send_mode: string
+}
+
+export function sendOneAdmissionOfferNotification(payload: { candidate_no: string }) {
+  return http.post<SendOneAdmissionOfferNotificationResponse>(
+    '/recruitment/camp-offers/send-offer-notification/one',
+    payload,
+  )
+}
+
 export function listOfferTemplates() {
   return http.get<OfferTemplateListResponse>(`/recruitment/camp-offers/templates`)
 }

@@ -24,6 +24,8 @@ from app.schemas.recruitment import (
     SendAdmissionOfferNotificationItem,
     SendAdmissionOfferNotificationRequest,
     SendAdmissionOfferNotificationResponse,
+    SendOneAdmissionOfferNotificationRequest,
+    SendOneAdmissionOfferNotificationResponse,
     CampOfferNotificationSendResponse,
     CampOfferRecord,
     CampOfferUpsert,
@@ -1049,6 +1051,29 @@ def send_admission_offer_notification_records(
         sent=int(result.get("sent") or 0),
         failed=[SendAdmissionOfferNotificationItem(candidate_no=x.get("candidate_no"), reason=x.get("reason")) for x in result.get("failed", [])],
         skipped=[SendAdmissionOfferNotificationItem(candidate_no=x.get("candidate_no"), reason=x.get("reason")) for x in result.get("skipped", [])],
+    )
+
+
+# 2026-07-10: 单封发送 (供前端进度条逐封调). 区别于上面的批量端点:
+#   - 每次只处理一个 candidate_no, 返回 {ok, reason, actual_recipient, actual_smtp_send_mode}
+#   - 实际收件人字段暴露给前端, 方便测试时验证 SMTP_SEND_MODE=mock 生效 (始终是 lk139@126.com)
+@router.post(
+    "/camp-offers/send-offer-notification/one",
+    response_model=SendOneAdmissionOfferNotificationResponse,
+)
+def send_one_admission_offer_notification(
+    payload: SendOneAdmissionOfferNotificationRequest,
+    principal: Principal = Depends(require_permissions("recruitment_camp_offer:write")),
+) -> SendOneAdmissionOfferNotificationResponse:
+    from app.services.management_service import RuntimeManagementStore
+
+    store = RuntimeManagementStore()
+    result = store.send_one_offer_notification(candidate_no=payload.candidate_no, principal=principal)
+    return SendOneAdmissionOfferNotificationResponse(
+        ok=bool(result.get("ok")),
+        reason=str(result.get("reason") or ""),
+        actual_recipient=str(result.get("actual_recipient") or ""),
+        actual_smtp_send_mode=str(result.get("actual_smtp_send_mode") or ""),
     )
 
 

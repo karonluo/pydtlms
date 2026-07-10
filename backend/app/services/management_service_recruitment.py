@@ -1653,12 +1653,13 @@ class RuntimeManagementStoreRecruitmentMixin:
         )
 
 
-    # 2026-07-09: 书院管理员在 /recruitment/camp-offers 选中学生 → 发送"录取通知书"邮件.
+    # 2026-07-09: 书院管理员在 /recruitment/camp-offers 选中学生 → 发送"录取通知书"邮件. 2026-07-09 二次扩展 (真实 student_name / SMTP_SEND_MODE). 2026-07-10 修复: 不再 self._connect (RuntimeManagementStore 无此方法), 改走 self._postgres_store.find_camp_offers_for_notification + mark_camp_offer_as_notification_sent.
     # 业务规则:
     #   1) 每个 candidate 必须存在 dtlms_plan_offer 行 (同 plan_id);
     #   2) 当前 accepted 必须在 [accepted_pending_send, accepted_confirmed, accepted_rejected] 中 (允许重发, 不允许 declined/pending 状态发);
     #   3) 写库: accepted = 'accepted_sent' + accepted_notification_sent_at = now() + 清空 student_submitted_offer_at;
-    #   4) 发邮件: 实际收件人统一写死 lk139@126.com (测试期); 文案 = portal 卡片同源.
+    #   4) 发邮件: SMTP_SEND_MODE 决定收件人 (mock -> lk139@126.com; real -> 学生真实邮箱);
+    #              student_name 真实从 dtlms_portal_students.full_name 取 (按 plan_offer.portal_student_id 关联).
     # 返回: dict { sent: int, failed: list[{candidate_no, reason}], skipped: list[{candidate_no, reason}] }
     def send_offer_notifications(
         self,
@@ -1674,29 +1675,18 @@ class RuntimeManagementStoreRecruitmentMixin:
         if not normalized:
             return {"sent": 0, "failed": [], "skipped": []}
 
-        # 1) 查这些 candidate 当前 accepted 状态
-        with self._connect(settings.postgres_db) as conn:
-            conn.row_factory = dict_row
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT candidate_no, plan_id, accepted, accepted_notification_sent_at,
-                           student_submitted_offer_at
-                    FROM dtlms_plan_offer
-                    WHERE candidate_no = ANY(%s)
-                    """,
-                    (normalized,),
-                )
-                rows = cur.fetchall()
+        # 1) 查 candidate 关联的 offer + portal_student (走 store, 不在 service 层直连 DB)
+        rows = self._postgres_store.find_camp_offers_for_notification(candidate_nos=normalized)
         row_map = {str(r.get("candidate_no") or "").strip(): r for r in rows}
 
-        valid_statuses = {"accepted_pending_send", "accepted_confirmed", "accepted_rejected"}
+        valid_statuses = {"accepted_pending_send", "accepted_sent", "accepted_confirmed", "accepted_rejected"}
         sent = 0
         failed: list[dict[str, str]] = []
         skipped: list[dict[str, str]] = []
-        now_iso = datetime.now().strftime("%Y 年 %-m 月 %-d 日") if hasattr(datetime, "now") else ""
 
         email_service = NotificationEmailService()
+        timeout_hours = self._resolve_offer_timeout_hours() if hasattr(self, "_resolve_offer_timeout_hours") else 24
+        portal_offer_url = "/portal/home/offer"
 
         for cno in normalized:
             row = row_map.get(cno)
@@ -1705,7 +1695,7 @@ class RuntimeManagementStoreRecruitmentMixin:
                 continue
             current = row.get("accepted")
             if current not in valid_statuses:
-                skipped.append({"candidate_no": cno, "reason": f"当前状态 {current} 不允许发送录取通知 (应处于 录取未发送/录取已确认/录取已拒绝)"})
+                skipped.append({"candidate_no": cno, "reason": f"当前状态 {current} 不允许发送录取通知 (应处于 录取未发送/录取已发送/录取已确认/录取已拒绝)"})
                 continue
 
             plan_id = int(row.get("plan_id") or 0)
@@ -1713,33 +1703,17 @@ class RuntimeManagementStoreRecruitmentMixin:
                 failed.append({"candidate_no": cno, "reason": "plan_id 缺失"})
                 continue
 
-            # 2) 写库: 状态置 accepted_sent + accepted_notification_sent_at = now + 清空 student_submitted_offer_at
-            try:
-                with self._connect(settings.postgres_db) as conn:
-                    conn.row_factory = dict_row
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE dtlms_plan_offer
-                            SET accepted = 'accepted_sent',
-                                accepted_notification_sent_at = now(),
-                                student_submitted_offer_at = NULL,
-                                updated_at = now()
-                            WHERE candidate_no = %s AND plan_id = %s
-                              AND accepted = %s
-                            RETURNING candidate_no, admission_offered_school, accepted_notification_sent_at
-                            """,
-                            (cno, plan_id, current),
-                        )
-                        upd = cur.fetchone()
-            except Exception as exc:
-                failed.append({"candidate_no": cno, "reason": f"DB update failed: {exc}"})
-                continue
+            # 2) 写库 (走 store; 守门 expected_current_accepted 防并发覆盖)
+            upd = self._postgres_store.mark_camp_offer_as_notification_sent(
+                candidate_no=cno,
+                plan_id=plan_id,
+                expected_current_accepted=current,
+            )
             if not upd:
                 failed.append({"candidate_no": cno, "reason": "状态已变更, 操作被拒绝"})
                 continue
 
-            # 3) 发邮件
+            # 3) 发邮件 (HTML + text/plain 双格式, SMTP_SEND_MODE 决定收件人)
             try:
                 school = (upd.get("admission_offered_school") or "").strip() or "上海人工智能实验室"
                 sent_at = upd.get("accepted_notification_sent_at")
@@ -1750,14 +1724,17 @@ class RuntimeManagementStoreRecruitmentMixin:
                 else:
                     from datetime import datetime as _dt
                     sent_at_dt = _dt.now()
-                ymd = sent_at_dt.strftime("%Y 年 %-m 月 %-d 日") if hasattr(sent_at_dt, "strftime") else str(sent_at_dt)
+                ymd = sent_at_dt.strftime("%Y 年 %m 月 %d 日") if hasattr(sent_at_dt, "strftime") else str(sent_at_dt)
+                # 2026-07-09: student_name 真实从 dtlms_portal_students.full_name 取
+                real_name = (row.get("student_full_name") or "").strip()
+                real_email = (row.get("student_email") or "").strip()
                 email_service.send_admission_offer_letter(
-                    student_name=cno,  # 暂用报名号作为称呼 (后续可改为从 portal_student 取 full_name)
-                    student_email="",  # 写空, 由 email_service 内部替换为 lk139@126.com
+                    student_name=real_name or cno,  # 兜底: 拿不到 full_name 用 candidate_no
+                    student_email=real_email,         # 真实邮箱; mock 模式会被替换
                     admission_offered_school=school,
                     accepted_notification_sent_at_ymd=ymd,
-                    offer_timeout_hours=self._resolve_offer_timeout_hours() if hasattr(self, "_resolve_offer_timeout_hours") else 24,
-                    portal_offer_url="/portal/home/offer",
+                    offer_timeout_hours=timeout_hours,
+                    portal_offer_url=portal_offer_url,
                     business_key=cno,
                 )
                 sent += 1
@@ -1766,6 +1743,80 @@ class RuntimeManagementStoreRecruitmentMixin:
                 continue
 
         return {"sent": sent, "failed": failed, "skipped": skipped}
+
+    # 2026-07-10: 单封发送 (供前端进度条逐封调).
+    # 返回 dict {ok, reason, actual_recipient, actual_smtp_send_mode}
+    def send_one_offer_notification(self, *, candidate_no: str, principal: Any | None = None) -> dict[str, Any]:
+        from app.services.email_service import NotificationEmailService
+        from app.core.config import settings as _settings
+
+        cno = str(candidate_no or "").strip()
+        if not cno:
+            return {"ok": False, "reason": "candidate_no 为空", "actual_recipient": "", "actual_smtp_send_mode": self._smtp_mode()}
+
+        # 1) 查 (走 store)
+        rows = self._postgres_store.find_camp_offers_for_notification(candidate_nos=[cno])
+        if not rows:
+            return {"ok": False, "reason": "未找到该学生的入营记录", "actual_recipient": "", "actual_smtp_send_mode": self._smtp_mode()}
+        row = rows[0]
+        current = row.get("accepted")
+        valid_statuses = {"accepted_pending_send", "accepted_sent", "accepted_confirmed", "accepted_rejected"}
+        if current not in valid_statuses:
+            return {"ok": False, "reason": f"当前状态 {current} 不允许发送录取通知 (应处于 录取未发送/录取已发送/录取已确认/录取已拒绝)", "actual_recipient": "", "actual_smtp_send_mode": self._smtp_mode()}
+
+        plan_id = int(row.get("plan_id") or 0)
+        if plan_id <= 0:
+            return {"ok": False, "reason": "plan_id 缺失", "actual_recipient": "", "actual_smtp_send_mode": self._smtp_mode()}
+
+        # 2) 写库
+        upd = self._postgres_store.mark_camp_offer_as_notification_sent(
+            candidate_no=cno, plan_id=plan_id, expected_current_accepted=current,
+        )
+        if not upd:
+            return {"ok": False, "reason": "状态已变更, 操作被拒绝", "actual_recipient": "", "actual_smtp_send_mode": self._smtp_mode()}
+
+        # 3) 计算实际收件人 (返回给前端用于显示, 验证 mock 模式生效)
+        mode = self._smtp_mode()
+        real_email = (row.get("student_email") or "").strip()
+        actual_recipient = "lk139@126.com" if mode == "mock" else (real_email or "lk139@126.com")
+
+        # 4) 发邮件 (实际收件人永远是 lk139@126.com in mock; 真实邮箱 in real)
+        # 2026-07-10: 仍走 send_admission_offer_letter 内部 SMTP_SEND_MODE 判定逻辑, 这里只是把结果记到日志便于排查
+        try:
+            from datetime import datetime
+            school = (upd.get("admission_offered_school") or "").strip() or "上海人工智能实验室"
+            sent_at = upd.get("accepted_notification_sent_at")
+            if sent_at is None:
+                sent_at_dt = datetime.now()
+            elif hasattr(sent_at, "strftime"):
+                sent_at_dt = sent_at
+            else:
+                from datetime import datetime as _dt
+                sent_at_dt = _dt.now()
+            ymd = sent_at_dt.strftime("%Y 年 %m 月 %d 日") if hasattr(sent_at_dt, "strftime") else str(sent_at_dt)
+            real_name = (row.get("student_full_name") or "").strip()
+            timeout_hours = self._resolve_offer_timeout_hours() if hasattr(self, "_resolve_offer_timeout_hours") else 24
+            NotificationEmailService(log_delivery=self._record_notification_delivery_log).send_admission_offer_letter(
+                student_name=real_name or cno,
+                student_email=real_email,
+                admission_offered_school=school,
+                accepted_notification_sent_at_ymd=ymd,
+                offer_timeout_hours=timeout_hours,
+                portal_offer_url="/portal/home/offer",
+                business_key=cno,
+            )
+            return {"ok": True, "reason": "", "actual_recipient": actual_recipient, "actual_smtp_send_mode": mode}
+        except Exception as exc:
+            return {"ok": False, "reason": f"send mail failed: {exc}", "actual_recipient": actual_recipient, "actual_smtp_send_mode": mode}
+
+    def _smtp_mode(self) -> str:
+        """2026-07-10: 读 settings.smtp_send_mode_normalized; 默认 real."""
+        try:
+            from app.core.config import settings as _settings
+            mode = getattr(_settings, "smtp_send_mode_normalized", "real")
+            return str(mode or "real")
+        except Exception:
+            return "real"
 
     def _resolve_offer_timeout_hours(self) -> int:
         """2026-07-09: 从字典 student_signed_offer_timeout_hours 读超时阈值; fallback 24."""

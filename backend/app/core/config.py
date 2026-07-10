@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     smtp_enabled: bool = False
     smtp_student_notification_enabled: bool = False
+    # 2026-07-09: 邮件发送模式. mock=测试期统一替换收件人为 lk139@126.com; real=用学生真实邮箱. 默认 real (兼容生产).
+    smtp_send_mode: str = "real"
     smtp_host: str = ""
     smtp_port: int = 465
     smtp_username: str = ""
@@ -112,6 +114,12 @@ class Settings(BaseSettings):
             host, port = item.split(":", 1)
             nodes.append((host.strip(), int(port.strip())))
         return nodes
+
+    @property
+    def smtp_send_mode_normalized(self) -> str:
+        """2026-07-09: 归一化 SMTP_SEND_MODE 配置. 默认 'real'. 仅识别 'mock' 走测试邮箱, 其它一律 'real'."""
+        v = str(self.smtp_send_mode or "").strip().lower()
+        return "mock" if v == "mock" else "real"
 
     @property
     def redis_url(self) -> str:

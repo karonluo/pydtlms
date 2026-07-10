@@ -6,6 +6,7 @@ import ssl
 from collections.abc import Callable
 from threading import Thread
 from email.message import EmailMessage
+from html import escape as html_escape
 
 from app.core.config import Settings, settings
 
@@ -86,10 +87,14 @@ class NotificationEmailService:
         )
         self.send_message(to_email=email, subject=subject, text_body=text_body, template_code="portal_admin_password_reset")
 
-    # 2026-07-09: 录取通知书邮件 (与 portal /portal/home/offer 卡片同源 HTML 文案).
-    # 测试期间: 实际收件人统一替换为 lk139@126.com (写死), 不论 student_email 是什么.
-    # 模板变量: student_name / admission_offered_school / accepted_notification_sent_at_ymd /
-    #           offer_timeout_hours / portal_offer_url.
+    # 2026-07-09: 录取通知书邮件 (与 portal /portal/home/offer 卡片同源 HTML 文案). 2026-07-09 二次扩展 (HTML + SMTP_SEND_MODE + 真实 student_name).
+    # 收件人逻辑: 读 SMTP_SEND_MODE 配置 (默认 real, 大小写不敏感):
+    #   - mock  -> 实际收件人替换为 TEST_OVERRIDE_RECIPIENT (lk139@126.com), 不论 student_email 是啥
+    #   - real  -> 用 student_email (学生真实邮箱); 若为空则用 lk139@126.com 兜底 (避免空字符串)
+    # 模板变量: student_name (从 portal_student 真实取) / admission_offered_school / accepted_notification_sent_at_ymd /
+    #           offer_timeout_hours / portal_offer_url. 同源 HTML + text/plain 双格式.
+    TEST_OVERRIDE_RECIPIENT = "lkai@cotong.com"
+
     def send_admission_offer_letter(
         self,
         *,
@@ -101,12 +106,19 @@ class NotificationEmailService:
         portal_offer_url: str,
         business_key: str | None = None,
     ) -> None:
-        # 2026-07-09: 测试期间统一替换收件人, 避免发到学生真邮箱.
-        TEST_OVERRIDE_RECIPIENT = "lk139@126.com"
+        # 1) 收件人逻辑: 按 SMTP_SEND_MODE 决定
+        mode = self._settings.smtp_send_mode_normalized if hasattr(self._settings, "smtp_send_mode_normalized") else "real"
         original_email = str(student_email or "").strip()
-        actual_recipient = TEST_OVERRIDE_RECIPIENT if original_email else TEST_OVERRIDE_RECIPIENT
+        if mode == "mock":
+            actual_recipient = self.TEST_OVERRIDE_RECIPIENT
+        else:  # real
+            actual_recipient = original_email or self.TEST_OVERRIDE_RECIPIENT
+
+        # 2) 变量填充
         school = (admission_offered_school or "").strip() or "上海人工智能实验室"
         student_name_clean = (student_name or "").strip() or "同学"
+
+        # 3) 主题 + text/plain + text/html (同源)
         subject = f"【上海人工智能实验室】录取通知书 - {school}"
         text_body = (
             f"{student_name_clean} 同学你好:\n\n"
@@ -120,13 +132,130 @@ class NotificationEmailService:
             "上海人工智能实验室\n"
             f"{accepted_notification_sent_at_ymd}"
         )
-        self.send_message(
+        safe_school = html_escape(school)
+        safe_name = html_escape(student_name_clean)
+        safe_hours = html_escape(str(offer_timeout_hours))
+        safe_url = "https://admissions.pjlab.org.cn/" + html_escape(portal_offer_url)
+        safe_ymd = html_escape(accepted_notification_sent_at_ymd)
+        html_body = (
+            "<!DOCTYPE html>\n"
+            "<html><head><meta charset=\"utf-8\">"
+            "<title>" + html_escape(subject) + "</title>"
+            "</head><body style=\"margin:0;padding:0;background:#f5f7fa;font-family:'Microsoft YaHei',Arial,sans-serif;\">"
+            "<div style=\"max-width:600px;margin:24px auto;background:#ffffff;border:1px solid #ecf0f4;border-radius:8px;overflow:hidden;\">"
+            "<div style=\"text-align:center;background:#1f3864;color:#fff;padding:20px 16px;letter-spacing:1px;\">"
+            "<div style=\"font-size:12px;opacity:.85;\">Shanghai AI Lab</div>"
+            "<div style=\"font-size:24px;font-weight:700;margin-top:6px;letter-spacing:6px;\">录取通知书</div>"
+            "<div style=\"font-size:11px;letter-spacing:4px;margin-top:4px;opacity:.85;\">ADMISSION LETTER</div>"
+            "</div>"
+            "<hr style=\"border:none;border-top:2px solid #1f3864;margin:0;\"/>"
+            "<div style=\"padding:24px 32px;color:#303133;font-size:14px;line-height:1.9;\">"
+            f"<p style=\"text-align:left;margin:0 0 12px;\">{safe_name} 同学你好:</p>"
+            "<p style=\"text-align:left;margin:0 0 12px;\">衷心祝贺你通过上海人工智能实验室招生委员会专家组的综合评审! "
+            f"也成功被 <strong style=\"color:#1f3864;\">{safe_school}</strong> 录取。你在学术潜力、科研素养等方面的优异表现给招生委员会留下了深刻印象。"
+            "我们诚挚地邀请你加入上海人工智能实验室,共同探索人工智能领域的前沿发展。</p>"
+            "<p style=\"text-align:left;margin:0 0 12px;\">"
+            f"请务必在 <strong style=\"color:#1f3864;\">{safe_hours}</strong> 小时内(逾期未确认将被视为自动放弃入选资格) "
+            f"点击下方按钮完成入选意向确认:</p>"
+            f"<p style=\"text-align:center;margin:18px 0;\"><a href=\"{safe_url}\" "
+            "style=\"display:inline-block;background:#1f3864;color:#fff;text-decoration:none;padding:10px 28px;"
+            f"border-radius:4px;font-size:14px;letter-spacing:2px;\">登录网站进行确认</a></p>"
+            "<p style=\"text-align:left;margin:0 0 12px;\">其他具体信息请以你收到的通知邮件为准。</p>"
+            "<p style=\"text-align:left;margin:0 0 12px;\">期待在不久的将来,与你在实验室相聚,携手启程,"
+            "在这人工智能的星辰大海中,探索并定义独属于你的科研疆界。</p>"
+            "</div>"
+            "<div style=\"text-align:right;padding:8px 32px 24px;color:#303133;font-size:14px;\">"
+            "<div>上海人工智能实验室</div>"
+            f"<div style=\"color:#606266;font-size:13px;margin-top:4px;\">{safe_ymd}</div>"
+            "</div>"
+            "</div>"
+            "<div style=\"text-align:center;padding:12px;color:#909399;font-size:12px;\">"
+            "此邮件为系统自动发送,请勿直接回复。</div>"
+            "</body></html>"
+        )
+
+        # 4) 走 self.send_message 复用基础流程, 传 text_body 当 text/plain 兜底, html_body 当 html 主内容
+        # 扩展 send_message 不动: 在 send_admission_offer_letter 内部直接用 smtplib 发 multipart/alternative
+        self._send_multipart(
             to_email=actual_recipient,
             subject=subject,
             text_body=text_body,
+            html_body=html_body,
             template_code="admission_offer_letter",
             business_key=business_key,
         )
+
+    def _send_multipart(
+        self,
+        *,
+        to_email: str,
+        subject: str,
+        text_body: str,
+        html_body: str,
+        template_code: str | None = None,
+        business_key: str | None = None,
+    ) -> None:
+        """2026-07-09: 发送 text/plain + text/html 双格式邮件 (multipart/alternative).
+
+        与 send_message 类似, 但额外带 html_body. 不走 send_message 是因为 send_message
+        只支持单一 text_body; 这里的 text_body 仍保留作为非 HTML 客户端的兜底.
+        """
+        from email.message import EmailMessage as _EmailMessage
+
+        if not self.enabled():
+            logger.info("Skip email delivery because SMTP is disabled or incomplete")
+            self._record_delivery(
+                channel="email",
+                recipient=to_email,
+                subject=subject,
+                send_status="skipped",
+                template_code=template_code,
+                business_key=business_key,
+                failure_reason="SMTP is disabled or incomplete",
+            )
+            return
+        if not to_email:
+            logger.info("Skip email delivery because recipient email is empty")
+            self._record_delivery(
+                channel="email",
+                recipient=to_email,
+                subject=subject,
+                send_status="skipped",
+                template_code=template_code,
+                business_key=business_key,
+                failure_reason="Recipient email is empty",
+            )
+            return
+
+        message = _EmailMessage()
+        message["Subject"] = subject
+        message["From"] = self._format_from_address()
+        message["To"] = to_email
+        message.set_content(text_body)
+        message.add_alternative(html_body, subtype="html")
+
+        try:
+            self._send_via_smtp(message)
+            self._record_delivery(
+                channel="email",
+                recipient=to_email,
+                subject=subject,
+                send_status="success",
+                template_code=template_code,
+                business_key=business_key,
+            )
+        except Exception as exc:
+            logger.warning("Send email failed: %s", exc)
+            self._record_delivery(
+                channel="email",
+                recipient=to_email,
+                subject=subject,
+                send_status="failed",
+                template_code=template_code,
+                business_key=business_key,
+                failure_reason=str(exc),
+            )
+
 
     def send_recruitment_status_update(
         self,
