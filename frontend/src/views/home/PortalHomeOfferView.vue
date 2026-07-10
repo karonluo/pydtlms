@@ -506,6 +506,8 @@ async function onAcceptOffer() {
     ElMessage.warning('录取通知已超时, 无法完成签署')
     return
   }
+  // 2026-07-10: 在二次确认弹出前就置 accept loading, 这样拒绝按钮会立刻 disable
+  offerActionLoading.value.accept = true
   try {
     await ElMessageBox.confirm(
       '确认接受录取吗? 此操作不可撤销, 提交后将无法再修改。',
@@ -513,9 +515,9 @@ async function onAcceptOffer() {
       { confirmButtonText: '确认接受', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
+    offerActionLoading.value.accept = false
     return
   }
-  offerActionLoading.value.accept = true
   try {
     const resp = await acceptPortalOffer()
     portalOffer.value = resp.data
@@ -533,6 +535,8 @@ async function onDeclineOffer() {
     ElMessage.warning('录取通知已超时, 无法完成签署')
     return
   }
+  // 2026-07-10: 在二次确认弹出前就置 reject loading, 这样接受按钮会立刻 disable
+  offerActionLoading.value.reject = true
   try {
     await ElMessageBox.confirm(
       '确认拒绝录取吗? 此操作不可撤销, 提交后将无法再修改。',
@@ -540,9 +544,9 @@ async function onDeclineOffer() {
       { confirmButtonText: '确认拒绝', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
+    offerActionLoading.value.reject = false
     return
   }
-  offerActionLoading.value.reject = true
   try {
     const resp = await rejectPortalOffer()
     portalOffer.value = resp.data
